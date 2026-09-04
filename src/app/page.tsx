@@ -95,7 +95,7 @@ export default function Home() {
   };
 
   const isReady = profileType === "javascript"
-    ? Boolean(files.cpu && files.sourceMap)
+    ? Boolean(files.cpu)
     : Boolean(files.reactProfile);
 
   return (
@@ -132,14 +132,14 @@ export default function Home() {
         <section className="upload-section" aria-live="polite">
           <div className="section-heading">
             <div><span className="step-number">2</span><h2>Add profile files</h2></div>
-            <p>{profileType === "javascript" ? "Both files are required" : "One file required"}</p>
+            <p>{profileType === "javascript" ? "CPU profile required · Source map optional" : "One file required"}</p>
           </div>
 
           <div className={`upload-grid ${profileType === "react" ? "single" : ""}`}>
             {profileType === "javascript" ? (
               <>
                 <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or .json file here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
-                <UploadPane kind="sourceMap" title="Source map" detail="Drop the matching .map or .json file here" file={files.sourceMap} onFile={(file) => updateFile("sourceMap", file)} />
+                <UploadPane kind="sourceMap" title="Source map (optional)" detail="Add the matching .map or .json for clearer results" file={files.sourceMap} onFile={(file) => updateFile("sourceMap", file)} />
               </>
             ) : (
               <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
