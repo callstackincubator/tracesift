@@ -1,69 +1,160 @@
-import Image from "next/image";
+"use client";
+
+import { ChangeEvent, DragEvent, useId, useState } from "react";
+
+type ProfileType = "javascript" | "react";
+type UploadKind = "cpu" | "sourceMap" | "reactProfile";
+
+const acceptedFiles: Record<UploadKind, string> = {
+  cpu: ".cpuprofile,.json,application/json",
+  sourceMap: ".map,.json,application/json",
+  reactProfile: ".json,application/json",
+};
+
+function ProfileIcon({ type }: { type: ProfileType }) {
+  if (type === "javascript") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6.75 4.75h10.5a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H6.75a2 2 0 0 1-2-2V6.75a2 2 0 0 1 2-2Z" />
+        <path d="M9.5 9.25v5.1c0 1.1-.62 1.65-1.85 1.65M16.4 10.05c-.46-.54-1.06-.8-1.8-.8-.9 0-1.55.45-1.55 1.17 0 .7.5.99 1.6 1.36 1.16.39 1.85.85 1.85 1.95 0 1.34-1.07 2.27-2.62 2.27-.98 0-1.78-.32-2.4-.96" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <ellipse cx="12" cy="12" rx="9" ry="3.6" />
+      <ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)" />
+      <ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)" />
+      <circle cx="12" cy="12" r="1.6" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14.5v3.75A1.75 1.75 0 0 0 6.75 20h10.5A1.75 1.75 0 0 0 19 18.25V14.5" />
+    </svg>
+  );
+}
+
+function UploadPane({
+  kind,
+  title,
+  detail,
+  file,
+  onFile,
+}: {
+  kind: UploadKind;
+  title: string;
+  detail: string;
+  file?: File;
+  onFile: (file?: File) => void;
+}) {
+  const inputId = useId();
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onFile(event.target.files?.[0]);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    onFile(event.dataTransfer.files?.[0]);
+  };
+
+  return (
+    <label
+      className={`upload-pane${isDragging ? " is-dragging" : ""}${file ? " has-file" : ""}`}
+      htmlFor={inputId}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+    >
+      <input id={inputId} type="file" accept={acceptedFiles[kind]} onChange={handleChange} />
+      <span className="upload-icon"><UploadIcon /></span>
+      <span className="upload-title">{file ? file.name : title}</span>
+      <span className="upload-detail">{file ? "Ready to analyze" : detail}</span>
+      <span className="browse-button">{file ? "Replace file" : "Browse files"}</span>
+    </label>
+  );
+}
 
 export default function Home() {
+  const [profileType, setProfileType] = useState<ProfileType>("javascript");
+  const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
+
+  const updateFile = (kind: UploadKind, file?: File) => {
+    setFiles((current) => ({ ...current, [kind]: file }));
+  };
+
+  const isReady = profileType === "javascript"
+    ? Boolean(files.cpu && files.sourceMap)
+    : Boolean(files.reactProfile);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand" aria-label="RN Profile Inspector">
+          <span className="brand-mark"><ProfileIcon type="react" /></span>
+          <span>RN Profile <strong>Inspector</strong></span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="local-badge"><span /> Runs locally in your browser</div>
+      </header>
+
+      <section className="workspace">
+        <div className="intro">
+          <span className="eyebrow">React Native performance</span>
+          <h1>What would you like to analyze?</h1>
+          <p>Choose a profile type, then add the files captured from your React Native app.</p>
         </div>
-      </main>
-    </div>
+
+        <div className="profile-options" role="radiogroup" aria-label="Profile type">
+          <button type="button" role="radio" aria-checked={profileType === "javascript"} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
+            <span className="profile-icon"><ProfileIcon type="javascript" /></span>
+            <span className="option-copy"><strong>JavaScript CPU profile</strong><small>Inspect call stacks and JavaScript execution time</small></span>
+            <span className="radio-indicator" />
+          </button>
+
+          <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
+            <span className="profile-icon"><ProfileIcon type="react" /></span>
+            <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
+            <span className="radio-indicator" />
+          </button>
+        </div>
+
+        <section className="upload-section" aria-live="polite">
+          <div className="section-heading">
+            <div><span className="step-number">2</span><h2>Add profile files</h2></div>
+            <p>{profileType === "javascript" ? "Both files are required" : "One file required"}</p>
+          </div>
+
+          <div className={`upload-grid ${profileType === "react" ? "single" : ""}`}>
+            {profileType === "javascript" ? (
+              <>
+                <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or .json file here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
+                <UploadPane kind="sourceMap" title="Source map" detail="Drop the matching .map or .json file here" file={files.sourceMap} onFile={(file) => updateFile("sourceMap", file)} />
+              </>
+            ) : (
+              <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
+            )}
+          </div>
+        </section>
+
+        <div className="action-row">
+          <p>Files stay on this device and are processed locally.</p>
+          <button className="analyze-button" type="button" disabled={!isReady}>
+            Analyze profile
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 4 6 6-6 6" /></svg>
+          </button>
+        </div>
+      </section>
+    </main>
   );
 }
