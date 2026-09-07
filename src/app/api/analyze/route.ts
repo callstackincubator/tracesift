@@ -11,6 +11,7 @@ import {
   type TokenUsage,
 } from "@/lib/analysis";
 import { summarizeCpuProfile } from "@/lib/js-profile";
+import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { AgentError, runAgent } from "@/lib/pi-agent";
 import { ANALYST_SYSTEM_PROMPT, analystUserPrompt } from "@/lib/prompts";
 
@@ -29,11 +30,9 @@ const hotspotReportSchema = Type.Object({
   hotspots: Type.Array(
     Type.Object({
       id: Type.String(),
-      title: Type.String(),
-      selfTimeMs: Type.Number(),
-      percentOfTotal: Type.Number(),
+      title: Type.String({ minLength: 1, maxLength: 120, description: "Describe the dominant expensive work, using the supporting functions." }),
+      supportingFunctionIds: Type.Array(Type.String(), { minItems: 1, maxItems: 8, description: "IDs of supplied functions supporting the title and summary; include the heaviest function." }),
       summary: Type.String(),
-      stack: Type.Array(Type.String()),
       suggestedFix: Type.String(),
     }),
     { minItems: 1, maxItems: 12 }
@@ -97,7 +96,7 @@ export async function POST(request: Request): Promise<Response> {
   const apiKey = String(form.get("apiKey") ?? "").trim();
   if (!apiKey) {
     log("rejected: no API key in request");
-    return json({ error: "A Callstack API key is required to run the analysis." }, 400);
+    return json({ error: "An AI Agent API key is required to run the analysis." }, 400);
   }
 
   const profile = form.get("profile");
@@ -126,9 +125,10 @@ export async function POST(request: Request): Promise<Response> {
 
   let summary;
   let queriedHotspots;
+  let bottlenecks;
   try {
     const rawProfile = JSON.parse(await readFile(`${dir}/${PROFILE_FILE_NAME}`, "utf8")) as unknown;
-    ({ summary, hotspots: queriedHotspots } = summarizeCpuProfile(rawProfile, id, profile.name));
+    ({ summary, hotspots: queriedHotspots, bottlenecks } = summarizeCpuProfile(rawProfile, id, profile.name));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     log(`failed to parse profile: ${reason}`);
@@ -147,12 +147,18 @@ export async function POST(request: Request): Promise<Response> {
     `profile summary: total=${Math.round(totalMs)} ms, samples=${summary.session.sampleCount}, hotspots=${queriedHotspots.total}, topSelf=${top ? `${top.functionName} (${top.selfTimeMs} ms)` : "n/a"}`
   );
 
+  if (bottlenecks.length === 0) {
+    log(`no hotspots reached ${MIN_HOTSPOT_TIME_MS} ms — skipping analyzer`);
+    await destroyRecord(id, dir);
+    return json({ error: `No hotspots of at least ${MIN_HOTSPOT_TIME_MS} ms were found in this profile.` }, 422);
+  }
+
   const capture: { report?: unknown } = {};
   const reportTool: ToolDefinition = defineTool({
     name: "report_hotspots",
     label: "Report hotspots",
     description:
-      "Submit the final ranked list of CPU profile hotspots. Call exactly once with the complete report, sorted by selfTimeMs descending. The root block must not be included.",
+      "Submit the final ranked list of CPU profile hotspots. Call exactly once with the complete report, using the provided group IDs. The root block must not be included.",
     parameters: hotspotReportSchema,
     execute: async (_toolCallId, params) => {
       capture.report = params;
@@ -176,7 +182,7 @@ export async function POST(request: Request): Promise<Response> {
       label: "analyze",
       apiKey,
       systemPrompt: ANALYST_SYSTEM_PROMPT,
-      prompt: analystUserPrompt(queriedHotspots),
+      prompt: analystUserPrompt(bottlenecks, totalMs),
       cwd: dir,
       customTools: [reportTool],
       builtinTools: [],
@@ -214,7 +220,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const { hotspots } = normalizeHotspots(report.hotspots, totalMs);
+  const { hotspots } = normalizeHotspots(report.hotspots, totalMs, bottlenecks);
   if (hotspots.length === 0) {
     log("report had no usable hotspots after normalization");
     await destroyRecord(id, dir);
@@ -233,6 +239,6 @@ export async function POST(request: Request): Promise<Response> {
     promptUsage: {},
   });
 
-  log(`analysis ${id} complete in ${Math.round((Date.now() - startedAt) / 1000)}s — ${hotspots.length} hotspots (analyzer tokens: ${usage.totalTokens}) — ` + hotspots.map((h) => `${h.title} (${h.selfTimeMs} ms)`).join(" | "));
+  log(`analysis ${id} complete in ${Math.round((Date.now() - startedAt) / 1000)}s — ${hotspots.length} hotspots (analyzer tokens: ${usage.totalTokens}) — ` + hotspots.map((h) => `${h.title} (${h.combinedTimeMs} ms)`).join(" | "));
   return json({ analysisId: id, totalMs, hotspots, usage });
 }

@@ -5,67 +5,57 @@
  *     developer prompt explaining origin + suggested fixes).
  */
 
-import type { JsHotspotsResult } from "@/app/js-profiler/types";
-import { PROFILE_FILE_NAME, type AnalysisRecord, type Hotspot } from "./analysis";
+import { analysisPromptData, debugPromptData } from "./prompt-data";
+import type { Bottleneck } from "./bottlenecks";
+import type { Hotspot } from "./analysis";
 
-export const ANALYST_SYSTEM_PROMPT = `You are a JavaScript/React Native CPU profile performance analyst. You receive an EXACT, precomputed hotspot list from a CPU profile: top frames by SELF time (time actually executed inside the frame) and TOTAL time (including callees), modules, percents, and sample counts. These numbers were computed server-side from the profile samples — treat them as ground truth and do not recompute them.
+export const ANALYST_SYSTEM_PROMPT = `You are a JavaScript/React Native CPU profile performance analyst. You receive precomputed bottleneck groups, sorted by combined sampled time. Each group contains individual functions ranked by their self time. groupingCaller describes how samples were grouped; it is execution context, not the performance problem or a proposed card title.
 
-Your job:
-1. Pick the 6-12 most important hotspots from the precomputed data. A good hotspot is a frame with high SELF time (the real cost), or an app-level frame whose TOTAL time dominates because of an inefficient pattern (hot loops, repeated re-renders, heavy JSON/regex/layout work, expensive native bridge calls). Merge entries when the same function dominates through the same caller path; keep entries that represent distinct work.
-2. EXCLUDE the Root block entirely (functionName "" or "(root)") — it is already excluded from the hotspot list, never report it.
-3. For each hotspot produce:
-   - id: stable slug, e.g. "sanitize-polyfill-1"
-   - title: short human-readable name of the work (function name plus a little context), max 60 characters
-   - selfTimeMs: self time in milliseconds (a number — copy it from the hotspot list)
-   - percentOfTotal: percent of total profile time (a number; the server recomputes it, so just give your best value)
-   - summary: 1-2 sentences naming the performance problem (what is slow and why it matters)
-   - stack: array of frame strings, innermost first, max 8 frames, taken from the provided data; format "functionName (url or (anonymous):line:column)"
-   - suggestedFix: 1-2 sentences with the most likely fix (memoize, debounce, move work off the critical path, lazy-load, replace a hot dependency, reduce re-renders, etc.)
-4. Sort by selfTimeMs DESCENDING (highest impact first).
-5. Submit the final result by calling the report_hotspots tool exactly once with { totalMs, hotspots }. Do not duplicate the report in your final text message.
+Only the heaviest functions are included in this bounded summary. omittedFunctionCount and omittedSelfTimeMs describe the rest; combinedTimeMs still covers the entire group. Stacks and long labels may be abbreviated. Do not assume omitted work is absent.
 
-Rules:
-- Use the real function names, modules and stacks from the provided data — do not invent frames.
-- Frame names may include JS engine internals; focus the report on application-level work.
-- Be concise. The tool call is the deliverable.`;
+These groups and measurements are ground truth. Each sample belongs to one group only; combinedTimeMs sums function self times without adding overlapping inclusive times. Do not split groups into individual hotspots, merge unrelated groups, invent stacks, or change measurements.
 
-export function analystUserPrompt(hotspots: JsHotspotsResult): string {
-  return `Analyze the CPU profile. Its exact, precomputed hotspot list is below (times in ms, computed from the samples; the root block is already excluded).
+Explain every supplied group, including single-function groups. For each, return:
+- Its exact id.
+- A concise title (at most 120 characters) describing the dominant expensive operations, weighted by self time, rather than copying a framework wrapper such as dispatchEvent or batchedUpdates. If the work is mixed, describe the main operations without inventing a common cause.
+- A short summary (1-3 sentences) explaining the same operations as the title, grounded in the supplied functions and their measured self times. Lead with expensive work; mention dispatch/scheduling context only when necessary to explain it. Group totals include omitted work; do not attribute that time to just the listed functions.
+- supportingFunctionIds containing the exact supplied function IDs supporting the title and summary, including the heaviest function.
+- A suggestedFix with prioritized investigations or optimizations of the expensive work and relevant application callers. Put possible causes here and label them as hypotheses.
 
-${JSON.stringify(hotspots, null, 2)}
+A function's self time can aggregate multiple call paths; its stack is representative, not proof that all samples followed that path. Abbreviated stacks can omit application callers. Do not infer user-event frequency, render placement, full-array processing, missing memoization, or one formatter construction per item from sampled stacks alone. Construction self time is not an invocation count.
 
-Pick the top hotspots and submit the ranked report via the report_hotspots tool.`;
+Example: for date formatting through formatDate, localeCompare inside sort, and DateTimeFormat construction, use a title like "Expensive date formatting and locale-aware sorting". Summarize their measured costs; investigate formatter reuse and avoiding unnecessary sorting in suggestedFix. Do not title it "dispatchEvent" just because that is the grouping caller.
+
+Submit report_hotspots exactly once with { hotspots: [{ id, title, summary, supportingFunctionIds, suggestedFix }] }. Do not repeat the report in final text.`;
+
+export function analystUserPrompt(groups: Bottleneck[], totalMs: number): string {
+  return `Analyze these bottleneck groups. Total profile duration: ${totalMs} ms. Times use the profiler's duration-per-sample estimate. Function stacks are innermost first. Describe the dominant expensive work in each group as one bottleneck.
+
+${JSON.stringify(analysisPromptData(groups))}`;
 }
 
 export const FIX_PROMPT_SYSTEM_PROMPT = `You are a senior React Native performance engineer. You write precise, developer-ready debugging prompts for CPU profile hotspots.
 
-You will be given the details of ONE hotspot from a V8 CPU profile: its self time, share of total profile time, title, short problem summary, call stack, and a first-pass suggested fix. The original profile file (${PROFILE_FILE_NAME}) is in the current working directory if you need to verify details or find surrounding call context.
+You will be given only the summary and shortlisted function names for ONE bottleneck. This is a writing task using the supplied analysis; no profile inspection or additional analysis is needed.
 
-Your job: produce ONE self-contained prompt (markdown, roughly 200-400 words) that a developer can paste into a coding AI agent to fix this exact hotspot. The prompt must contain:
+Your job: produce ONE self-contained prompt (markdown, roughly 200-400 words) that a developer can paste into a coding AI agent to fix this entire bottleneck, addressing the shortlisted functions together. The prompt must contain:
 
 ## Where this originates
-- Explain how to trace the hotspot back to its source: which application code or module owns the hot frame, which callers lead into it (from the stack), and how to locate the responsible code (file names, function names, RN-specific context such as render passes, event handlers, JSON serialization, native bridge work).
+- Explain how to trace the hotspot back to its source: which application code or module owns the hot frame, how to search for the supplied function names, and what the developer should inspect to establish ownership and calling context.
 
 ## Suggested fixes
 - Concrete, prioritized fix options with expected impact (memoize/debounce, moving work off the main thread, replacing or upgrading a hot dependency, reducing render frequency, caching, lazy loading), plus how to verify the fix (re-profile and confirm the self time drops).
 
 Rules:
-- Base everything on the provided details; you may consult the profile to confirm frames or discover the owning caller, but never invent frames or file paths that are not in the data.
-- Reference the actual function names from the provided stack.
+- Use only the supplied summary and function names. Never invent frames, callers, file paths, measurements, or source ownership. Ask the coding agent to establish missing context in the codebase.
+- Treat possible causes and fix options as hypotheses to verify. Sampled time does not establish invocation counts, per-event repetition, missing memoization, or render placement.
 - Output a single prompt, ready to copy: no preamble, no questions, no markdown code fences around the whole prompt.
-- Submit it by calling the submit_prompt tool exactly once. Do not duplicate the prompt in your final text message.`;
+- Return the prompt directly as your final Markdown response.`;
 
-export function buildFixPromptUserPrompt(hotspot: Hotspot, record: AnalysisRecord): string {
-  const details = {
-    hotspot,
-    profileTotalMs: record.totalMs,
-    hasSourceMap: record.hasSourceMap,
-  };
-  return `Generate the debugging prompt for this hotspot:
+export function buildFixPromptUserPrompt(hotspot: Hotspot): string {
+  return `Generate the debugging prompt from this existing analysis:
 
-\`\`\`json
-${JSON.stringify(details, null, 2)}
-\`\`\`
+${JSON.stringify(debugPromptData(hotspot))}
 
-The profile file is at ./${PROFILE_FILE_NAME} if you need more context. Call submit_prompt with the final prompt.`;
+Return only the final Markdown prompt.`;
 }

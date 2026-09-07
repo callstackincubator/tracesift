@@ -117,7 +117,10 @@ export interface RunAgentOptions {
   cwd: string;
   customTools?: ToolDefinition[];
   builtinTools?: string[];
+  /** Per-request output budget; omitted uses the model default. */
+  maxOutputTokens?: number;
   timeoutMs?: number;
+  timeoutMessage?: string;
 }
 
 export interface RunAgentResult {
@@ -147,7 +150,9 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     cwd,
     customTools = [],
     builtinTools = ["read", "bash"],
+    maxOutputTokens,
     timeoutMs = 480_000,
+    timeoutMessage = "The analysis agent timed out. Try a smaller profile, or run it again.",
   } = options;
   const logPrefix = `agent:${label}`;
   const startedAt = Date.now();
@@ -208,11 +213,31 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       })
     ).session;
 
+    // Override the request budget without mutating the shared model registration.
+    const streamFunction = session.agent.streamFunction;
+    session.agent.streamFunction = (requestModel, context, options) => streamFunction(requestModel, context, {
+      ...options,
+      ...(maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens }),
+    });
+    const onPayload = session.agent.onPayload;
+    session.agent.onPayload = async (payload, requestModel) => {
+      const transformed = await onPayload?.(payload, requestModel);
+      const outgoing = transformed ?? payload;
+      log(logPrefix, `provider request dispatched after ${Date.now() - startedAt} ms; payloadBytes=${Buffer.byteLength(JSON.stringify(outgoing), "utf8")}, maxOutputTokens=${maxOutputTokens ?? model.maxTokens}`);
+      return outgoing;
+    };
+    const onResponse = session.agent.onResponse;
+    session.agent.onResponse = async (response, requestModel) => {
+      log(logPrefix, `provider HTTP status=${response.status} after ${Date.now() - startedAt} ms`);
+      await onResponse?.(response, requestModel);
+    };
+
     let finalText = "";
     let lastError: string | undefined;
     let lastStopReason: string | undefined;
     const toolCalls: string[] = [];
     let turnCount = 0;
+    let receivedDelta = false;
     let abortedByTimeout = false;
     const usageTotals: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 };
 
@@ -222,6 +247,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
           log(logPrefix, "agent run started");
           break;
         case "turn_start":
+          receivedDelta = false;
           turnCount += 1;
           log(logPrefix, `turn ${turnCount} started`);
           break;
@@ -237,6 +263,12 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
             logPrefix,
             `tool result ← ${event.toolName} ${event.isError ? "ERROR" : "ok"}: ${truncate(event.result, 300)}`
           );
+          break;
+        case "message_update":
+          if (!receivedDelta && event.assistantMessageEvent.type.endsWith("_delta")) {
+            receivedDelta = true;
+            log(logPrefix, `first streamed output for turn ${turnCount} after ${Date.now() - startedAt} ms`);
+          }
           break;
         case "message_end": {
           const message = event.message as {
@@ -300,6 +332,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     try {
       await session.prompt(prompt);
     } catch (error) {
+      if (abortedByTimeout) throw new AgentError(504, timeoutMessage);
       const detail = error instanceof Error ? error.message : String(error);
       log(logPrefix, `session.prompt threw: ${truncate(detail, 800)}`);
       if (isAuthFailure(detail)) {
@@ -318,7 +351,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     );
 
     if (abortedByTimeout) {
-      throw new AgentError(504, "The analysis agent timed out. Try a smaller profile, or run it again.");
+      throw new AgentError(504, timeoutMessage);
     }
     if (lastError) {
       if (isAuthFailure(lastError)) {

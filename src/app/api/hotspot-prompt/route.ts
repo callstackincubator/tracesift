@@ -1,5 +1,3 @@
-import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { getRecord, type TokenUsage } from "@/lib/analysis";
 import { AgentError, runAgent } from "@/lib/pi-agent";
 import { buildFixPromptUserPrompt, FIX_PROMPT_SYSTEM_PROMPT } from "@/lib/prompts";
@@ -9,13 +7,6 @@ const LOG = "api/hotspot-prompt";
 function log(...parts: unknown[]): void {
   console.log(`[perf-ai] ${new Date().toISOString()} [${LOG}]`, ...parts);
 }
-
-const submitPromptSchema = Type.Object({
-  prompt: Type.String({
-    description:
-      "The full debugging prompt (markdown) a developer can paste into a coding AI agent. Must contain 'Where this originates' and 'Suggested fixes' sections.",
-  }),
-});
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return Response.json(body, { status });
@@ -38,7 +29,7 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "analysisId and hotspotId are required." }, 400);
   }
   if (!apiKey) {
-    return json({ error: "A Callstack API key is required to generate the prompt." }, 400);
+    return json({ error: "An AI Agent API key is required to generate the prompt." }, 400);
   }
 
   const record = getRecord(analysisId);
@@ -55,30 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     log(`analysis=${analysisId} hotspot=${hotspotId}: serving cached prompt (${cached.length} chars)`);
     return json({ prompt: cached, usage: record.promptUsage[hotspotId] });
   }
-  log(`analysis=${analysisId} hotspot=${hotspotId} ("${hotspot.title}", ${hotspot.selfTimeMs} ms): generating prompt`);
-
-  const capture: { prompt?: string } = {};
-  const submitTool: ToolDefinition = defineTool({
-    name: "submit_prompt",
-    label: "Submit prompt",
-    description: "Submit the final debugging prompt for this hotspot. Call exactly once.",
-    parameters: submitPromptSchema,
-    execute: async (_toolCallId, params) => {
-      const text = typeof params.prompt === "string" ? params.prompt.trim() : "";
-      if (text) capture.prompt = text;
-      return {
-        content: [
-          {
-            type: "text",
-            text: text
-              ? "Prompt submitted. Task complete — reply with a one-line confirmation and stop."
-              : "The prompt was empty. Call submit_prompt again with the full prompt text.",
-          },
-        ],
-        details: { received: Boolean(text) },
-      };
-    },
-  });
+  log(`analysis=${analysisId} hotspot=${hotspotId} ("${hotspot.title}", ${hotspot.combinedTimeMs} ms): generating prompt`);
 
   let finalText = "";
   let usage: TokenUsage;
@@ -87,9 +55,11 @@ export async function POST(request: Request): Promise<Response> {
       label: "hotspot-prompt",
       apiKey,
       systemPrompt: FIX_PROMPT_SYSTEM_PROMPT,
-      prompt: buildFixPromptUserPrompt(hotspot, record),
+      prompt: buildFixPromptUserPrompt(hotspot),
       cwd: record.dir,
-      customTools: [submitTool],
+      maxOutputTokens: 2_048,
+      builtinTools: [],
+      timeoutMessage: "Debug prompt generation timed out. Please try again.",
       timeoutMs: 300_000,
     }));
   } catch (error) {
@@ -101,12 +71,12 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Unexpected server error while generating the prompt." }, 500);
   }
 
-  const prompt = (capture.prompt ?? finalText.trim())
+  const prompt = finalText.trim()
     .replace(/^\s*```[a-z]*\s*\n?/, "")
     .replace(/\n?\s*```\s*$/, "")
     .trim();
   if (!prompt) {
-    log("agent produced no prompt (tool not called and final text empty)");
+    log("agent produced no prompt (final text empty)");
     return json(
       { error: "The agent finished without producing a prompt. Try again.", detail: finalText.slice(0, 400) || undefined },
       502

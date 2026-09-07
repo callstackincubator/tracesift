@@ -1,3 +1,4 @@
+import { groupBottlenecks, type Bottleneck } from "./bottlenecks";
 import { normalizeProfile } from "@/app/js-profiler/normalize";
 import { queryHotspots, querySummary } from "@/app/js-profiler/query";
 import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "@/app/js-profiler/types";
@@ -209,7 +210,7 @@ export function summarizeCpuProfile(
   raw: unknown,
   sessionId: string,
   name: string
-): { summary: JsProfileSummary; hotspots: JsHotspotsResult } {
+): { summary: JsProfileSummary; hotspots: JsHotspotsResult; bottlenecks: Bottleneck[] } {
   const now = Date.now();
   const session = normalizeProfile(coerceCdpProfile(raw), {
     sessionId,
@@ -222,6 +223,7 @@ export function summarizeCpuProfile(
 
   return {
     summary: querySummary(session),
+    bottlenecks: groupBottlenecks(coerceCdpProfile(raw), session.durationMs),
     hotspots: queryHotspots(session, {
       limit: 20,
       offset: 0,

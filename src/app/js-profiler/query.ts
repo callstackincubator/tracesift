@@ -378,7 +378,7 @@ import type {
     const limit = opts.limit ?? 20;
     const offset = opts.offset ?? 0;
   
-    let modules = [...session.modules];
+    const modules = [...session.modules];
     if (opts.sortBy === "totalMs") {
       modules.sort((a, b) => b.totalTimeMs - a.totalTimeMs);
     }

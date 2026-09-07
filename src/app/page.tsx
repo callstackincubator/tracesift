@@ -1,20 +1,25 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useId, useSyncExternalStore, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useId, useSyncExternalStore, useState } from "react";
+import {
+  Alert,
+  ArrowRight,
+  Badge,
+  Button,
+  Field,
+  IndicatorDot,
+  Input,
+  PluginHeader,
+  PluginShell,
+  RozeniteLoader,
+  Text,
+} from "@rozenite/ui";
+
+import type { Hotspot } from "@/lib/analysis";
 
 type ProfileType = "javascript" | "react";
 type UploadKind = "cpu" | "sourceMap" | "reactProfile";
 type Phase = "upload" | "analyzing" | "results";
-
-interface Hotspot {
-  id: string;
-  title: string;
-  selfTimeMs: number;
-  percentOfTotal: number;
-  summary: string;
-  stack: string[];
-  suggestedFix: string;
-}
 
 interface AnalyzeResponse {
   analysisId: string;
@@ -176,7 +181,31 @@ function UploadPane({
   );
 }
 
+const ROZENITE_THEME_KEY = "@rozenite/ui:theme";
+
 export default function Home() {
+  const [themeReady, setThemeReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(ROZENITE_THEME_KEY);
+      if (stored !== "light" && stored !== "dark") {
+        localStorage.setItem(ROZENITE_THEME_KEY, "dark");
+      }
+    } catch {
+      // Theme still applies for this session even if storage is unavailable.
+    }
+    setThemeReady(true);
+  }, []);
+
+  if (!themeReady) {
+    return <div className="dark h-screen bg-background" />;
+  }
+
+  return <InspectorApp />;
+}
+
+function InspectorApp() {
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
   const apiKey = useSyncExternalStore(subscribeApiKey, getApiKeySnapshot, () => "");
@@ -211,7 +240,7 @@ export default function Home() {
       return;
     }
     if (!apiKey.trim()) {
-      setError("Enter your Callstack API key first.");
+      setError("Enter your AI Agent API key first.");
       setErrorDetail(null);
       return;
     }
@@ -346,15 +375,22 @@ export default function Home() {
   const maxPercent = hotspots.length > 0 ? Math.max(...hotspots.map((hotspot) => hotspot.percentOfTotal)) : 0;
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand" aria-label="RN Profile Inspector">
-          <span className="brand-mark"><ProfileIcon type="react" /></span>
-          <span>RN Profile <strong>Inspector</strong></span>
-        </div>
-        <div className="local-badge"><span /> Runs locally · AI-assisted</div>
-      </header>
+    <PluginShell>
+      <PluginHeader>
+        <PluginHeader.Title className="brand" render={<div />}>
+          <span className="brand-mark" aria-hidden="true"><ProfileIcon type="react" /></span>
+          RN Profile Inspector
+        </PluginHeader.Title>
+        <PluginHeader.Actions>
+          <Text variant="caption" className="local-badge">
+            <IndicatorDot tone="success" size="lg" />
+            Runs locally · AI-assisted
+          </Text>
+          <PluginHeader.ThemeSwitcher />
+        </PluginHeader.Actions>
+      </PluginHeader>
 
+      <PluginShell.Body>
       <section className="workspace">
         {(phase === "upload" || phase === "analyzing") && (
           <>
@@ -374,7 +410,7 @@ export default function Home() {
               <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
                 <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
-                <span className="option-badge">coming soon</span>
+                <Badge tone="neutral" variant="soft">coming soon</Badge>
               </button>
             </div>
 
@@ -395,50 +431,54 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="key-field">
-                <label htmlFor="apex-api-key">Callstack API key</label>
-                <input
+              <Field className="key-field">
+                <Field.Label>AI Agent API key</Field.Label>
+                <Input
                   id="apex-api-key"
                   type="password"
-                  placeholder="Paste your Callstack API key"
+                  placeholder="Paste your AI Agent API key"
                   value={apiKey}
                   autoComplete="off"
                   spellCheck={false}
                   onChange={(event) => setApiKeyValue(event.target.value)}
                 />
-                <small>Stored only in this browser and used to authorize the analysis agents. It is never sent anywhere except the Callstack API.</small>
-              </div>
+                <Field.Description>
+                  Stored only in this browser and used to authorize the analysis agents. It is never sent anywhere except the AI Agent API.
+                </Field.Description>
+              </Field>
             </section>
 
             {error && (
-              <div className="error-banner" role="alert">
-                {error}
+              <Alert tone="danger" className="mt-4">
+                <Alert.Title>{error}</Alert.Title>
                 {errorDetail && (
-                  <details className="error-detail-wrap">
-                    <summary>What the agent returned</summary>
-                    <pre className="error-detail">{errorDetail}</pre>
-                  </details>
+                  <Alert.Description>
+                    <details className="error-detail-wrap">
+                      <summary>What the agent returned</summary>
+                      <pre className="error-detail">{errorDetail}</pre>
+                    </details>
+                  </Alert.Description>
                 )}
-              </div>
+              </Alert>
             )}
 
             <div className="action-row">
               <p>{profileType === "javascript"
-                ? "Profile files stay on this device and are analyzed locally by a PI agent."
+                ? "Profile files stay on this device and are analyzed locally."
                 : "React component profile analysis is coming soon — pick the JavaScript CPU profile to analyze now."}</p>
-              <button className="analyze-button" type="button" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
+              <Button size="lg" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
-                    <span className="spinner" aria-hidden="true" />
+                    <RozeniteLoader size={16} label="" />
                     Analyzing profile…
                   </>
                 ) : (
                   <>
                     Analyze profile
-                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 4 6 6-6 6" /></svg>
+                    <ArrowRight />
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -448,7 +488,7 @@ export default function Home() {
             <div className="results-header">
               <div className="intro">
                 <span className="eyebrow">Analysis results</span>
-                <h1 className="results-title">Hotspots, ranked by self time</h1>
+                <h1 className="results-title">Bottlenecks, slowest first</h1>
                 <p>
                   {hotspots.length} bottleneck{hotspots.length === 1 ? "" : "s"} found · total profile time {formatMs(totalMs)}
                 </p>
@@ -458,9 +498,10 @@ export default function Home() {
                   </p>
                 )}
               </div>
-              <button type="button" className="ghost-button" onClick={resetToUpload}>New analysis</button>
+              <Button tone="primary" variant="outline" onClick={resetToUpload}>New analysis</Button>
             </div>
 
+            <p className="grouping-note">Related calls share one card. Combined time adds their self times, counting each sample once.</p>
             <div className="hotspot-list">
               {hotspots.map((hotspot, index) => (
                 <button
@@ -474,12 +515,21 @@ export default function Home() {
                   <span className="hotspot-main">
                     <span className="hotspot-top">
                       <strong>{hotspot.title}</strong>
-                      <span className="hotspot-time">{formatMs(hotspot.selfTimeMs)} · {hotspot.percentOfTotal}%</span>
+                      <span className="hotspot-time">{formatMs(hotspot.combinedTimeMs)} · {hotspot.percentOfTotal}%</span>
                     </span>
                     <span className="hotspot-bar" aria-hidden="true">
                       <span style={{ width: `${maxPercent > 0 ? Math.max(4, (hotspot.percentOfTotal / maxPercent) * 100) : 0}%` }} />
                     </span>
                     <small>{hotspot.summary}</small>
+                    <span className="function-breakdown">
+                      <span className="function-heading">{hotspot.functions.length} function{hotspot.functions.length === 1 ? "" : "s"} · self time within this bottleneck</span>
+                      {hotspot.functions.map((fn) => (
+                        <span className="function-row" key={fn.id}>
+                          <span className="function-name" title={fn.stack.join("\n")}>{fn.title}</span>
+                          <span>{formatMs(fn.selfTimeMs)} · {fn.percentOfGroup}%</span>
+                        </span>
+                      ))}
+                    </span>
                   </span>
                 </button>
               ))}
@@ -489,13 +539,13 @@ export default function Home() {
               <section className="details-panel" aria-live="polite">
                 <div className="details-heading">
                   <div>
-                    <span className="eyebrow">Hotspot details</span>
+                    <span className="eyebrow">Bottleneck details</span>
                     <h2>{selected.title}</h2>
                   </div>
                   <div className="details-metrics">
                     <div>
-                      <small>Self time</small>
-                      <strong>{formatMs(selected.selfTimeMs)}</strong>
+                      <small>Combined time</small>
+                      <strong>{formatMs(selected.combinedTimeMs)}</strong>
                     </div>
                     <div>
                       <small>Share of total</small>
@@ -506,16 +556,18 @@ export default function Home() {
 
                 <p className="details-summary">{selected.summary}</p>
 
-                {selected.stack.length > 0 && (
-                  <div className="details-block">
-                    <h3>Stack trace</h3>
-                    <ol className="stack-view">
-                      {selected.stack.map((frame, index) => (
-                        <li key={index}>{frame}</li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
+                <div className="details-block">
+                  <h3>Functions in this bottleneck</h3>
+                  {selected.functions.map((fn) => (
+                    <details className="function-detail" key={fn.id}>
+                      <summary>{fn.title} · {formatMs(fn.selfTimeMs)} self time · {fn.percentOfGroup}% of bottleneck</summary>
+                      <p>Representative stack; self time may include other call paths.</p>
+                      <ol className="stack-view">
+                        {fn.stack.map((frame, index) => <li key={index}>{frame}</li>)}
+                      </ol>
+                    </details>
+                  ))}
+                </div>
 
                 <div className="details-block">
                   <h3>Possible solution</h3>
@@ -531,14 +583,13 @@ export default function Home() {
                           {formatTokens(selectedPromptUsage.totalTokens)} tokens · {usageBreakdown(selectedPromptUsage)}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        className="copy-button"
+                      <Button
+                        size="sm"
                         disabled={!prompts[selected.id]}
                         onClick={() => void copyPrompt()}
                       >
                         {copied ? "Copied!" : "Copy prompt"}
-                      </button>
+                      </Button>
                     </span>
                   </div>
 
@@ -555,19 +606,17 @@ export default function Home() {
                   ) : promptErrors[selected.id] ? (
                     <p className="prompt-error">
                       {promptErrors[selected.id]}
-                      <button type="button" onClick={() => void generatePrompt(selected.id)}>Retry</button>
+                      <Button size="sm" tone="danger" variant="outline" onClick={() => void generatePrompt(selected.id)}>Retry</Button>
                     </p>
                   ) : (
                     <div className="prompt-generate">
                       <p className="prompt-loading">No prompt generated for this hotspot yet.</p>
-                      <button
-                        type="button"
-                        className="copy-button"
+                      <Button
                         disabled={promptLoadingId !== null}
                         onClick={() => void generatePrompt(selected.id)}
                       >
                         Generate prompt
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -576,6 +625,7 @@ export default function Home() {
           </>
         )}
       </section>
-    </main>
+      </PluginShell.Body>
+    </PluginShell>
   );
 }

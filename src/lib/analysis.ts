@@ -3,13 +3,12 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-export interface Hotspot {
-  id: string;
-  title: string;
-  selfTimeMs: number;
-  percentOfTotal: number;
+import type { Bottleneck } from "./bottlenecks";
+
+export interface Hotspot extends Bottleneck {
+  groupingCaller: string;
+  supportingFunctionIds: string[];
   summary: string;
-  stack: string[];
   suggestedFix: string;
 }
 
@@ -48,8 +47,6 @@ export const PROFILE_FILE_NAME = "profile.json";
 export const SOURCEMAP_FILE_NAME = "sourcemap.json";
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-const MAX_HOTSPOTS = 12;
-const MAX_STACK_FRAMES = 12;
 const RECORD_TTL_MS = 60 * 60 * 1000;
 const MAX_RECORDS = 24;
 
@@ -108,76 +105,36 @@ export async function destroyRecord(id: string, dir?: string): Promise<void> {
   await rm(target, { recursive: true, force: true }).catch(() => undefined);
 }
 
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-}
-
-function isRootLikeTitle(title: string): boolean {
-  const normalized = title.trim();
-  if (!normalized) return true;
-  if (/^\(?\s*root\s*\)?$/i.test(normalized)) return true;
-  if (/^\(all frames\)$/i.test(normalized)) return true;
-  if (/^\(idle\)$/i.test(normalized)) return true;
-  return false;
-}
-
-function asStringArray(value: unknown, max: number): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).slice(0, max);
-}
-
-/**
- * Validates the agent's raw report, drops the Root block and anything
- * unusable, recomputes percentages when needed and sorts by self time desc.
- */
-export function normalizeHotspots(raw: unknown, totalMs: unknown): { hotspots: Hotspot[]; totalMs: number } {
-  const validTotal = typeof totalMs === "number" && Number.isFinite(totalMs) && totalMs > 0 ? totalMs : 0;
-  const list = Array.isArray(raw) ? raw : [];
-
-  const hotspots: Hotspot[] = [];
-  for (const entry of list) {
+/** Keep measured groups authoritative; the agent only supplies explanations. */
+export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottleneck[]): { hotspots: Hotspot[]; totalMs: number } {
+  const annotations = new Map<string, Record<string, unknown>>();
+  for (const entry of Array.isArray(raw) ? raw : []) {
     if (!entry || typeof entry !== "object") continue;
     const candidate = entry as Record<string, unknown>;
-    const title = typeof candidate.title === "string" ? candidate.title.trim() : "";
-    const selfTimeMs = typeof candidate.selfTimeMs === "number" && Number.isFinite(candidate.selfTimeMs) ? candidate.selfTimeMs : NaN;
-    if (!title || isRootLikeTitle(title) || !Number.isFinite(selfTimeMs) || selfTimeMs < 0) continue;
-
-    const summary = typeof candidate.summary === "string" && candidate.summary.trim() ? candidate.summary.trim() : "No summary provided.";
-    const suggestedFix = typeof candidate.suggestedFix === "string" && candidate.suggestedFix.trim() ? candidate.suggestedFix.trim() : "No fix suggested.";
-
-    let percent = typeof candidate.percentOfTotal === "number" && Number.isFinite(candidate.percentOfTotal) ? candidate.percentOfTotal : 0;
-    if (validTotal > 0) {
-      // Authoritative: self time share of the total profile time.
-      percent = (selfTimeMs / validTotal) * 100;
-    } else if (percent <= 0) {
-      percent = 0;
-    }
-    percent = Math.max(0, Math.min(100, percent));
-
-    const rawId = typeof candidate.id === "string" && candidate.id.trim() ? candidate.id.trim() : title;
-    hotspots.push({
-      id: slugify(rawId) || `hotspot-${hotspots.length + 1}`,
-      title: title.slice(0, 140),
-      selfTimeMs,
-      percentOfTotal: Math.round(percent * 100) / 100,
-      summary,
-      stack: asStringArray(candidate.stack, MAX_STACK_FRAMES),
-      suggestedFix,
-    });
+    if (typeof candidate.id === "string" && !annotations.has(candidate.id)) annotations.set(candidate.id, candidate);
   }
-
-  hotspots.sort((a, b) => b.selfTimeMs - a.selfTimeMs);
-
-  const seen = new Set<string>();
-  const deduped = hotspots.filter((hotspot) => {
-    if (seen.has(hotspot.id)) return false;
-    seen.add(hotspot.id);
-    return true;
-  });
-
-  return { hotspots: deduped.slice(0, MAX_HOTSPOTS), totalMs: validTotal };
+  return {
+    totalMs,
+    hotspots: groups.map((group) => {
+      const candidate = annotations.get(group.id);
+      const ids = candidate?.supportingFunctionIds;
+      const functionIds = new Set(group.functions.map((fn) => fn.id));
+      // Reject ungrounded annotations, including reports extracted from plain text.
+      const validEvidence = Array.isArray(ids) && ids.length > 0 && ids.length <= 8
+        && ids.every((id) => typeof id === "string" && functionIds.has(id))
+        && ids.includes(group.functions[0]?.id);
+      const title = typeof candidate?.title === "string" ? candidate.title.trim() : "";
+      const annotation = validEvidence && title.length > 0 && title.length <= 120 ? candidate : undefined;
+      const heaviest = group.functions.slice(0, 3);
+      const fallbackTitle = heaviest.map((fn) => fn.title).join(" / ") || "Sampled CPU work";
+      return {
+        ...group,
+        groupingCaller: group.title,
+        title: annotation ? title : fallbackTitle,
+        supportingFunctionIds: annotation ? [...new Set(ids as string[])] : heaviest.map((fn) => fn.id),
+        summary: typeof annotation?.summary === "string" && annotation.summary.trim() ? annotation.summary.trim() : `The heaviest sampled functions are ${heaviest.map((fn) => `${fn.title} (${Math.round(fn.selfTimeMs)} ms self time)`).join(", ")}.`,
+        suggestedFix: typeof annotation?.suggestedFix === "string" && annotation.suggestedFix.trim() ? annotation.suggestedFix.trim() : "Inspect the heaviest functions below and re-profile after optimizing their caller.",
+      };
+    }).sort((a, b) => b.combinedTimeMs - a.combinedTimeMs),
+  };
 }
