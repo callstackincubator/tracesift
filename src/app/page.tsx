@@ -1,15 +1,105 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useId, useState } from "react";
+import { ChangeEvent, DragEvent, useId, useSyncExternalStore, useState } from "react";
 
 type ProfileType = "javascript" | "react";
 type UploadKind = "cpu" | "sourceMap" | "reactProfile";
+type Phase = "upload" | "analyzing" | "results";
+
+interface Hotspot {
+  id: string;
+  title: string;
+  selfTimeMs: number;
+  percentOfTotal: number;
+  summary: string;
+  stack: string[];
+  suggestedFix: string;
+}
+
+interface AnalyzeResponse {
+  analysisId: string;
+  totalMs: number;
+  hotspots: Hotspot[];
+  usage?: TokenUsage;
+}
+
+interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  costUsd: number;
+}
 
 const acceptedFiles: Record<UploadKind, string> = {
   cpu: ".cpuprofile,.json,application/json",
   sourceMap: ".map,.json,application/json",
   reactProfile: ".json,application/json",
 };
+
+const API_KEY_STORAGE = "perf-ai.apex-api-key";
+
+/**
+ * Tiny localStorage-backed store for the API key, readable via
+ * useSyncExternalStore (avoids setState-in-effect and hydration mismatches).
+ */
+const apiKeyListeners = new Set<() => void>();
+let apiKeyCache: string | null = null;
+
+function getApiKeySnapshot(): string {
+  if (typeof window === "undefined") return "";
+  if (apiKeyCache === null) apiKeyCache = window.localStorage.getItem(API_KEY_STORAGE) ?? "";
+  return apiKeyCache;
+}
+
+function subscribeApiKey(listener: () => void): () => void {
+  apiKeyListeners.add(listener);
+  return () => apiKeyListeners.delete(listener);
+}
+
+function setApiKeyValue(value: string): void {
+  apiKeyCache = value;
+  if (value) window.localStorage.setItem(API_KEY_STORAGE, value);
+  else window.localStorage.removeItem(API_KEY_STORAGE);
+  for (const listener of apiKeyListeners) listener();
+}
+
+function formatMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const seconds = ms / 1000;
+  if (seconds < 10) return `${seconds.toFixed(2)} s`;
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} m ${Math.round(seconds % 60)} s`;
+}
+
+function formatTokens(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  if (tokens < 1000) return `${Math.round(tokens)}`;
+  if (tokens < 10_000) return `${(tokens / 1000).toFixed(1)}k`;
+  return `${Math.round(tokens / 1000)}k`;
+}
+
+function formatUsd(cost: number): string {
+  if (!Number.isFinite(cost) || cost <= 0) return "";
+  return `$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
+}
+
+/** Compact "in / out (+ cached) [+ cost]" suffix shared by both usage readouts. */
+function usageBreakdown(usage: TokenUsage): string {
+  const parts = [`${formatTokens(usage.input)} in`, `${formatTokens(usage.output)} out`];
+  if (usage.cacheRead > 0) parts.push(`${formatTokens(usage.cacheRead)} cached`);
+  const cost = formatUsd(usage.costUsd);
+  if (cost) parts.push(cost);
+  return parts.join(" · ");
+}
+
+function errorMessageFrom(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return "Something went wrong. Try again.";
+}
 
 function ProfileIcon({ type }: { type: ProfileType }) {
   if (type === "javascript") {
@@ -89,14 +179,171 @@ function UploadPane({
 export default function Home() {
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
+  const apiKey = useSyncExternalStore(subscribeApiKey, getApiKeySnapshot, () => "");
+
+  const [phase, setPhase] = useState<Phase>("upload");
+  const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [totalMs, setTotalMs] = useState(0);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [promptUsages, setPromptUsages] = useState<Record<string, TokenUsage>>({});
+  const [analyzerUsage, setAnalyzerUsage] = useState<TokenUsage | null>(null);
+  const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
+  const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState(false);
 
   const updateFile = (kind: UploadKind, file?: File) => {
     setFiles((current) => ({ ...current, [kind]: file }));
   };
 
   const isReady = profileType === "javascript"
-    ? Boolean(files.cpu)
-    : Boolean(files.reactProfile);
+    ? Boolean(files.cpu && apiKey.trim())
+    : false;
+
+  const handleAnalyze = async () => {
+    if (!files.cpu) {
+      setError("Add a CPU profile file first.");
+      setErrorDetail(null);
+      return;
+    }
+    if (!apiKey.trim()) {
+      setError("Enter your Callstack API key first.");
+      setErrorDetail(null);
+      return;
+    }
+    setPhase("analyzing");
+    setError(null);
+    setErrorDetail(null);
+    try {
+      const form = new FormData();
+      form.append("profile", files.cpu);
+      if (files.sourceMap) form.append("sourceMap", files.sourceMap);
+      form.append("apiKey", apiKey.trim());
+
+      const response = await fetch("/api/analyze", { method: "POST", body: form });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        detail?: string;
+        analysisId?: string;
+        totalMs?: number;
+        hotspots?: Hotspot[];
+        usage?: TokenUsage;
+      };
+      if (!response.ok) {
+        setError(data.error ?? `Analysis failed (${response.status}).`);
+        setErrorDetail(data.detail ?? null);
+        setPhase("upload");
+        return;
+      }
+
+      const result: AnalyzeResponse = {
+        analysisId: data.analysisId ?? "",
+        totalMs: data.totalMs ?? 0,
+        hotspots: data.hotspots ?? [],
+        usage: data.usage,
+      };
+      if (!result.analysisId) {
+        setError("The server did not return an analysis id. Check the dev server logs.");
+        setPhase("upload");
+        return;
+      }
+      setAnalysisId(result.analysisId);
+      setTotalMs(result.totalMs);
+      setHotspots(result.hotspots);
+      setSelectedId(result.hotspots[0]?.id ?? null);
+      setPrompts({});
+      setPromptUsages({});
+      setAnalyzerUsage(result.usage ?? null);
+      setPromptErrors({});
+      setCopied(false);
+      setPhase("results");
+    } catch (err) {
+      setError(errorMessageFrom(err));
+      setErrorDetail(null);
+      setPhase("upload");
+    }
+  };
+
+  const selectHotspot = (id: string) => {
+    setSelectedId(id);
+    setCopied(false);
+  };
+
+  const generatePrompt = async (id: string) => {
+    if (!analysisId || prompts[id] || promptLoadingId) return;
+
+    setPromptErrors((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setCopied(false);
+    setPromptLoadingId(id);
+    try {
+      const response = await fetch("/api/hotspot-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId, hotspotId: id, apiKey: apiKey.trim() }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; prompt?: string; usage?: TokenUsage };
+      if (!response.ok || !data.prompt) {
+        throw new Error(data.error ?? `Prompt generation failed (${response.status}).`);
+      }
+      setPrompts((current) => ({ ...current, [id]: data.prompt as string }));
+      if (data.usage) {
+        const usage = data.usage;
+        setPromptUsages((current) => ({ ...current, [id]: usage }));
+      }
+    } catch (err) {
+      setPromptErrors((current) => ({ ...current, [id]: errorMessageFrom(err) }));
+    } finally {
+      setPromptLoadingId((current) => (current === id ? null : current));
+    }
+  };
+
+  const copyPrompt = async () => {
+    if (!selectedId) return;
+    const text = prompts[selectedId];
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const resetToUpload = () => {
+    setPhase("upload");
+    setError(null);
+    setErrorDetail(null);
+    setAnalysisId(null);
+    setHotspots([]);
+    setSelectedId(null);
+    setPrompts({});
+    setPromptUsages({});
+    setAnalyzerUsage(null);
+    setPromptLoadingId(null);
+    setPromptErrors({});
+    setCopied(false);
+  };
+
+  const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
+  const selectedPromptUsage = selected ? promptUsages[selected.id] : undefined;
+  const maxPercent = hotspots.length > 0 ? Math.max(...hotspots.map((hotspot) => hotspot.percentOfTotal)) : 0;
 
   return (
     <main className="app-shell">
@@ -105,55 +352,229 @@ export default function Home() {
           <span className="brand-mark"><ProfileIcon type="react" /></span>
           <span>RN Profile <strong>Inspector</strong></span>
         </div>
-        <div className="local-badge"><span /> Runs locally in your browser</div>
+        <div className="local-badge"><span /> Runs locally · AI-assisted</div>
       </header>
 
       <section className="workspace">
-        <div className="intro">
-          <span className="eyebrow">React Native performance</span>
-          <h1>What would you like to analyze?</h1>
-          <p>Choose a profile type, then add the files captured from your React Native app.</p>
-        </div>
+        {(phase === "upload" || phase === "analyzing") && (
+          <>
+            <div className="intro">
+              <span className="eyebrow">React Native performance</span>
+              <h1>What would you like to analyze?</h1>
+              <p>Choose a profile type, then add the files captured from your React Native app.</p>
+            </div>
 
-        <div className="profile-options" role="radiogroup" aria-label="Profile type">
-          <button type="button" role="radio" aria-checked={profileType === "javascript"} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
-            <span className="profile-icon"><ProfileIcon type="javascript" /></span>
-            <span className="option-copy"><strong>JavaScript CPU profile</strong><small>Inspect call stacks and JavaScript execution time</small></span>
-            <span className="radio-indicator" />
-          </button>
+            <div className="profile-options" role="radiogroup" aria-label="Profile type">
+              <button type="button" role="radio" aria-checked={profileType === "javascript"} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
+                <span className="profile-icon"><ProfileIcon type="javascript" /></span>
+                <span className="option-copy"><strong>JavaScript CPU profile</strong><small>Inspect call stacks and JavaScript execution time</small></span>
+                <span className="radio-indicator" />
+              </button>
 
-          <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
-            <span className="profile-icon"><ProfileIcon type="react" /></span>
-            <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
-            <span className="radio-indicator" />
-          </button>
-        </div>
+              <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
+                <span className="profile-icon"><ProfileIcon type="react" /></span>
+                <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
+                <span className="option-badge">coming soon</span>
+              </button>
+            </div>
 
-        <section className="upload-section" aria-live="polite">
-          <div className="section-heading">
-            <div><span className="step-number">2</span><h2>Add profile files</h2></div>
-            <p>{profileType === "javascript" ? "CPU profile required · Source map optional" : "One file required"}</p>
-          </div>
+            <section className="upload-section" aria-live="polite">
+              <div className="section-heading">
+                <div><span className="step-number">2</span><h2>Add profile files</h2></div>
+                <p>{profileType === "javascript" ? "CPU profile required · Source map optional" : "One file required"}</p>
+              </div>
 
-          <div className={`upload-grid ${profileType === "react" ? "single" : ""}`}>
-            {profileType === "javascript" ? (
-              <>
-                <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or .json file here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
-                <UploadPane kind="sourceMap" title="Source map (optional)" detail="Add the matching .map or .json for clearer results" file={files.sourceMap} onFile={(file) => updateFile("sourceMap", file)} />
-              </>
-            ) : (
-              <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
+              <div className={`upload-grid ${profileType === "react" ? "single" : ""}`}>
+                {profileType === "javascript" ? (
+                  <>
+                    <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
+                    <UploadPane kind="sourceMap" title="Source map (optional)" detail="Add the matching .map or .json for clearer results" file={files.sourceMap} onFile={(file) => updateFile("sourceMap", file)} />
+                  </>
+                ) : (
+                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
+                )}
+              </div>
+
+              <div className="key-field">
+                <label htmlFor="apex-api-key">Callstack API key</label>
+                <input
+                  id="apex-api-key"
+                  type="password"
+                  placeholder="Paste your Callstack API key"
+                  value={apiKey}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setApiKeyValue(event.target.value)}
+                />
+                <small>Stored only in this browser and used to authorize the analysis agents. It is never sent anywhere except the Callstack API.</small>
+              </div>
+            </section>
+
+            {error && (
+              <div className="error-banner" role="alert">
+                {error}
+                {errorDetail && (
+                  <details className="error-detail-wrap">
+                    <summary>What the agent returned</summary>
+                    <pre className="error-detail">{errorDetail}</pre>
+                  </details>
+                )}
+              </div>
             )}
-          </div>
-        </section>
 
-        <div className="action-row">
-          <p>Files stay on this device and are processed locally.</p>
-          <button className="analyze-button" type="button" disabled={!isReady}>
-            Analyze profile
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 4 6 6-6 6" /></svg>
-          </button>
-        </div>
+            <div className="action-row">
+              <p>{profileType === "javascript"
+                ? "Profile files stay on this device and are analyzed locally by a PI agent."
+                : "React component profile analysis is coming soon — pick the JavaScript CPU profile to analyze now."}</p>
+              <button className="analyze-button" type="button" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
+                {phase === "analyzing" ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    Analyzing profile…
+                  </>
+                ) : (
+                  <>
+                    Analyze profile
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 4 6 6-6 6" /></svg>
+                  </>
+                )}
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === "results" && (
+          <>
+            <div className="results-header">
+              <div className="intro">
+                <span className="eyebrow">Analysis results</span>
+                <h1 className="results-title">Hotspots, ranked by self time</h1>
+                <p>
+                  {hotspots.length} bottleneck{hotspots.length === 1 ? "" : "s"} found · total profile time {formatMs(totalMs)}
+                </p>
+                {analyzerUsage && (
+                  <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
+                    analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
+                  </p>
+                )}
+              </div>
+              <button type="button" className="ghost-button" onClick={resetToUpload}>New analysis</button>
+            </div>
+
+            <div className="hotspot-list">
+              {hotspots.map((hotspot, index) => (
+                <button
+                  key={hotspot.id}
+                  type="button"
+                  className={`hotspot-card${selectedId === hotspot.id ? " selected" : ""}`}
+                  aria-pressed={selectedId === hotspot.id}
+                  onClick={() => selectHotspot(hotspot.id)}
+                >
+                  <span className="hotspot-rank">{index + 1}</span>
+                  <span className="hotspot-main">
+                    <span className="hotspot-top">
+                      <strong>{hotspot.title}</strong>
+                      <span className="hotspot-time">{formatMs(hotspot.selfTimeMs)} · {hotspot.percentOfTotal}%</span>
+                    </span>
+                    <span className="hotspot-bar" aria-hidden="true">
+                      <span style={{ width: `${maxPercent > 0 ? Math.max(4, (hotspot.percentOfTotal / maxPercent) * 100) : 0}%` }} />
+                    </span>
+                    <small>{hotspot.summary}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {selected && (
+              <section className="details-panel" aria-live="polite">
+                <div className="details-heading">
+                  <div>
+                    <span className="eyebrow">Hotspot details</span>
+                    <h2>{selected.title}</h2>
+                  </div>
+                  <div className="details-metrics">
+                    <div>
+                      <small>Self time</small>
+                      <strong>{formatMs(selected.selfTimeMs)}</strong>
+                    </div>
+                    <div>
+                      <small>Share of total</small>
+                      <strong>{selected.percentOfTotal}%</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="details-summary">{selected.summary}</p>
+
+                {selected.stack.length > 0 && (
+                  <div className="details-block">
+                    <h3>Stack trace</h3>
+                    <ol className="stack-view">
+                      {selected.stack.map((frame, index) => (
+                        <li key={index}>{frame}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                <div className="details-block">
+                  <h3>Possible solution</h3>
+                  <p>{selected.suggestedFix}</p>
+                </div>
+
+                <div className="details-block prompt-block">
+                  <div className="prompt-head">
+                    <h3>Debugging prompt</h3>
+                    <span className="prompt-head-actions">
+                      {selectedPromptUsage && (
+                        <span className="usage-chip" title="Tokens consumed by the agent that generated this prompt">
+                          {formatTokens(selectedPromptUsage.totalTokens)} tokens · {usageBreakdown(selectedPromptUsage)}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="copy-button"
+                        disabled={!prompts[selected.id]}
+                        onClick={() => void copyPrompt()}
+                      >
+                        {copied ? "Copied!" : "Copy prompt"}
+                      </button>
+                    </span>
+                  </div>
+
+                  {promptLoadingId === selected.id ? (
+                    <p className="prompt-loading">
+                      <span className="spinner" aria-hidden="true" />
+                      Generating a prompt from the hotspot details…
+                    </p>
+                  ) : prompts[selected.id] ? (
+                    <details className="prompt-details" open={false}>
+                      <summary>View generated prompt</summary>
+                      <pre className="prompt-box">{prompts[selected.id]}</pre>
+                    </details>
+                  ) : promptErrors[selected.id] ? (
+                    <p className="prompt-error">
+                      {promptErrors[selected.id]}
+                      <button type="button" onClick={() => void generatePrompt(selected.id)}>Retry</button>
+                    </p>
+                  ) : (
+                    <div className="prompt-generate">
+                      <p className="prompt-loading">No prompt generated for this hotspot yet.</p>
+                      <button
+                        type="button"
+                        className="copy-button"
+                        disabled={promptLoadingId !== null}
+                        onClick={() => void generatePrompt(selected.id)}
+                      >
+                        Generate prompt
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+          </>
+        )}
       </section>
     </main>
   );
