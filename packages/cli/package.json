@@ -1,0 +1,38 @@
+{
+  "name": "@callstack/perf-ai",
+  "version": "0.1.0",
+  "description": "Managed local CPU profile analysis with AI",
+  "type": "module",
+  "bin": {
+    "perf-ai": "src/cli.js"
+  },
+  "exports": {
+    "./config": "./src/config.js",
+    "./models": "./src/models.js",
+    "./runtime": "./src/runtime.js",
+    "./bootstrap": "./src/bootstrap.js"
+  },
+  "files": [
+    "src",
+    "release.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "prepack": "node scripts/prepack.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": "https://github.com/callstackincubator/perf-ai.git"
+}

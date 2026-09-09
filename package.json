@@ -3,18 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node --import @callstack/perf-ai/bootstrap node_modules/next/dist/bin/next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "node --import @callstack/perf-ai/bootstrap node_modules/next/dist/bin/next start",
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs packages/cli/test/*.test.js",
+    "test:production": "node --test packages/cli/test/production.smoke.js"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4",
     "@rozenite/ui": "^2.4.0",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "typebox": "^1.3.25"
+    "typebox": "^1.3.25",
+    "@callstack/perf-ai": "0.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -26,5 +29,8 @@
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "workspaces": [
+    "packages/cli"
+  ]
 }

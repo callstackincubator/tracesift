@@ -1,14 +1,12 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useEffect, useId, useSyncExternalStore, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useId, useState } from "react";
 import {
   Alert,
   ArrowRight,
   Badge,
   Button,
-  Field,
   IndicatorDot,
-  Input,
   PluginHeader,
   PluginShell,
   RozeniteLoader,
@@ -42,33 +40,6 @@ const acceptedFiles: Record<UploadKind, string> = {
   sourceMap: ".map,.json,application/json",
   reactProfile: ".json,application/json",
 };
-
-const API_KEY_STORAGE = "perf-ai.apex-api-key";
-
-/**
- * Tiny localStorage-backed store for the API key, readable via
- * useSyncExternalStore (avoids setState-in-effect and hydration mismatches).
- */
-const apiKeyListeners = new Set<() => void>();
-let apiKeyCache: string | null = null;
-
-function getApiKeySnapshot(): string {
-  if (typeof window === "undefined") return "";
-  if (apiKeyCache === null) apiKeyCache = window.localStorage.getItem(API_KEY_STORAGE) ?? "";
-  return apiKeyCache;
-}
-
-function subscribeApiKey(listener: () => void): () => void {
-  apiKeyListeners.add(listener);
-  return () => apiKeyListeners.delete(listener);
-}
-
-function setApiKeyValue(value: string): void {
-  apiKeyCache = value;
-  if (value) window.localStorage.setItem(API_KEY_STORAGE, value);
-  else window.localStorage.removeItem(API_KEY_STORAGE);
-  for (const listener of apiKeyListeners) listener();
-}
 
 function formatMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
@@ -195,7 +166,8 @@ export default function Home() {
     } catch {
       // Theme still applies for this session even if storage is unavailable.
     }
-    setThemeReady(true);
+    const frame = requestAnimationFrame(() => setThemeReady(true));
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   if (!themeReady) {
@@ -208,7 +180,16 @@ export default function Home() {
 function InspectorApp() {
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
-  const apiKey = useSyncExternalStore(subscribeApiKey, getApiKeySnapshot, () => "");
+  const [modelStatus, setModelStatus] = useState<{ configured: boolean; provider?: string; model?: string; error?: string } | null>(null);
+  useEffect(() => {
+    try { localStorage.removeItem("perf-ai.apex-api-key"); } catch { /* Storage may be disabled. */ }
+    const controller = new AbortController();
+    fetch("/api/model", { signal: controller.signal, cache: "no-store" })
+      .then((response) => { if (!response.ok) throw new Error(); return response.json(); })
+      .then(setModelStatus)
+      .catch(() => { if (!controller.signal.aborted) setModelStatus({ configured: false, error: "Could not load model configuration. Reload the page." }); });
+    return () => controller.abort();
+  }, []);
 
   const [phase, setPhase] = useState<Phase>("upload");
   const [error, setError] = useState<string | null>(null);
@@ -230,7 +211,7 @@ function InspectorApp() {
   };
 
   const isReady = profileType === "javascript"
-    ? Boolean(files.cpu && apiKey.trim())
+    ? Boolean(files.cpu && modelStatus?.configured)
     : false;
 
   const handleAnalyze = async () => {
@@ -239,8 +220,8 @@ function InspectorApp() {
       setErrorDetail(null);
       return;
     }
-    if (!apiKey.trim()) {
-      setError("Enter your AI Agent API key first.");
+    if (!modelStatus?.configured) {
+      setError("Run perf-ai model, then restart the server.");
       setErrorDetail(null);
       return;
     }
@@ -251,7 +232,6 @@ function InspectorApp() {
       const form = new FormData();
       form.append("profile", files.cpu);
       if (files.sourceMap) form.append("sourceMap", files.sourceMap);
-      form.append("apiKey", apiKey.trim());
 
       const response = await fetch("/api/analyze", { method: "POST", body: form });
       const data = (await response.json().catch(() => ({}))) as {
@@ -317,7 +297,7 @@ function InspectorApp() {
       const response = await fetch("/api/hotspot-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysisId, hotspotId: id, apiKey: apiKey.trim() }),
+        body: JSON.stringify({ analysisId, hotspotId: id }),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string; prompt?: string; usage?: TokenUsage };
       if (!response.ok || !data.prompt) {
@@ -431,21 +411,13 @@ function InspectorApp() {
                 )}
               </div>
 
-              <Field className="key-field">
-                <Field.Label>AI Agent API key</Field.Label>
-                <Input
-                  id="apex-api-key"
-                  type="password"
-                  placeholder="Paste your AI Agent API key"
-                  value={apiKey}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => setApiKeyValue(event.target.value)}
-                />
-                <Field.Description>
-                  Stored only in this browser and used to authorize the analysis agents. It is never sent anywhere except the AI Agent API.
-                </Field.Description>
-              </Field>
+              <div className="key-field">
+                <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
+                  ? `Model: ${modelStatus.provider} / ${modelStatus.model}`
+                  : modelStatus.error || "Run perf-ai model, then restart the server."}</Text>
+                  <br />
+                <Text className="italic text-muted-foreground">Change models with <code>perf-ai model</code> and restart the server.</Text>
+              </div>
             </section>
 
             {error && (

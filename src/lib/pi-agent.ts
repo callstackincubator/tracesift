@@ -1,14 +1,12 @@
 import {
   createAgentSession,
   DefaultResourceLoader,
-  getAgentDir,
-  ModelRuntime,
   SettingsManager,
   SessionManager,
   type AgentSession,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { APEX_MODEL_ID, APEX_PROVIDER_ID, registerApexProvider } from "./apex-provider";
+import { getConfiguredRuntime } from "@callstack/perf-ai/runtime";
 import type { TokenUsage } from "./analysis";
 
 /** Error with an HTTP status so route handlers can map failures 1:1. */
@@ -44,22 +42,6 @@ function truncate(value: unknown, max = 400): string {
 /** Coerce a provider-reported token count into a safe non-negative number. */
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-let modelRuntimePromise: Promise<ModelRuntime> | undefined;
-let configuredKey: string | undefined;
-
-function getModelRuntime(): Promise<ModelRuntime> {
-  if (!modelRuntimePromise) {
-    modelRuntimePromise = (async () => {
-      log("agent", "creating ModelRuntime…");
-      const runtime = await ModelRuntime.create();
-      registerApexProvider(runtime);
-      log("agent", `ModelRuntime ready; registered provider "${APEX_PROVIDER_ID}" (model ${APEX_MODEL_ID})`);
-      return runtime;
-    })();
-  }
-  return modelRuntimePromise;
 }
 
 /** Keep at most a couple of agent runs in flight; the rest wait in line. */
@@ -109,8 +91,6 @@ function isAuthFailure(detail: string): boolean {
 export interface RunAgentOptions {
   /** Short label used in the logs, e.g. "analyze" or "hotspot-prompt". */
   label: string;
-  /** User-provided API key for the Apex provider (never persisted). */
-  apiKey: string;
   systemPrompt: string;
   prompt: string;
   /** Working directory the agent sees (profile files live here). */
@@ -136,7 +116,7 @@ export interface RunAgentResult {
 }
 
 /**
- * Spawns a short-lived, tool-enabled PI agent session against the Apex model,
+ * Spawns a short-lived, tool-enabled PI agent session against the configured model,
  * runs one prompt and resolves with the final assistant text.
  * Structured output is captured by the caller's custom tools.
  * Every turn, tool call and model message is logged to the server console.
@@ -144,7 +124,6 @@ export interface RunAgentResult {
 export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult> {
   const {
     label,
-    apiKey,
     systemPrompt,
     prompt,
     cwd,
@@ -157,17 +136,10 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
   const logPrefix = `agent:${label}`;
   const startedAt = Date.now();
 
-  const runtime = await getModelRuntime();
-  if (apiKey !== configuredKey) {
-    await runtime.setRuntimeApiKey(APEX_PROVIDER_ID, apiKey);
-    configuredKey = apiKey;
-    log(logPrefix, `API key set on runtime (length ${apiKey.length}, masked)`);
-  }
-
-  const model = runtime.getModel(APEX_PROVIDER_ID, APEX_MODEL_ID);
-  if (!model) {
-    throw new AgentError(500, "The Apex model is not available right now. Try again shortly.");
-  }
+  const state = await getConfiguredRuntime().catch((error: Error) => {
+    throw new AgentError(503, error.message);
+  });
+  const { runtime, model, agentDir } = state;
   log(
     logPrefix,
     `starting agent — model ${model.provider}/${model.id} (api=${model.api}, baseUrl=${model.baseUrl}), tools=[${[
@@ -183,7 +155,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
 
   const resourceLoader = new DefaultResourceLoader({
     cwd,
-    agentDir: getAgentDir(),
+    agentDir,
     settingsManager,
     // Keep these runs deterministic: no user extensions, skills, prompts,
     // themes or AGENTS.md context files are relevant to profile analysis.
@@ -217,7 +189,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     const streamFunction = session.agent.streamFunction;
     session.agent.streamFunction = (requestModel, context, options) => streamFunction(requestModel, context, {
       ...options,
-      ...(maxOutputTokens === undefined ? {} : { maxTokens: maxOutputTokens }),
+      ...(maxOutputTokens === undefined ? {} : { maxTokens: Math.min(maxOutputTokens, requestModel.maxTokens) }),
     });
     const onPayload = session.agent.onPayload;
     session.agent.onPayload = async (payload, requestModel) => {
@@ -336,7 +308,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       const detail = error instanceof Error ? error.message : String(error);
       log(logPrefix, `session.prompt threw: ${truncate(detail, 800)}`);
       if (isAuthFailure(detail)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Check the key and try again.");
+        throw new AgentError(401, "The API key was rejected by the provider. Run perf-ai model to replace it, then restart the server.");
       }
       throw new AgentError(502, `The analysis agent failed: ${detail}`);
     } finally {
@@ -355,7 +327,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     }
     if (lastError) {
       if (isAuthFailure(lastError)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Check the key and try again.");
+        throw new AgentError(401, "The API key was rejected by the provider. Run perf-ai model to replace it, then restart the server.");
       }
       throw new AgentError(502, `The analysis agent failed: ${lastError}`);
     }
