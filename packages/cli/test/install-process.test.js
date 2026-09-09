@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
 import { install, verifyInstallation } from '../src/install.js';
-import { acquireLock, launch, alive } from '../src/process.js';
+import { acquireLock, launch, alive, run } from '../src/process.js';
 import { parsePort, assertPortAvailable, waitForReady, openBrowser } from '../src/start.js';
 
 async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'perf-ai-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
@@ -62,6 +62,42 @@ test('process supervisor stops child group and reports command errors', async ()
   assert.equal(alive(proc.child.pid), false);
   const missing = launch('/does-not-exist-perf-ai', [], { stdio: 'ignore' });
   await assert.rejects(missing.done, /ENOENT/);
+});
+
+test('post-exit EPERM cleanup preserves command results and clears child tracking', async t => {
+  const originalKill = process.kill;
+  let childPid;
+  let denied = 0;
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === -childPid) {
+      denied++;
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    }
+    return originalKill.call(process, pid, signal);
+  });
+  const tracked = [];
+  const options = { stdio: 'ignore', onSpawn(pid) { tracked.push(pid); if (pid) childPid = pid; } };
+  await run(process.execPath, ['-e', ''], options);
+  assert.equal(tracked.at(-1), undefined);
+  await assert.rejects(run(process.execPath, ['-e', 'process.exit(7)'], options), /failed \(7\)/);
+  assert.equal(tracked.at(-1), undefined);
+  assert(denied > 0, 'exercises permission-denied cleanup');
+});
+
+test('permission errors stopping a running child are still reported', async t => {
+  const proc = launch(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  const originalKill = process.kill;
+  const mock = t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === -proc.child.pid) throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    return originalKill.call(process, pid, signal);
+  });
+  try {
+    await assert.rejects(proc.stop(), { code: 'EPERM' });
+    assert.equal(proc.finished, false);
+  } finally {
+    mock.mock.restore();
+    await proc.stop();
+  }
 });
 
 test('readiness checks instance identity, occupied port, early exits and timeout', async t => {
