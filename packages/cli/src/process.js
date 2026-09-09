@@ -56,7 +56,18 @@ export function launch(command, args, options = {}) {
   });
   // Attach immediately so launch errors during readiness cannot become unhandled rejections.
   done.catch(() => {});
-  const kill = signal => { try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== 'ESRCH' && child.pid) throw error; } };
+  const kill = signal => {
+    if (!child.pid) return;
+    try { process.kill(-child.pid, signal); }
+    catch (error) {
+      if (error.code === 'ESRCH') return;
+      // Once the child has exited, group cleanup is best effort. An EPERM
+      // here must not turn a completed build into a failed installation.
+      // Keep permission errors visible when we still need to stop the child.
+      if (error.code === 'EPERM' && finished) return;
+      throw error;
+    }
+  };
   return { child, done, get finished() { return finished; }, async stop(signal = 'SIGTERM') {
     if (!child.pid) return;
     kill(signal);
