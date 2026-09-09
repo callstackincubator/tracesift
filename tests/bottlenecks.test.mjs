@@ -80,6 +80,21 @@ test('parentId profiles and malformed cycles terminate safely; empty profiles ha
   assert.deepEqual(groupBottlenecks(profile([], []), 0), []);
 });
 
+test('uses CPU-profile time deltas instead of treating unequal intervals as equal samples', () => {
+  const weighted = {
+    ...profile([
+      node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3]),
+      node(2, 'briefWork'), node(3, 'expensiveWork'),
+    ], [2, 3]),
+    timeDeltas: [10_000, 90_000],
+  };
+  const groups = groupBottlenecks(weighted, 100);
+  assert.equal(groups[0].combinedTimeMs, 100);
+  assert.deepEqual(groups[0].functions.map(fn => [fn.title, fn.selfTimeMs]), [
+    ['expensiveWork', 90],
+  ]);
+});
+
 test('agent cannot alter measured times, omit groups, or duplicate cards', () => {
   const groups = groupBottlenecks(profile([node(1, 'entry')], [1]), 100);
   const { hotspots } = normalizeHotspots([

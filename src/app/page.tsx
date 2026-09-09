@@ -16,7 +16,7 @@ import {
 import type { Hotspot } from "@/lib/analysis";
 
 type ProfileType = "javascript" | "react";
-type UploadKind = "cpu" | "sourceMap" | "reactProfile";
+type UploadKind = "cpu" | "reactProfile";
 type Phase = "upload" | "analyzing" | "results";
 
 interface AnalyzeResponse {
@@ -37,7 +37,6 @@ interface TokenUsage {
 
 const acceptedFiles: Record<UploadKind, string> = {
   cpu: ".cpuprofile,.json,application/json",
-  sourceMap: ".map,.json,application/json",
   reactProfile: ".json,application/json",
 };
 
@@ -231,7 +230,6 @@ function InspectorApp() {
     try {
       const form = new FormData();
       form.append("profile", files.cpu);
-      if (files.sourceMap) form.append("sourceMap", files.sourceMap);
 
       const response = await fetch("/api/analyze", { method: "POST", body: form });
       const data = (await response.json().catch(() => ({}))) as {
@@ -377,7 +375,7 @@ function InspectorApp() {
             <div className="intro">
               <span className="eyebrow">React Native performance</span>
               <h1>What would you like to analyze?</h1>
-              <p>Choose a profile type, then add the files captured from your React Native app.</p>
+              <p>Choose a profile type, then add the profile captured from your React Native app.</p>
             </div>
 
             <div className="profile-options" role="radiogroup" aria-label="Profile type">
@@ -396,16 +394,13 @@ function InspectorApp() {
 
             <section className="upload-section" aria-live="polite">
               <div className="section-heading">
-                <div><span className="step-number">2</span><h2>Add profile files</h2></div>
-                <p>{profileType === "javascript" ? "CPU profile required · Source map optional" : "One file required"}</p>
+                <div><span className="step-number">2</span><h2>Add profile file</h2></div>
+                <p>One file required</p>
               </div>
 
-              <div className={`upload-grid ${profileType === "react" ? "single" : ""}`}>
+              <div className="upload-grid single">
                 {profileType === "javascript" ? (
-                  <>
-                    <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
-                    <UploadPane kind="sourceMap" title="Source map (optional)" detail="Add the matching .map or .json for clearer results" file={files.sourceMap} onFile={(file) => updateFile("sourceMap", file)} />
-                  </>
+                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
                 ) : (
                   <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
                 )}
@@ -436,7 +431,7 @@ function InspectorApp() {
 
             <div className="action-row">
               <p>{profileType === "javascript"
-                ? "Profile files stay on this device and are analyzed locally."
+                ? "Your profile stays on this device and is analyzed locally."
                 : "React component profile analysis is coming soon — pick the JavaScript CPU profile to analyze now."}</p>
               <Button size="lg" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (

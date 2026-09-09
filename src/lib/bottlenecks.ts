@@ -34,7 +34,8 @@ function label(frame: CdpCallFrame): string {
  * Caller node IDs preserve call-path identity; source locations do not identify runs.
  * Separate invocations without an observed stack exit cannot be distinguished.
  * Each leaf sample contributes self time to exactly one function in one group.
- * Like the existing profiler, timings use duration / sample count.
+ * Profiles with time deltas retain their measured interval weights; profiles
+ * without them fall back to duration / sample count.
  */
 export function groupBottlenecks(profile: CdpProfile, durationMs: number): Bottleneck[] {
   const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
@@ -44,7 +45,16 @@ export function groupBottlenecks(profile: CdpProfile, durationMs: number): Bottl
     for (const child of node.children ?? []) parents.set(child, node.id);
   }
   const samples = profile.samples ?? [];
-  const sampleMs = samples.length ? durationMs / samples.length : 0;
+  const rawDeltas = profile.timeDeltas ?? [];
+  const totalDelta = rawDeltas.reduce((sum, delta) => sum + Math.max(0, delta), 0);
+  const deltaScale = totalDelta > 0 && durationMs > 0 ? durationMs / (totalDelta / 1000) : 1;
+  const sampleTimesMs = samples.map((_, index) =>
+    totalDelta > 0
+      ? (Math.max(0, rawDeltas[index] ?? 0) / 1000) * deltaScale
+      : samples.length > 0
+        ? durationMs / samples.length
+        : 0
+  );
   type Group = Bottleneck & { members: Map<string, HotFunction> };
   const groups: Group[] = [];
   const contexts = new Map<number, { owner: CdpProfileNode | undefined; meaningful: CdpProfileNode[] }>();
@@ -70,7 +80,9 @@ export function groupBottlenecks(profile: CdpProfile, durationMs: number): Bottl
   }
   let activeOwner: number | undefined;
   let group: Group | undefined;
-  for (const id of samples) {
+  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
+    const id = samples[sampleIndex];
+    const sampleMs = sampleTimesMs[sampleIndex];
     const leaf = nodes.get(id);
     const { owner, meaningful } = contextFor(id);
     // GC can interrupt a caller without unwinding it. A standalone GC sample

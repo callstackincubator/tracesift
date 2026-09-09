@@ -1,4 +1,5 @@
 import { groupBottlenecks, type Bottleneck } from "./bottlenecks";
+import { extractFromDurationTrace } from "./hermes-duration-profile";
 import { normalizeProfile } from "@/app/js-profiler/normalize";
 import { queryHotspots, querySummary } from "@/app/js-profiler/query";
 import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "@/app/js-profiler/types";
@@ -8,11 +9,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Accepts a V8/CDP CPU profile, a `{ profile }` wrapper, or a Chrome
- * Performance / React DevTools trace (`traceEvents` with Profile + ProfileChunk).
+ * Accepts a V8/CDP CPU profile, a `{ profile }` wrapper, a Chrome
+ * Performance / React DevTools trace (`traceEvents` with Profile + ProfileChunk),
+ * or the begin/end duration trace produced by hermes-profile-transformer.
  */
 export function coerceCdpProfile(raw: unknown): CdpProfile {
-  const fromTrace = extractFromChromeTrace(raw);
+  const fromTrace = extractFromTrace(raw);
   if (fromTrace) {
     return fromTrace;
   }
@@ -67,7 +69,7 @@ function fromCdpShape(inner: Record<string, unknown>): CdpProfile {
   return { nodes, samples, timeDeltas, startTime, endTime };
 }
 
-function extractFromChromeTrace(raw: unknown): CdpProfile | null {
+function extractFromTrace(raw: unknown): CdpProfile | null {
   const events = getTraceEvents(raw);
   if (!events) {
     return null;
@@ -127,8 +129,12 @@ function extractFromChromeTrace(raw: unknown): CdpProfile | null {
     .sort((a, b) => b.samples.length - a.samples.length)[0];
 
   if (!assembled) {
+    const durationProfile = extractFromDurationTrace(events);
+    if (durationProfile) {
+      return durationProfile;
+    }
     throw new Error(
-      "This Chrome / React DevTools trace does not contain a V8 CPU profile (no Profile/ProfileChunk events)."
+      "This trace does not contain supported CPU profile data (expected V8 Profile/ProfileChunk events or Hermes B/E duration events)."
     );
   }
 

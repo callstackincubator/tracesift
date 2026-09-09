@@ -103,18 +103,16 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "The profile file is too large (max 25 MB)." }, 413);
   }
 
-  const sourceMapEntry = form.get("sourceMap");
-  const sourceMap = sourceMapEntry instanceof File && sourceMapEntry.size > 0 ? sourceMapEntry : undefined;
-  log(`request received: profile="${profile.name}" (${profile.size} bytes), sourceMap=${sourceMap ? `${sourceMap.name} (${sourceMap.size} bytes)` : "none"}`);
+  log(`request received: profile="${profile.name}" (${profile.size} bytes)`);
 
   let created;
   try {
-    created = await createAnalysisFiles(profile, sourceMap);
+    created = await createAnalysisFiles(profile);
   } catch (error) {
     log("failed to store upload:", error instanceof Error ? error.message : error);
     return json({ error: "Could not store the uploaded profile on the server." }, 500);
   }
-  const { id, dir, hasSourceMap } = created;
+  const { id, dir } = created;
   log(`analysis ${id} stored in ${dir}`);
 
   let summary;
@@ -171,11 +169,15 @@ export async function POST(request: Request): Promise<Response> {
 
   let finalText: string;
   let usage: TokenUsage;
+
+  const analystPrompt = analystUserPrompt(bottlenecks, totalMs);
+  log(`analyst prompt: ${analystPrompt}`);
+
   try {
     ({ finalText, usage } = await runAgent({
       label: "analyze",
       systemPrompt: ANALYST_SYSTEM_PROMPT,
-      prompt: analystUserPrompt(bottlenecks, totalMs),
+      prompt: analystPrompt,
       cwd: dir,
       customTools: [reportTool],
       builtinTools: [],
@@ -225,7 +227,6 @@ export async function POST(request: Request): Promise<Response> {
     createdAt: Date.now(),
     dir,
     totalMs,
-    hasSourceMap,
     hotspots,
     prompts: {},
     usage,
