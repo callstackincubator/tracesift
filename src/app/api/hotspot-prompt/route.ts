@@ -14,24 +14,19 @@ function json(body: Record<string, unknown>, status = 200): Response {
 
 export async function POST(request: Request): Promise<Response> {
   const startedAt = Date.now();
-  let body: { analysisId?: unknown; hotspotId?: unknown; apiKey?: unknown } | null;
+  let body: { analysisId?: unknown; hotspotId?: unknown } | null;
   try {
     body = (await request.json()) as typeof body;
   } catch {
-    return json({ error: "Expected a JSON body with analysisId, hotspotId and apiKey." }, 400);
+    return json({ error: "Expected a JSON body with analysisId and hotspotId." }, 400);
   }
 
   const analysisId = typeof body?.analysisId === "string" ? body.analysisId : "";
   const hotspotId = typeof body?.hotspotId === "string" ? body.hotspotId : "";
-  const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
 
   if (!analysisId || !hotspotId) {
     return json({ error: "analysisId and hotspotId are required." }, 400);
   }
-  if (!apiKey) {
-    return json({ error: "An AI Agent API key is required to generate the prompt." }, 400);
-  }
-
   const record = getRecord(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
@@ -53,7 +48,6 @@ export async function POST(request: Request): Promise<Response> {
   try {
     ({ finalText, usage } = await runAgent({
       label: "hotspot-prompt",
-      apiKey,
       systemPrompt: FIX_PROMPT_SYSTEM_PROMPT,
       prompt: buildFixPromptUserPrompt(hotspot),
       cwd: record.dir,

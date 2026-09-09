@@ -93,12 +93,6 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Expected a multipart form containing the profile file." }, 400);
   }
 
-  const apiKey = String(form.get("apiKey") ?? "").trim();
-  if (!apiKey) {
-    log("rejected: no API key in request");
-    return json({ error: "An AI Agent API key is required to run the analysis." }, 400);
-  }
-
   const profile = form.get("profile");
   if (!(profile instanceof File) || profile.size === 0) {
     log("rejected: no profile file in request");
@@ -180,7 +174,6 @@ export async function POST(request: Request): Promise<Response> {
   try {
     ({ finalText, usage } = await runAgent({
       label: "analyze",
-      apiKey,
       systemPrompt: ANALYST_SYSTEM_PROMPT,
       prompt: analystUserPrompt(bottlenecks, totalMs),
       cwd: dir,
