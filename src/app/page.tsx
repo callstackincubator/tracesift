@@ -4,7 +4,6 @@ import { ChangeEvent, DragEvent, useEffect, useId, useState } from "react";
 import {
   Alert,
   ArrowRight,
-  Badge,
   Button,
   IndicatorDot,
   PluginHeader,
@@ -14,6 +13,7 @@ import {
 } from "@rozenite/ui";
 
 import type { Hotspot } from "@/lib/analysis";
+import type { ReactIssue } from "@/lib/react-analyzer";
 
 type ProfileType = "javascript" | "react";
 type UploadKind = "cpu" | "reactProfile";
@@ -24,6 +24,29 @@ interface AnalyzeResponse {
   totalMs: number;
   hotspots: Hotspot[];
   usage?: TokenUsage;
+}
+
+interface ReactComponentResult {
+  id: string;
+  displayName: string;
+  key: string | null;
+  metadataMissing: boolean;
+  renderCount: number;
+  avgActualDurationMs: number;
+  maxActualDurationMs: number;
+  totalActualDurationMs: number;
+  avgSelfDurationMs: number | null;
+}
+
+interface ReactSummary {
+  peakCommitDurationMs: number | null;
+  commitsOverBudget: number;
+  omittedEvidenceCommitCount: number;
+  rootCount: number;
+  commitCount: number;
+  totalCommitRenderDurationMs: number;
+  matchingCount: number;
+  omittedCount: number;
 }
 
 interface TokenUsage {
@@ -194,8 +217,15 @@ function InspectorApp() {
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [analyzedType, setAnalyzedType] = useState<ProfileType>("javascript");
   const [totalMs, setTotalMs] = useState(0);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [reactComponents, setReactComponents] = useState<ReactComponentResult[]>([]);
+  const [frameBudget, setFrameBudget] = useState("16");
+  const [appliedBudget, setAppliedBudget] = useState(16);
+  const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
+  const [reactReasoning, setReactReasoning] = useState("");
+  const [reactSummary, setReactSummary] = useState<ReactSummary | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -209,13 +239,15 @@ function InspectorApp() {
     setFiles((current) => ({ ...current, [kind]: file }));
   };
 
-  const isReady = profileType === "javascript"
-    ? Boolean(files.cpu && modelStatus?.configured)
-    : false;
+  const validBudget = frameBudget.trim() !== "" && Number.isFinite(Number(frameBudget)) && Number(frameBudget) > 0;
+  const isReady = Boolean(
+    (profileType === "javascript" ? files.cpu : files.reactProfile) && modelStatus?.configured && (profileType !== "react" || validBudget),
+  );
 
   const handleAnalyze = async () => {
-    if (!files.cpu) {
-      setError("Add a CPU profile file first.");
+    const file = profileType === "javascript" ? files.cpu : files.reactProfile;
+    if (!file) {
+      setError(profileType === "javascript" ? "Add a CPU profile file first." : "Add a React profile file first.");
       setErrorDetail(null);
       return;
     }
@@ -224,14 +256,19 @@ function InspectorApp() {
       setErrorDetail(null);
       return;
     }
+    if (profileType === "react" && !validBudget) {
+      setError("Enter a finite positive commit budget in milliseconds.");
+      return;
+    }
     setPhase("analyzing");
     setError(null);
     setErrorDetail(null);
     try {
       const form = new FormData();
-      form.append("profile", files.cpu);
-
-      const response = await fetch("/api/analyze", { method: "POST", body: form });
+      form.append("profile", file);
+      if (profileType === "react") form.append("frameBudgetMs", frameBudget);
+      const endpoint = profileType === "javascript" ? "/api/analyze" : "/api/analyze/react";
+      const response = await fetch(endpoint, { method: "POST", body: form });
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
         detail?: string;
@@ -239,11 +276,44 @@ function InspectorApp() {
         totalMs?: number;
         hotspots?: Hotspot[];
         usage?: TokenUsage;
+        summary?: ReactSummary;
+        components?: ReactComponentResult[];
+        issues?: ReactIssue[];
+        noIssue?: boolean;
+        reasoning?: string;
+        frameBudgetMs?: number;
       };
       if (!response.ok) {
         setError(data.error ?? `Analysis failed (${response.status}).`);
         setErrorDetail(data.detail ?? null);
         setPhase("upload");
+        return;
+      }
+
+      setPrompts({});
+      setPromptUsages({});
+      setAnalyzerUsage(data.usage ?? null);
+      setPromptErrors({});
+      setCopied(false);
+      setAnalyzedType(profileType);
+
+      if (profileType === "react") {
+        const components = data.components ?? [];
+        if (!Array.isArray(data.issues) || (data.issues.length > 0 && typeof data.reasoning !== "string") || data.noIssue !== (data.issues.length === 0)) {
+          setError("The server did not return a valid React issue report. Check the dev server logs.");
+          setPhase("upload");
+          return;
+        }
+        setAnalysisId(null);
+        setHotspots([]);
+        setReactComponents(components);
+        setReactIssues(data.issues);
+        setReactReasoning(data.issues.length > 0 ? data.reasoning ?? "" : "");
+        setAppliedBudget(data.frameBudgetMs ?? Number(frameBudget));
+        setReactSummary(data.summary ?? null);
+        setTotalMs(data.summary?.totalCommitRenderDurationMs ?? 0);
+        setSelectedId(components[0]?.id ?? null);
+        setPhase("results");
         return;
       }
 
@@ -261,12 +331,9 @@ function InspectorApp() {
       setAnalysisId(result.analysisId);
       setTotalMs(result.totalMs);
       setHotspots(result.hotspots);
+      setReactComponents([]);
+      setReactSummary(null);
       setSelectedId(result.hotspots[0]?.id ?? null);
-      setPrompts({});
-      setPromptUsages({});
-      setAnalyzerUsage(result.usage ?? null);
-      setPromptErrors({});
-      setCopied(false);
       setPhase("results");
     } catch (err) {
       setError(errorMessageFrom(err));
@@ -338,7 +405,12 @@ function InspectorApp() {
     setError(null);
     setErrorDetail(null);
     setAnalysisId(null);
+    setAnalyzedType("javascript");
     setHotspots([]);
+    setReactComponents([]);
+    setReactSummary(null);
+    setReactIssues([]);
+    setReactReasoning("");
     setSelectedId(null);
     setPrompts({});
     setPromptUsages({});
@@ -349,8 +421,12 @@ function InspectorApp() {
   };
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
+  const selectedReact = reactComponents.find((component) => component.id === selectedId);
   const selectedPromptUsage = selected ? promptUsages[selected.id] : undefined;
   const maxPercent = hotspots.length > 0 ? Math.max(...hotspots.map((hotspot) => hotspot.percentOfTotal)) : 0;
+  const maxReactAvg = reactComponents.length > 0
+    ? Math.max(...reactComponents.map((component) => component.avgActualDurationMs))
+    : 0;
 
   return (
     <PluginShell>
@@ -388,14 +464,14 @@ function InspectorApp() {
               <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
                 <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
-                <Badge tone="neutral" variant="soft">coming soon</Badge>
+                <span className="radio-indicator" />
               </button>
             </div>
 
             <section className="upload-section" aria-live="polite">
               <div className="section-heading">
-                <div><span className="step-number">2</span><h2>Add profile file</h2></div>
-                <p>One file required</p>
+                <div><h2>Add a profile</h2></div>
+                <p>required</p>
               </div>
 
               <div className="upload-grid single">
@@ -405,6 +481,16 @@ function InspectorApp() {
                   <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
                 )}
               </div>
+
+              {profileType === "react" && (
+                <div className="react-budget-field">
+                  <label htmlFor="react-frame-budget">Commit budget (ms)</label>
+                  <input id="react-frame-budget" type="number" step="any" value={frameBudget}
+                    aria-invalid={!validBudget} aria-describedby="react-budget-help"
+                    onChange={event => setFrameBudget(event.target.value)} />
+                  <p id="react-budget-help">Defaults to 16 ms. Use a lower budget, such as 8.33 ms, for a higher refresh-rate target.</p>
+                </div>
+              )}
 
               <div className="key-field">
                 <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
@@ -430,9 +516,7 @@ function InspectorApp() {
             )}
 
             <div className="action-row">
-              <p>{profileType === "javascript"
-                ? "Your profile stays on this device and is analyzed locally."
-                : "React component profile analysis is coming soon — pick the JavaScript CPU profile to analyze now."}</p>
+              <p>Your profile stays on this device and is analyzed locally.</p>
               <Button size="lg" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
@@ -450,7 +534,119 @@ function InspectorApp() {
           </>
         )}
 
-        {phase === "results" && (
+        {phase === "results" && analyzedType === "react" && (
+          <>
+            <div className="results-header">
+              <div className="intro">
+                <span className="eyebrow">Analysis results</span>
+                <h1 className="results-title">{reactIssues.length} React issue{reactIssues.length === 1 ? "" : "s"} found</h1>
+                <p>
+                  {appliedBudget} ms budget
+                  {reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : ""}
+                </p>
+                {analyzerUsage && (
+                  <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
+                    analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
+                  </p>
+                )}
+              </div>
+              <Button tone="primary" variant="outline" onClick={resetToUpload}>New analysis</Button>
+            </div>
+
+            <section className="react-issues" aria-label="React issues">
+              {reactIssues.length === 0 && <h2>No significant React issues found in this recording</h2>}
+              {reactIssues.length > 0 && <p className="details-summary">{reactReasoning}</p>}
+              {reactIssues.length > 0 && reactSummary && reactSummary.omittedEvidenceCommitCount > 0 && (
+                <p className="grouping-note">Detailed analysis used the 50 slowest commits; {reactSummary.omittedEvidenceCommitCount} other commits are included in the summary measurements.</p>
+              )}
+              {reactIssues.map(issue => (
+                <article key={issue.id} className="details-panel">
+                  <div className="details-heading">
+                    <h2>{issue.summary}</h2>
+                    <span className="react-severity">{issue.severity} severity</span>
+                  </div>
+                  {issue.component && <p><strong>{issue.component}</strong> · {issue.componentId}</p>}
+                  <p className="details-summary">{issue.evidence}</p>
+                  <ul className="react-commit-list">
+                    {issue.commits.map(commit => <li key={`${commit.rootID}:${commit.commitIndex}`} title={`React root ${commit.rootID}`}>
+                      Commit {commit.commitIndex + 1}: {commit.durationMs} ms at {commit.timestampMs} ms
+                    </li>)}
+                  </ul>
+                  <div className="details-block"><h3>Suggested fix to verify</h3><p>{issue.suggestedFix}</p></div>
+                </article>
+              ))}
+            </section>
+
+            <details className="react-ranking">
+              <summary>Inspect raw component ranking ({reactComponents.length})</summary>
+              <p className="grouping-note">Components ranked by average inclusive render time. These measurements are not an issue list.</p>
+              {reactSummary && <p className="grouping-note">{formatMs(reactSummary.totalCommitRenderDurationMs)} total commit render time{reactSummary.omittedCount > 0 ? ` · ${reactSummary.omittedCount} more components matched the ranking filters` : ""}</p>}
+              {reactComponents.length === 0 && <p>No components matched the ranking filters.</p>}
+            <p className="grouping-note">Inclusive duration includes descendants and overlaps across ancestors. Ranking uses average inclusive render time, not CPU samples.</p>
+            <div className="hotspot-list">
+              {reactComponents.map((component, index) => (
+                <button
+                  key={component.id}
+                  type="button"
+                  className={`hotspot-card${selectedId === component.id ? " selected" : ""}`}
+                  aria-pressed={selectedId === component.id}
+                  onClick={() => selectHotspot(component.id)}
+                >
+                  <span className="hotspot-rank">{index + 1}</span>
+                  <span className="hotspot-main">
+                    <span className="hotspot-top">
+                      <strong>{component.displayName}{component.key ? ` · ${component.key}` : ""}</strong>
+                      <span className="hotspot-time">{formatMs(component.avgActualDurationMs)} avg</span>
+                    </span>
+                    <span className="hotspot-bar" aria-hidden="true">
+                      <span style={{ width: `${maxReactAvg > 0 ? Math.max(4, (component.avgActualDurationMs / maxReactAvg) * 100) : 0}%` }} />
+                    </span>
+                    <span className="function-breakdown">
+                      <span className="function-heading">
+                        {component.renderCount} render{component.renderCount === 1 ? "" : "s"} · max {formatMs(component.maxActualDurationMs)}
+                        {component.avgSelfDurationMs === null ? " · self time unavailable" : ` · ${formatMs(component.avgSelfDurationMs)} avg self`}
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {selectedReact && (
+              <section className="details-panel" aria-live="polite">
+                <div className="details-heading">
+                  <div>
+                    <span className="eyebrow">Component details</span>
+                    <h2>{selectedReact.displayName}</h2>
+                  </div>
+                  <div className="details-metrics">
+                    <div>
+                      <small>Avg inclusive</small>
+                      <strong>{formatMs(selectedReact.avgActualDurationMs)}</strong>
+                    </div>
+                    <div>
+                      <small>Max inclusive</small>
+                      <strong>{formatMs(selectedReact.maxActualDurationMs)}</strong>
+                    </div>
+                    <div>
+                      <small>Renders</small>
+                      <strong>{selectedReact.renderCount}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedReact.metadataMissing && (
+                  <p className="details-summary">Component metadata was missing from this export; the display name is a fallback.</p>
+                )}
+
+
+              </section>
+            )}
+            </details>
+          </>
+        )}
+
+        {phase === "results" && analyzedType === "javascript" && (
           <>
             <div className="results-header">
               <div className="intro">

@@ -1,0 +1,413 @@
+diff --git a/node_modules/agent-react-devtools/dist/cli.js b/node_modules/agent-react-devtools/dist/cli.js
+index e9d64e0..dd61b7f 100755
+--- a/node_modules/agent-react-devtools/dist/cli.js
++++ b/node_modules/agent-react-devtools/dist/cli.js
+@@ -551,6 +551,8 @@ Profiling:
+   profile stop                  Stop profiling, collect data
+   profile report <@c1 | id>    Render report for component
+   profile slow [--limit N]      Slowest components (by avg)
++  profile slow --file <profile.json> [--json] [--limit N] [--root-id N]
++               [--component-name TEXT] [--min-avg-duration MS] [--analysis-evidence]  Offline slow components
+   profile rerenders [--limit N] Most re-rendered components
+   profile timeline [--limit N]  Commit timeline
+   profile commit <N | #N> [--limit N]  Detail for specific commit
+@@ -603,6 +605,18 @@ async function main() {
+   }
+   const cmd0 = command[0];
+   const cmd1 = command[1];
++  // File analysis is deliberately handled before any daemon interaction.
++  if (cmd0 === "profile" && cmd1 === "slow" &&
++      ["file", "json", "root-id", "component-name", "min-avg-duration", "analysis-evidence"].some(key => key in flags)) {
++    try {
++      const { runOfflineSlow } = await import("./profile-offline.js");
++      runOfflineSlow(command, flags);
++    } catch (error) {
++      console.error(error instanceof Error ? error.message : String(error));
++      process.exitCode = error?.code === "INVALID_PROFILE" ? 2 : 1;
++    }
++    return;
++  }
+   try {
+     if (cmd0 === "init") {
+       const { runInit } = await import("./init-TDSG2Z3U.js");
+diff --git a/node_modules/agent-react-devtools/dist/profile-offline-LICENSE.txt b/node_modules/agent-react-devtools/dist/profile-offline-LICENSE.txt
+new file mode 100644
+index 0000000..b93be90
+--- /dev/null
++++ b/node_modules/agent-react-devtools/dist/profile-offline-LICENSE.txt
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) Meta Platforms, Inc. and affiliates.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/node_modules/agent-react-devtools/dist/profile-offline.js b/node_modules/agent-react-devtools/dist/profile-offline.js
+new file mode 100644
+index 0000000..eae7760
+--- /dev/null
++++ b/node_modules/agent-react-devtools/dist/profile-offline.js
+@@ -0,0 +1,348 @@
++// Local offline extension for agent-react-devtools 0.4.0 (MIT).
++// Tree wire format follows Meta's MIT-licensed CommitTreeBuilder.js at React v19.1.0:
++// https://github.com/facebook/react/blob/v19.1.0/packages/react-devtools-shared/src/devtools/views/Profiler/CommitTreeBuilder.js
++// Copyright (c) Meta Platforms, Inc. and affiliates. See profile-offline-LICENSE.txt.
++import { loadExportFile } from './profile-diff-EQGS3CDL.js';
++
++function invalid(message) {
++  const error = new Error(message);
++  error.code = 'INVALID_PROFILE';
++  throw error;
++}
++const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
++const idNumber = value => Number.isSafeInteger(value) && value >= 0;
++const duration = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
++const text = value => value === null || typeof value === 'string';
++const elementTypes = new Set([1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
++function pairs(value, check, label) {
++  if (!Array.isArray(value)) invalid(`Invalid profile: ${label} must be an array`);
++  const result = new Map();
++  for (const pair of value) {
++    if (!Array.isArray(pair) || pair.length !== 2 || !idNumber(pair[0]) || !check(pair[1]) || result.has(pair[0])) {
++      invalid(`Invalid profile: malformed or duplicate ${label} entry`);
++    }
++    result.set(...pair);
++  }
++  return result;
++}
++// Match the pinned DevTools display-name formatting for newly mounted fibers.
++function displayNameFromBackend(name, type) {
++  if (name === null) return null;
++  while (name.startsWith('Forget(')) name = name.slice(7, -1);
++  if ([1, 5, 6, 8, 15].includes(type) && name.includes('(')) {
++    const matches = name.match(/[^()]+/g);
++    if (matches) name = matches[matches.length - 1];
++  }
++  return name;
++}
++function initialNodes(root) {
++  const nodes = pairs(root.snapshots, node => object(node) && idNumber(node.id)
++    && elementTypes.has(node.type) && text(node.displayName) && text(node.key)
++    && Array.isArray(node.children) && node.children.every(idNumber), 'snapshots');
++  for (const [id, node] of nodes) {
++    if (id !== node.id) invalid('Invalid profile: snapshot ID mismatch');
++    nodes.set(id, { ...node, children: [...node.children], parentID: null });
++  }
++  for (const node of nodes.values()) {
++    if (new Set(node.children).size !== node.children.length) invalid('Invalid profile: duplicate children');
++    for (const child of node.children) {
++      const childNode = nodes.get(child);
++      if (childNode) {
++        if (childNode.parentID !== null || child === root.rootID) invalid('Invalid profile: invalid parent relationship');
++        childNode.parentID = node.id;
++      }
++    }
++  }
++  // Linear-time cycle validation, including disconnected snapshots.
++  const visited = new Set();
++  for (const id of nodes.keys()) {
++    const path = new Set();
++    let current = id;
++    while (nodes.has(current) && !visited.has(current)) {
++      if (path.has(current)) invalid('Invalid profile: cyclic snapshots');
++      path.add(current);
++      current = nodes.get(current).parentID;
++    }
++    for (const item of path) visited.add(item);
++  }
++  return nodes;
++}
++
++// Replay only the pinned wire encoding. Never skip unknown opcodes: the next
++// integer could be payload, producing silently incorrect component identities.
++function replay(nodes, operations, rootID) {
++  const fail = () => invalid('Unsupported or malformed tree operations (expected React v19.1.0 DevTools encoding)');
++  if (!Array.isArray(operations)) fail();
++  if (operations.length === 0) return; // agent-react-devtools exports may use empty commits.
++  let i = 0;
++  function take() {
++    const value = operations[i++];
++    if (!idNumber(value)) fail();
++    return value;
++  }
++  take(); // rendererID
++  if (take() !== rootID) fail();
++  const tableEnd = take() + i;
++  if (tableEnd > operations.length) fail();
++  const strings = [null];
++  while (i < tableEnd) {
++    const length = take();
++    if (i + length > tableEnd) fail();
++    let value = '';
++    for (let end = i + length; i < end;) {
++      const point = take();
++      if (point > 0x10ffff) fail();
++      value += String.fromCodePoint(point);
++    }
++    strings.push(value);
++  }
++  function stringRef() {
++    const id = take();
++    if (id >= strings.length) fail();
++    return strings[id];
++  }
++  function existing(id) { if (!nodes.has(id)) fail(); return nodes.get(id); }
++  while (i < operations.length) {
++    const op = take();
++    switch (op) {
++      case 1: {
++        const id = take(), type = take();
++        if (nodes.has(id) || !elementTypes.has(type)) fail();
++        let parentID = null, displayName = null, key = null;
++        if (type === 11) {
++          if (id !== rootID) fail();
++          take(); take(); take(); take();
++        } else {
++          parentID = take(); take(); // ownerID
++          displayName = displayNameFromBackend(stringRef(), type); key = stringRef();
++          existing(parentID).children.push(id);
++        }
++        nodes.set(id, { id, type, parentID, displayName, key, children: [] });
++        break;
++      }
++      case 2: {
++        const count = take();
++        if (count > operations.length - i) fail();
++        for (let j = 0; j < count; j++) {
++          const id = take(), node = existing(id);
++          const parent = nodes.get(node.parentID);
++          if (parent) parent.children = parent.children.filter(child => child !== id);
++          nodes.delete(id);
++        }
++        break;
++      }
++      case 3: {
++        const node = existing(take()), count = take(), children = [];
++        if (count !== node.children.length || count > operations.length - i) fail();
++        for (let j = 0; j < count; j++) {
++          const child = take();
++          if (existing(child).parentID !== node.id) fail();
++          children.push(child);
++        }
++        if (new Set(children).size !== count) fail();
++        node.children = children;
++        break;
++      }
++      case 4: // base duration in integer microseconds
++      case 7: // subtree mode
++        existing(take()); take(); break;
++      case 5: // errors and warnings
++        existing(take()); take(); take(); break;
++      default: fail();
++    }
++  }
++}
++
++// Evidence selection follows ai-harness trace-evidence, using this decoder's identities.
++function changeEvidence(value) {
++  if (value == null) return { causes: ['unknown'], changedProps: [], changedHooks: [], stateChanged: null };
++  if (!object(value)) invalid('Invalid profile: malformed change description');
++  for (const key of ['isFirstMount', 'context', 'didHooksChange']) {
++    if (value[key] != null && typeof value[key] !== 'boolean') invalid('Invalid profile: malformed change flag');
++  }
++  for (const key of ['props', 'hooks']) {
++    if (value[key] != null && (!Array.isArray(value[key]) || !value[key].every(v => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))))) invalid('Invalid profile: malformed changed fields');
++  }
++  const causes = [];
++  if (value.isFirstMount) causes.push('first-mount');
++  if (value.context) causes.push('context-changed');
++  if (value.props?.length) causes.push('props-changed');
++  if (value.state != null) causes.push('state-changed');
++  if (value.didHooksChange || value.hooks?.length) causes.push('hooks-changed');
++  return { causes: causes.length ? causes : ['unknown'],
++    changedProps: (value.props ?? []).slice(0, 20).map(v => String(v).slice(0, 200)),
++    changedHooks: (value.hooks ?? []).slice(0, 20).map(v => String(v).slice(0, 200)),
++    stateChanged: value.state != null ? true : null };
++}
++const commitOrder = (a, b) => b.durationMs - a.durationMs || a.rootID - b.rootID || a.commitIndex - b.commitIndex;
++const componentOrder = (a, b) => a.rootID - b.rootID || a.fiberID - b.fiberID;
++const boundedComponent = entry => ({ ...entry, displayName: entry.displayName.slice(0, 200), key: entry.key?.slice(0, 200) ?? null });
++
++export function extractOfflineProfile(data, options, analysisEvidence = false) {
++  if (!object(data) || data.version !== 5 || !Array.isArray(data.dataForRoots)) invalid('Invalid profile: expected React DevTools export version 5');
++  const all = [], roots = new Set();
++  let commitCount = 0, totalCommitRenderDurationMs = 0;
++  const evidenceCommits = [], evidenceComponents = [];
++  let evidenceCommitCount = 0, evidenceTotal = 0, evidencePeak = null, evidenceRootCount = 0;
++  const commitDurations = [];
++  for (const root of data.dataForRoots) {
++    if (!object(root) || !idNumber(root.rootID) || roots.has(root.rootID)
++        || !Array.isArray(root.commitData) || !Array.isArray(root.operations)
++        || root.operations.length !== root.commitData.length) invalid('Invalid profile: malformed root or mismatched commit operations');
++    roots.add(root.rootID);
++    pairs(root.initialTreeBaseDurations, duration, 'initialTreeBaseDurations');
++    const nodes = initialNodes(root), stats = new Map(), recordedChanges = new Map();
++    const scoped = analysisEvidence && (options.rootID === null || options.rootID === root.rootID);
++    if (scoped) evidenceRootCount++;
++    for (let commitIndex = 0; commitIndex < root.commitData.length; commitIndex++) {
++      const commit = root.commitData[commitIndex];
++      if (!object(commit) || !duration(commit.duration) || !duration(commit.timestamp)) invalid('Invalid profile: malformed commit');
++      const actual = pairs(commit.fiberActualDurations, duration, 'fiberActualDurations');
++      const self = pairs(commit.fiberSelfDurations, duration, 'fiberSelfDurations');
++      if ([...self.keys()].some(id => !actual.has(id))) invalid('Invalid profile: self duration without a rendered fiber');
++      replay(nodes, root.operations[commitIndex], root.rootID);
++      commitCount++;
++      totalCommitRenderDurationMs += commit.duration;
++      const changes = scoped && commit.changeDescriptions != null
++        ? pairs(commit.changeDescriptions, object, 'changeDescriptions') : new Map();
++      for (const [fiberID, ms] of actual) {
++        const node = nodes.get(fiberID);
++        if (fiberID === root.rootID || node?.type === 11 || node?.type === 7) continue;
++        let entry = stats.get(fiberID);
++        if (!entry) {
++          entry = {
++            id: `${root.rootID}:${fiberID}`, rootID: root.rootID, fiberID,
++            displayName: node?.displayName || `Component#${fiberID}`,
++            metadataMissing: !node?.displayName, elementType: node?.type ?? null,
++            key: node?.key ?? null, renderCount: 0,
++            totalActualDurationMs: 0, avgActualDurationMs: 0, maxActualDurationMs: 0,
++            selfRenderCount: 0, totalSelfDurationMs: null, avgSelfDurationMs: null, maxSelfDurationMs: null,
++            peakCommit: { rootID: root.rootID, commitIndex, timestampMs: commit.timestamp }
++          };
++          stats.set(fiberID, entry);
++        }
++        if (node?.displayName && entry.metadataMissing) {
++          entry.displayName = node.displayName; entry.metadataMissing = false;
++          entry.elementType = node.type; entry.key = node.key;
++        }
++        if (scoped) {
++          const change = changeEvidence(changes.get(fiberID));
++          const previous = recordedChanges.get(fiberID);
++          recordedChanges.set(fiberID, previous ? {
++            causes: [...new Set([...previous.causes, ...change.causes])],
++            changedProps: [...new Set([...previous.changedProps, ...change.changedProps])].slice(0, 20),
++            changedHooks: [...new Set([...previous.changedHooks, ...change.changedHooks])].slice(0, 20),
++            stateChanged: previous.stateChanged || change.stateChanged || null,
++          } : change);
++        }
++        entry.renderCount++;
++        entry.totalActualDurationMs += ms;
++        if (ms > entry.maxActualDurationMs) {
++          entry.maxActualDurationMs = ms;
++          entry.peakCommit = { rootID: root.rootID, commitIndex, timestampMs: commit.timestamp };
++        }
++        if (self.has(fiberID)) {
++          const selfMs = self.get(fiberID);
++          entry.selfRenderCount++;
++          entry.totalSelfDurationMs = (entry.totalSelfDurationMs ?? 0) + selfMs;
++          entry.maxSelfDurationMs = Math.max(entry.maxSelfDurationMs ?? 0, selfMs);
++        }
++      }
++      if (scoped) {
++        evidenceCommitCount++;
++        evidenceTotal += commit.duration;
++        evidencePeak = Math.max(evidencePeak ?? 0, commit.duration);
++        commitDurations.push(commit.duration);
++        const rendered = [...actual].filter(([id]) => stats.has(id)).map(([fiberID, durationMs]) => ({
++          id: `${root.rootID}:${fiberID}`, rootID: root.rootID, fiberID,
++          displayName: stats.get(fiberID).displayName.slice(0, 200),
++          durationMs, selfDurationMs: self.get(fiberID) ?? null,
++          ...changeEvidence(changes.get(fiberID)),
++        })).sort((a, b) => (b.selfDurationMs ?? -1) - (a.selfDurationMs ?? -1)
++          || b.durationMs - a.durationMs || a.fiberID - b.fiberID);
++        if (commit.updaters != null && (!Array.isArray(commit.updaters) || !commit.updaters.every(u => object(u) && (u.displayName == null || typeof u.displayName === 'string')))) invalid('Invalid profile: malformed updaters');
++        evidenceCommits.push({ rootID: root.rootID, commitIndex, timestampMs: commit.timestamp, durationMs: commit.duration,
++          components: rendered.slice(0, 10), omittedComponentCount: Math.max(0, rendered.length - 10),
++          updaters: (commit.updaters ?? []).slice(0, 20).map(u => (u.displayName || 'Unknown').slice(0, 200)),
++          omittedUpdaterCount: Math.max(0, (commit.updaters?.length ?? 0) - 20),
++        });
++        evidenceCommits.sort(commitOrder);
++        if (evidenceCommits.length > 50) evidenceCommits.pop();
++      }
++    }
++    for (const entry of stats.values()) {
++      entry.avgActualDurationMs = entry.totalActualDurationMs / entry.renderCount;
++      // Partial self data does not imply zero for the missing commits.
++      if (entry.selfRenderCount === entry.renderCount) {
++        entry.avgSelfDurationMs = entry.totalSelfDurationMs / entry.renderCount;
++      } else {
++        entry.totalSelfDurationMs = entry.avgSelfDurationMs = entry.maxSelfDurationMs = null;
++      }
++      if (!duration(entry.totalActualDurationMs)) invalid('Invalid profile: duration overflow');
++      if (entry.totalSelfDurationMs !== null && !duration(entry.totalSelfDurationMs)) invalid('Invalid profile: self duration overflow');
++      all.push(entry);
++      if (scoped) evidenceComponents.push({ ...boundedComponent(entry), ...recordedChanges.get(entry.fiberID) });
++    }
++  }
++  if (!duration(totalCommitRenderDurationMs)) invalid('Invalid profile: duration overflow');
++  const matches = all.filter(entry => entry.avgActualDurationMs > 0
++    && entry.avgActualDurationMs >= options.minAvgDurationMs
++    && (options.rootID === null || entry.rootID === options.rootID)
++    && (options.componentName === null || entry.displayName.toLowerCase().includes(options.componentName.toLowerCase())));
++  matches.sort((a, b) => b.avgActualDurationMs - a.avgActualDurationMs
++    || b.maxActualDurationMs - a.maxActualDurationMs || a.rootID - b.rootID || a.fiberID - b.fiberID);
++  const evidence = analysisEvidence ? {
++    evidenceVersion: 1,
++    summary: { rootCount: evidenceRootCount, commitCount: evidenceCommitCount,
++      totalCommitRenderDurationMs: evidenceTotal, peakCommitDurationMs: evidencePeak },
++    // All timings stay unrounded, including the compact list used for configurable budgets.
++    commitDurations,
++    commits: evidenceCommits, omittedCommitCount: Math.max(0, evidenceCommitCount - 50),
++    slowestComponentsByAverageDuration: [...evidenceComponents].sort((a, b) => b.avgActualDurationMs - a.avgActualDurationMs || componentOrder(a, b)).slice(0, 15),
++    componentsByRenderCount: [...evidenceComponents].sort((a, b) => b.renderCount - a.renderCount || b.totalActualDurationMs - a.totalActualDurationMs || componentOrder(a, b)).slice(0, 15),
++    componentsByTotalSelfDuration: [...evidenceComponents].sort((a, b) => (b.totalSelfDurationMs ?? -1) - (a.totalSelfDurationMs ?? -1) || componentOrder(a, b)).slice(0, 15),
++    omittedAggregateComponentCount: Math.max(0, evidenceComponents.length - 15),
++  } : undefined;
++  if (analysisEvidence && !duration(evidenceTotal)) invalid('Invalid profile: evidence duration overflow');
++  return {
++    ...(analysisEvidence ? { evidence } : {}),
++    schemaVersion: 1, profileType: 'react', ranking: 'avgActualDurationMs', filters: options,
++    summary: { rootCount: roots.size, commitCount, totalCommitRenderDurationMs,
++      candidateCount: all.length, matchingCount: matches.length, omittedCount: Math.max(0, matches.length - options.limit) },
++    components: matches.slice(0, options.limit)
++  };
++}
++
++export function runOfflineSlow(command, flags) {
++  const allowed = new Set(['file', 'json', 'limit', 'root-id', 'component-name', 'min-avg-duration', 'state-dir', 'analysis-evidence']);
++  if (command.length !== 2 || Object.keys(flags).some(key => !allowed.has(key))) invalid('Invalid offline profile slow arguments');
++  if (typeof flags.file !== 'string' || !flags.file) invalid('--file requires a React DevTools JSON path');
++  if ('json' in flags && flags.json !== true) invalid('--json does not accept a value');
++  function numberFlag(name, fallback, max = Number.MAX_SAFE_INTEGER, integer = true) {
++    if (!(name in flags)) return fallback;
++    const raw = flags[name], value = typeof raw === 'string' && raw.trim() ? Number(raw) : NaN;
++    if (!duration(value) || value > max || (integer && !Number.isSafeInteger(value))) invalid(`Invalid --${name}`);
++    return value;
++  }
++  const options = {
++    limit: numberFlag('limit', 10, 100), rootID: numberFlag('root-id', null),
++    componentName: flags['component-name'] ?? null,
++    minAvgDurationMs: numberFlag('min-avg-duration', 0, Number.MAX_VALUE, false)
++  };
++  if (options.limit < 1) invalid('--limit must be between 1 and 100');
++  if (options.componentName !== null && (typeof options.componentName !== 'string' || !options.componentName.trim())) invalid('--component-name requires nonempty text');
++  let data;
++  try { data = loadExportFile(flags.file); }
++  catch (error) {
++    if (error instanceof SyntaxError || error instanceof TypeError || ['ENOENT', 'EISDIR', 'EACCES'].includes(error.code)
++        || /^(Unsupported export version|Invalid export file)/.test(error.message)) invalid(`Cannot read profile: ${error.message}`);
++    throw error;
++  }
++  if ('analysis-evidence' in flags && flags['analysis-evidence'] !== true) invalid('--analysis-evidence does not accept a value');
++  const result = extractOfflineProfile(data, options, flags['analysis-evidence'] === true);
++  if (flags.json) console.log(JSON.stringify(result));
++  else {
++    console.log(`Slowest components by average inclusive render duration (${result.components.length}/${result.summary.matchingCount})`);
++    for (const item of result.components) console.log(`${item.id} ${JSON.stringify(item.displayName)}: avg ${item.avgActualDurationMs.toFixed(2)} ms, max ${item.maxActualDurationMs.toFixed(2)} ms, ${item.renderCount} renders`);
++  }
++}

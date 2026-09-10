@@ -1,0 +1,338 @@
+{
+  "version": 5,
+  "dataForRoots": [
+    {
+      "rootID": 1,
+      "displayName": "App",
+      "initialTreeBaseDurations": [
+        [
+          1,
+          30
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          3,
+          8
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          7,
+          9
+        ]
+      ],
+      "snapshots": [
+        [
+          1,
+          {
+            "id": 1,
+            "displayName": null,
+            "children": [
+              2,
+              3,
+              4,
+              7
+            ],
+            "type": 11,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ],
+        [
+          2,
+          {
+            "id": 2,
+            "displayName": "Row",
+            "children": [],
+            "type": 5,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ],
+        [
+          3,
+          {
+            "id": 3,
+            "displayName": "Row",
+            "children": [],
+            "type": 5,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ],
+        [
+          4,
+          {
+            "id": 4,
+            "displayName": "Idle",
+            "children": [],
+            "type": 5,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ],
+        [
+          7,
+          {
+            "id": 7,
+            "displayName": "View",
+            "children": [],
+            "type": 7,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ]
+      ],
+      "commitData": [
+        {
+          "duration": 30,
+          "timestamp": 0,
+          "fiberActualDurations": [
+            [
+              1,
+              30
+            ],
+            [
+              2,
+              20
+            ],
+            [
+              3,
+              8
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              7,
+              9
+            ]
+          ],
+          "fiberSelfDurations": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              4
+            ],
+            [
+              3,
+              8
+            ],
+            [
+              4,
+              0
+            ],
+            [
+              7,
+              9
+            ]
+          ],
+          "changeDescriptions": null,
+          "effectDuration": null,
+          "passiveEffectDuration": null,
+          "priority": null,
+          "updaters": null
+        },
+        {
+          "duration": 30,
+          "timestamp": 10,
+          "fiberActualDurations": [
+            [
+              2,
+              0
+            ],
+            [
+              3,
+              12
+            ],
+            [
+              5,
+              30
+            ]
+          ],
+          "fiberSelfDurations": [
+            [
+              2,
+              0
+            ],
+            [
+              5,
+              25
+            ]
+          ],
+          "changeDescriptions": null,
+          "effectDuration": null,
+          "passiveEffectDuration": null,
+          "priority": null,
+          "updaters": null
+        },
+        {
+          "duration": 10,
+          "timestamp": 20,
+          "fiberActualDurations": [
+            [
+              2,
+              10
+            ],
+            [
+              6,
+              9
+            ]
+          ],
+          "fiberSelfDurations": [
+            [
+              2,
+              2
+            ],
+            [
+              6,
+              5
+            ]
+          ],
+          "changeDescriptions": null,
+          "effectDuration": null,
+          "passiveEffectDuration": null,
+          "priority": null,
+          "updaters": null
+        }
+      ],
+      "operations": [
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          7,
+          6,
+          72,
+          235,
+          97,
+          118,
+          121,
+          129513,
+          1,
+          5,
+          5,
+          1,
+          0,
+          1,
+          0,
+          4,
+          5,
+          30000,
+          5,
+          5,
+          0,
+          0,
+          7,
+          5,
+          0
+        ],
+        [
+          1,
+          1,
+          0,
+          2,
+          1,
+          5,
+          3,
+          1,
+          4,
+          7,
+          4,
+          3,
+          2
+        ]
+      ]
+    },
+    {
+      "rootID": 10,
+      "displayName": "Modal",
+      "initialTreeBaseDurations": [
+        [
+          10,
+          40
+        ],
+        [
+          2,
+          40
+        ]
+      ],
+      "snapshots": [
+        [
+          10,
+          {
+            "id": 10,
+            "displayName": null,
+            "children": [
+              2
+            ],
+            "type": 11,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ],
+        [
+          2,
+          {
+            "id": 2,
+            "displayName": "Row",
+            "children": [],
+            "type": 5,
+            "key": null,
+            "hocDisplayNames": null,
+            "compiledWithForget": false
+          }
+        ]
+      ],
+      "commitData": [
+        {
+          "duration": 40,
+          "timestamp": 5,
+          "fiberActualDurations": [
+            [
+              2,
+              40
+            ]
+          ],
+          "fiberSelfDurations": [
+            [
+              2,
+              30
+            ]
+          ],
+          "changeDescriptions": null,
+          "effectDuration": null,
+          "passiveEffectDuration": null,
+          "priority": null,
+          "updaters": null
+        }
+      ],
+      "operations": [
+        [
+          1,
+          10,
+          0
+        ]
+      ]
+    }
+  ]
+}

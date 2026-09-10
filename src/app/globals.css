@@ -306,3 +306,13 @@ button, input { font: inherit; }
 
 .function-detail { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
 .function-detail summary { cursor: pointer; line-height: 1.5; }
+
+.react-budget-field { display: grid; gap: 8px; margin-top: 20px; }
+.react-budget-field label { font-weight: 600; }
+.react-budget-field input { width: 150px; border: 1px solid var(--border, #555); border-radius: 6px; padding: 8px 12px; background: transparent; color: inherit; }
+.react-budget-field p { font-size: 13px; opacity: .75; }
+.react-issues { margin-bottom: 28px; }
+.react-issues > h2 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
+.react-severity { font-size: 13px; text-transform: capitalize; white-space: nowrap; }
+.react-commit-list { margin: 12px 0; padding-left: 20px; list-style: disc; font-size: 13px; }
+.react-ranking > summary { cursor: pointer; font-weight: 600; padding: 16px 0; }
