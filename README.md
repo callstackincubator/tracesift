@@ -2,6 +2,8 @@
 
 Analyze JavaScript CPU profiles locally with OpenAI, Anthropic, or Callstack Apex.
 
+React DevTools exports can also be analyzed in the web UI or through `POST /api/analyze/react`. See [React profile analysis](docs/react-profile-cli.md) for usage, supported formats, and patch maintenance.
+
 ## CLI
 
 Once the package is published:
