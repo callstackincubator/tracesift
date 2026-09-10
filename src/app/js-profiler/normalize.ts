@@ -63,7 +63,13 @@ export function normalizeProfile(
     sampleTimestampsMs.push(cumulativeMs * sampleTimeScale);
   }
 
-  const timePerSampleMs = samples.length > 0 ? durationMs / samples.length : 0;
+  const sampleDurationsMs = samples.map((_, index) =>
+    totalRawSampleMs > 0
+      ? (rawSampleDeltasMs[index] ?? 0) * sampleTimeScale
+      : samples.length > 0
+        ? durationMs / samples.length
+        : 0
+  );
 
   // Frame registry keyed by identity (original position when symbolicated, otherwise bundle)
   const frameByKey = new Map<string, JsFrame>();
@@ -135,13 +141,18 @@ export function normalizeProfile(
 
   const selfCounts = new Map<string, number>();
   const totalCounts = new Map<string, number>();
+  const selfTimes = new Map<string, number>();
+  const totalTimes = new Map<string, number>();
 
-  for (const sampleNodeId of samples) {
+  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
+    const sampleNodeId = samples[sampleIndex];
     const leafNode = nodeById.get(sampleNodeId);
     if (!leafNode) continue;
+    const sampleDurationMs = sampleDurationsMs[sampleIndex];
 
     const lk = nodeKey(leafNode);
     selfCounts.set(lk, (selfCounts.get(lk) ?? 0) + 1);
+    selfTimes.set(lk, (selfTimes.get(lk) ?? 0) + sampleDurationMs);
 
     const ancestors = getAncestors(sampleNodeId);
     const seen = new Set<string>();
@@ -152,6 +163,7 @@ export function normalizeProfile(
       if (!seen.has(k)) {
         seen.add(k);
         totalCounts.set(k, (totalCounts.get(k) ?? 0) + 1);
+        totalTimes.set(k, (totalTimes.get(k) ?? 0) + sampleDurationMs);
       }
     }
   }
@@ -175,47 +187,52 @@ export function normalizeProfile(
       frameId: frame.frameId,
       selfSampleCount: selfCount,
       totalSampleCount: totalCount,
-      selfTimeMs: selfCount * timePerSampleMs,
-      totalTimeMs: totalCount * timePerSampleMs,
-      selfPercent: samples.length > 0 ? (selfCount / samples.length) * 100 : 0,
-      totalPercent: samples.length > 0 ? (totalCount / samples.length) * 100 : 0,
+      selfTimeMs: selfTimes.get(key) ?? 0,
+      totalTimeMs: totalTimes.get(key) ?? 0,
+      selfPercent: durationMs > 0 ? ((selfTimes.get(key) ?? 0) / durationMs) * 100 : 0,
+      totalPercent: durationMs > 0 ? ((totalTimes.get(key) ?? 0) / durationMs) * 100 : 0,
     });
 
     frameKeyToHotspotId.set(key, hotspotId);
   }
 
-  hotspots.sort((a, b) => b.selfSampleCount - a.selfSampleCount);
+  hotspots.sort((a, b) => b.selfTimeMs - a.selfTimeMs);
 
   const hotspotsById = new Map<string, JsHotspot>();
   for (const h of hotspots) hotspotsById.set(h.hotspotId, h);
 
   // Module rollups
-  const moduleSelf = new Map<string, number>();
-  const moduleTotal = new Map<string, number>();
+  const moduleSelfCounts = new Map<string, number>();
+  const moduleTotalCounts = new Map<string, number>();
+  const moduleSelfTimes = new Map<string, number>();
+  const moduleTotalTimes = new Map<string, number>();
 
   for (const [key, frame] of frameByKey.entries()) {
     if (NOISE_NAMES.has(frame.functionName)) continue;
-    const self = selfCounts.get(key) ?? 0;
-    const total = totalCounts.get(key) ?? 0;
-    if (self === 0 && total === 0) continue;
+    const selfCount = selfCounts.get(key) ?? 0;
+    const totalCount = totalCounts.get(key) ?? 0;
+    if (selfCount === 0 && totalCount === 0) continue;
     const mod = frame.moduleName;
-    moduleSelf.set(mod, (moduleSelf.get(mod) ?? 0) + self);
-    moduleTotal.set(mod, (moduleTotal.get(mod) ?? 0) + total);
+    moduleSelfCounts.set(mod, (moduleSelfCounts.get(mod) ?? 0) + selfCount);
+    moduleTotalCounts.set(mod, (moduleTotalCounts.get(mod) ?? 0) + totalCount);
+    moduleSelfTimes.set(mod, (moduleSelfTimes.get(mod) ?? 0) + (selfTimes.get(key) ?? 0));
+    moduleTotalTimes.set(mod, (moduleTotalTimes.get(mod) ?? 0) + (totalTimes.get(key) ?? 0));
   }
 
-  const modules: JsModuleRollup[] = [...moduleSelf.entries()].map(([mod, self]) => {
-    const total = moduleTotal.get(mod) ?? 0;
+  const modules: JsModuleRollup[] = [...moduleSelfCounts.entries()].map(([mod, selfCount]) => {
+    const totalCount = moduleTotalCounts.get(mod) ?? 0;
+    const selfTimeMs = moduleSelfTimes.get(mod) ?? 0;
     return {
       moduleName: mod,
-      selfSampleCount: self,
-      totalSampleCount: total,
-      selfTimeMs: self * timePerSampleMs,
-      totalTimeMs: total * timePerSampleMs,
-      selfPercent: samples.length > 0 ? (self / samples.length) * 100 : 0,
-      totalPercent: samples.length > 0 ? (total / samples.length) * 100 : 0,
+      selfSampleCount: selfCount,
+      totalSampleCount: totalCount,
+      selfTimeMs,
+      totalTimeMs: moduleTotalTimes.get(mod) ?? 0,
+      selfPercent: durationMs > 0 ? (selfTimeMs / durationMs) * 100 : 0,
+      totalPercent: durationMs > 0 ? ((moduleTotalTimes.get(mod) ?? 0) / durationMs) * 100 : 0,
     };
   });
-  modules.sort((a, b) => b.selfSampleCount - a.selfSampleCount);
+  modules.sort((a, b) => b.selfTimeMs - a.selfTimeMs);
 
   // Stack signatures
   const sigByKey = new Map<string, { frameIds: string[]; frames: string[]; count: number; timeMs: number }>();
@@ -238,7 +255,7 @@ export function normalizeProfile(
     if (frameIds.length === 0) continue;
 
     const sigKey = frameIds.join(">>>");
-    const timeDelta = (rawSampleDeltasMs[i] ?? 0) * sampleTimeScale;
+    const timeDelta = sampleDurationsMs[i];
     const existing = sigByKey.get(sigKey);
     if (existing) {
       existing.count++;
@@ -250,7 +267,7 @@ export function normalizeProfile(
 
   let stackCounter = 0;
   const stacks: JsStackSignature[] = [...sigByKey.values()]
-    .sort((a, b) => b.count - a.count)
+    .sort((a, b) => b.timeMs - a.timeMs)
     .slice(0, MAX_STACK_SIGNATURES)
     .map((sig) => ({
       stackId: `s${++stackCounter}`,
@@ -258,7 +275,7 @@ export function normalizeProfile(
       frames: sig.frames,
       sampleCount: sig.count,
       timeMs: sig.timeMs,
-      percent: samples.length > 0 ? (sig.count / samples.length) * 100 : 0,
+      percent: durationMs > 0 ? (sig.timeMs / durationMs) * 100 : 0,
     }));
 
   // Time buckets

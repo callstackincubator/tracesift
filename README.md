@@ -16,6 +16,8 @@ Setup clones and builds a pinned revision and offers model selection. Change you
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, manual testing, automated checks, and testing the managed CLI installation.
+
 ```sh
 npm ci
 node packages/cli/src/cli.js model

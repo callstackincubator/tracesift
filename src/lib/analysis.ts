@@ -33,7 +33,6 @@ export interface AnalysisRecord {
   createdAt: number;
   dir: string;
   totalMs: number;
-  hasSourceMap: boolean;
   hotspots: Hotspot[];
   /** hotspotId -> generated fix prompt (cached after the second agent run). */
   prompts: Record<string, string>;
@@ -44,7 +43,6 @@ export interface AnalysisRecord {
 }
 
 export const PROFILE_FILE_NAME = "profile.json";
-export const SOURCEMAP_FILE_NAME = "sourcemap.json";
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const RECORD_TTL_MS = 60 * 60 * 1000;
@@ -56,20 +54,12 @@ function baseDir(): string {
   return path.join(tmpdir(), "perf-ai-profiles");
 }
 
-export async function createAnalysisFiles(
-  profile: File,
-  sourceMap?: File
-): Promise<{ id: string; dir: string; hasSourceMap: boolean }> {
+export async function createAnalysisFiles(profile: File): Promise<{ id: string; dir: string }> {
   const id = randomUUID();
   const dir = path.join(baseDir(), id);
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, PROFILE_FILE_NAME), Buffer.from(await profile.arrayBuffer()));
-  let hasSourceMap = false;
-  if (sourceMap) {
-    await writeFile(path.join(dir, SOURCEMAP_FILE_NAME), Buffer.from(await sourceMap.arrayBuffer()));
-    hasSourceMap = true;
-  }
-  return { id, dir, hasSourceMap };
+  return { id, dir };
 }
 
 function pruneExpired(): void {
