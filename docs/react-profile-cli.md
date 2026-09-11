@@ -45,9 +45,9 @@ curl -X POST http://localhost:3000/api/analyze/react \
 
 Optional multipart fields are `limit` (1–12, default 10), `rootId`, `componentName` (1–200 characters), `minAvgDurationMs`, and `frameBudgetMs` (finite positive milliseconds, default 16). Maximum upload size is 25 MB.
 
-The response is `{ profileType: "react", summary, components, issues, noIssue, reasoning, frameBudgetMs, usage }`. `components` contains measured ranking data; it no longer receives mandatory `summary` and `suggestedFix` annotations. `issues` contains only selected findings, with `id`, `summary`, `severity`, `evidence`, required `componentId`/`component`, supporting `commits`, and `suggestedFix`. Commit references include server-resolved `rootID`, zero-based `commitIndex`, `timestampMs`, and `durationMs`. The UI displays commit numbers starting at one. Root-wide or unattributed commit observations belong in `reasoning`, not `issues`; an over-budget commit alone does not establish an actionable component finding. The server discards legacy issues without a component ID and recomputes `noIssue`.
+The response is `{ profileType: "react", analysisId, summary, issues, noIssue, reasoning, frameBudgetMs, usage }`. `analysisId` is set when `issues` is nonempty so the UI can generate a copy-paste debugging prompt; it is `null` for zero findings. The measured ranking is not returned. `issues` contains only selected findings, with `id`, `summary`, `severity`, `evidence`, required `componentId`/`component`, supporting `commits`, and `suggestedFix`. Commit references include server-resolved `rootID`, zero-based `commitIndex`, `timestampMs`, and `durationMs`. The UI displays commit numbers starting at one. Root-wide or unattributed commit observations belong in `reasoning`, not `issues`; an over-budget commit alone does not establish an actionable component finding. The server discards legacy issues without a component ID and recomputes `noIssue`.
 
-Analysis uses all commits in the selected root scope, independently of ranking limits, name filters, and minimum-average filters. Summary fields include scoped commit count, total render time, peak commit duration, `commitsOverBudget`, and `omittedEvidenceCommitCount`. Component matching and omitted counts describe the separate raw ranking.
+Analysis uses all commits in the selected root scope, independently of ranking limits, name filters, and minimum-average filters. Summary fields include scoped commit count, total render time, peak commit duration, `commitsOverBudget`, and `omittedEvidenceCommitCount`.
 
 ### Evidence and issue selection
 
@@ -61,7 +61,7 @@ An empty raw ranking is successful and does not prevent analysis. A root scope w
 
 The server uses `execFile`, argument arrays, a 30-second extraction timeout, an 8 MB analysis-output limit (the plain ranking wrapper retains its 1 MB default), and request cancellation. Uploads are removed after success or failure. The analyzer has no built-in file or shell tools and uses the configured provider when analysis is needed. HTTP errors include 400 invalid input, 413 oversized upload, 422 no commits, 499 cancellation, 502 invalid CLI/model output, and 504 extraction timeout; provider errors retain their status.
 
-The web UI shows issues first and keeps the measured ranking in an expandable inspection section. The numeric commit budget defaults to 16 ms; for example, enter 8.33 ms for a higher refresh-rate target. There is no interaction-description input. This endpoint does not persist fix-prompt records.
+The web UI shows selected issues and does not display the raw component ranking. Each issue includes the same Generate prompt control as the JavaScript profiler: `POST /api/react-issue-prompt` with `{ analysisId, issueId }` returns a copy-paste debugging prompt from the stored finding. Prompt records live in memory for up to one hour. The numeric commit budget defaults to 16 ms; for example, enter 8.33 ms for a higher refresh-rate target. There is no interaction-description input. Uploads are still removed after success or failure.
 
 ## Maintaining the patch
 

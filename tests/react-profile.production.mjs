@@ -33,7 +33,7 @@ test('production React endpoint resolves the patched CLI and reaches the model b
       const response = await fetch(`http://127.0.0.1:${port}/api/analyze/react`, { method: 'POST', body: form, signal: AbortSignal.timeout(15000) });
       const result = await response.json();
       assert.equal(response.status, expected, JSON.stringify(result) + logs);
-      if (expected === 200) { assert.deepEqual(result.components, []); assert.deepEqual(result.issues, []); assert.equal(result.noIssue, true); assert.equal(result.usage.totalTokens, 0); }
+      if (expected === 200) { assert.equal(result.components, undefined); assert.deepEqual(result.issues, []); assert.equal(result.noIssue, true); assert.equal(result.usage.totalTokens, 0); }
       if (expected === 503) assert.match(result.error, /Run perf-ai model/);
     }
   } finally {

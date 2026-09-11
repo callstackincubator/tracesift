@@ -26,18 +26,6 @@ interface AnalyzeResponse {
   usage?: TokenUsage;
 }
 
-interface ReactComponentResult {
-  id: string;
-  displayName: string;
-  key: string | null;
-  metadataMissing: boolean;
-  renderCount: number;
-  avgActualDurationMs: number;
-  maxActualDurationMs: number;
-  totalActualDurationMs: number;
-  avgSelfDurationMs: number | null;
-}
-
 interface ReactSummary {
   peakCommitDurationMs: number | null;
   commitsOverBudget: number;
@@ -45,8 +33,6 @@ interface ReactSummary {
   rootCount: number;
   commitCount: number;
   totalCommitRenderDurationMs: number;
-  matchingCount: number;
-  omittedCount: number;
 }
 
 interface TokenUsage {
@@ -97,6 +83,81 @@ function usageBreakdown(usage: TokenUsage): string {
 function errorMessageFrom(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return "Something went wrong. Try again.";
+}
+
+function DebuggingPromptSection({
+  id,
+  emptyLabel,
+  loadingLabel,
+  prompt,
+  usage,
+  loading,
+  error,
+  copied,
+  busy,
+  onGenerate,
+  onCopy,
+}: {
+  id: string;
+  emptyLabel: string;
+  loadingLabel: string;
+  prompt?: string;
+  usage?: TokenUsage;
+  loading: boolean;
+  error?: string;
+  copied: boolean;
+  busy: boolean;
+  onGenerate: (id: string) => void;
+  onCopy: (id: string) => void;
+}) {
+  return (
+    <div className="details-block prompt-block">
+      <div className="prompt-head">
+        <h3>Debugging prompt</h3>
+        <span className="prompt-head-actions">
+          {usage && (
+            <span className="usage-chip" title="Tokens consumed by the agent that generated this prompt">
+              {formatTokens(usage.totalTokens)} tokens · {usageBreakdown(usage)}
+            </span>
+          )}
+          <Button
+            size="sm"
+            disabled={!prompt}
+            onClick={() => void onCopy(id)}
+          >
+            {copied ? "Copied!" : "Copy prompt"}
+          </Button>
+        </span>
+      </div>
+
+      {loading ? (
+        <p className="prompt-loading">
+          <span className="spinner" aria-hidden="true" />
+          {loadingLabel}
+        </p>
+      ) : prompt ? (
+        <details className="prompt-details" open={false}>
+          <summary>View generated prompt</summary>
+          <pre className="prompt-box">{prompt}</pre>
+        </details>
+      ) : error ? (
+        <p className="prompt-error">
+          {error}
+          <Button size="sm" tone="danger" variant="outline" onClick={() => void onGenerate(id)}>Retry</Button>
+        </p>
+      ) : (
+        <div className="prompt-generate">
+          <p className="prompt-loading">{emptyLabel}</p>
+          <Button
+            disabled={busy}
+            onClick={() => void onGenerate(id)}
+          >
+            Generate prompt
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ProfileIcon({ type }: { type: ProfileType }) {
@@ -220,7 +281,6 @@ function InspectorApp() {
   const [analyzedType, setAnalyzedType] = useState<ProfileType>("javascript");
   const [totalMs, setTotalMs] = useState(0);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
-  const [reactComponents, setReactComponents] = useState<ReactComponentResult[]>([]);
   const [frameBudget, setFrameBudget] = useState("16");
   const [appliedBudget, setAppliedBudget] = useState(16);
   const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
@@ -233,7 +293,7 @@ function InspectorApp() {
   const [analyzerUsage, setAnalyzerUsage] = useState<TokenUsage | null>(null);
   const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
   const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const updateFile = (kind: UploadKind, file?: File) => {
     setFiles((current) => ({ ...current, [kind]: file }));
@@ -272,12 +332,11 @@ function InspectorApp() {
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
         detail?: string;
-        analysisId?: string;
+        analysisId?: string | null;
         totalMs?: number;
         hotspots?: Hotspot[];
         usage?: TokenUsage;
         summary?: ReactSummary;
-        components?: ReactComponentResult[];
         issues?: ReactIssue[];
         noIssue?: boolean;
         reasoning?: string;
@@ -294,25 +353,28 @@ function InspectorApp() {
       setPromptUsages({});
       setAnalyzerUsage(data.usage ?? null);
       setPromptErrors({});
-      setCopied(false);
+      setCopiedId(null);
       setAnalyzedType(profileType);
 
       if (profileType === "react") {
-        const components = data.components ?? [];
         if (!Array.isArray(data.issues) || (data.issues.length > 0 && typeof data.reasoning !== "string") || data.noIssue !== (data.issues.length === 0)) {
           setError("The server did not return a valid React issue report. Check the dev server logs.");
           setPhase("upload");
           return;
         }
-        setAnalysisId(null);
+        if (data.issues.length > 0 && !data.analysisId) {
+          setError("The server did not return an analysis id. Check the dev server logs.");
+          setPhase("upload");
+          return;
+        }
+        setAnalysisId(data.analysisId ?? null);
         setHotspots([]);
-        setReactComponents(components);
         setReactIssues(data.issues);
         setReactReasoning(data.issues.length > 0 ? data.reasoning ?? "" : "");
         setAppliedBudget(data.frameBudgetMs ?? Number(frameBudget));
         setReactSummary(data.summary ?? null);
         setTotalMs(data.summary?.totalCommitRenderDurationMs ?? 0);
-        setSelectedId(components[0]?.id ?? null);
+        setSelectedId(null);
         setPhase("results");
         return;
       }
@@ -331,7 +393,6 @@ function InspectorApp() {
       setAnalysisId(result.analysisId);
       setTotalMs(result.totalMs);
       setHotspots(result.hotspots);
-      setReactComponents([]);
       setReactSummary(null);
       setSelectedId(result.hotspots[0]?.id ?? null);
       setPhase("results");
@@ -344,7 +405,7 @@ function InspectorApp() {
 
   const selectHotspot = (id: string) => {
     setSelectedId(id);
-    setCopied(false);
+    setCopiedId(null);
   };
 
   const generatePrompt = async (id: string) => {
@@ -356,13 +417,14 @@ function InspectorApp() {
       delete next[id];
       return next;
     });
-    setCopied(false);
+    setCopiedId(null);
     setPromptLoadingId(id);
     try {
-      const response = await fetch("/api/hotspot-prompt", {
+      const isReact = analyzedType === "react";
+      const response = await fetch(isReact ? "/api/react-issue-prompt" : "/api/hotspot-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysisId, hotspotId: id }),
+        body: JSON.stringify(isReact ? { analysisId, issueId: id } : { analysisId, hotspotId: id }),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string; prompt?: string; usage?: TokenUsage };
       if (!response.ok || !data.prompt) {
@@ -380,9 +442,8 @@ function InspectorApp() {
     }
   };
 
-  const copyPrompt = async () => {
-    if (!selectedId) return;
-    const text = prompts[selectedId];
+  const copyPrompt = async (id: string) => {
+    const text = prompts[id];
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -396,8 +457,8 @@ function InspectorApp() {
       document.execCommand("copy");
       document.body.removeChild(textarea);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
   };
 
   const resetToUpload = () => {
@@ -407,7 +468,6 @@ function InspectorApp() {
     setAnalysisId(null);
     setAnalyzedType("javascript");
     setHotspots([]);
-    setReactComponents([]);
     setReactSummary(null);
     setReactIssues([]);
     setReactReasoning("");
@@ -417,16 +477,12 @@ function InspectorApp() {
     setAnalyzerUsage(null);
     setPromptLoadingId(null);
     setPromptErrors({});
-    setCopied(false);
+    setCopiedId(null);
   };
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
-  const selectedReact = reactComponents.find((component) => component.id === selectedId);
   const selectedPromptUsage = selected ? promptUsages[selected.id] : undefined;
   const maxPercent = hotspots.length > 0 ? Math.max(...hotspots.map((hotspot) => hotspot.percentOfTotal)) : 0;
-  const maxReactAvg = reactComponents.length > 0
-    ? Math.max(...reactComponents.map((component) => component.avgActualDurationMs))
-    : 0;
 
   return (
     <PluginShell>
@@ -573,76 +629,22 @@ function InspectorApp() {
                     </li>)}
                   </ul>
                   <div className="details-block"><h3>Suggested fix to verify</h3><p>{issue.suggestedFix}</p></div>
+                  <DebuggingPromptSection
+                    id={issue.id}
+                    emptyLabel="No prompt generated for this issue yet."
+                    loadingLabel="Generating a prompt from the issue details…"
+                    prompt={prompts[issue.id]}
+                    usage={promptUsages[issue.id]}
+                    loading={promptLoadingId === issue.id}
+                    error={promptErrors[issue.id]}
+                    copied={copiedId === issue.id}
+                    busy={promptLoadingId !== null}
+                    onGenerate={(id) => void generatePrompt(id)}
+                    onCopy={(id) => void copyPrompt(id)}
+                  />
                 </article>
               ))}
             </section>
-
-            <details className="react-ranking">
-              <summary>Inspect raw component ranking ({reactComponents.length})</summary>
-              <p className="grouping-note">Components ranked by average inclusive render time. These measurements are not an issue list.</p>
-              {reactSummary && <p className="grouping-note">{formatMs(reactSummary.totalCommitRenderDurationMs)} total commit render time{reactSummary.omittedCount > 0 ? ` · ${reactSummary.omittedCount} more components matched the ranking filters` : ""}</p>}
-              {reactComponents.length === 0 && <p>No components matched the ranking filters.</p>}
-            <p className="grouping-note">Inclusive duration includes descendants and overlaps across ancestors. Ranking uses average inclusive render time, not CPU samples.</p>
-            <div className="hotspot-list">
-              {reactComponents.map((component, index) => (
-                <button
-                  key={component.id}
-                  type="button"
-                  className={`hotspot-card${selectedId === component.id ? " selected" : ""}`}
-                  aria-pressed={selectedId === component.id}
-                  onClick={() => selectHotspot(component.id)}
-                >
-                  <span className="hotspot-rank">{index + 1}</span>
-                  <span className="hotspot-main">
-                    <span className="hotspot-top">
-                      <strong>{component.displayName}{component.key ? ` · ${component.key}` : ""}</strong>
-                      <span className="hotspot-time">{formatMs(component.avgActualDurationMs)} avg</span>
-                    </span>
-                    <span className="hotspot-bar" aria-hidden="true">
-                      <span style={{ width: `${maxReactAvg > 0 ? Math.max(4, (component.avgActualDurationMs / maxReactAvg) * 100) : 0}%` }} />
-                    </span>
-                    <span className="function-breakdown">
-                      <span className="function-heading">
-                        {component.renderCount} render{component.renderCount === 1 ? "" : "s"} · max {formatMs(component.maxActualDurationMs)}
-                        {component.avgSelfDurationMs === null ? " · self time unavailable" : ` · ${formatMs(component.avgSelfDurationMs)} avg self`}
-                      </span>
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {selectedReact && (
-              <section className="details-panel" aria-live="polite">
-                <div className="details-heading">
-                  <div>
-                    <span className="eyebrow">Component details</span>
-                    <h2>{selectedReact.displayName}</h2>
-                  </div>
-                  <div className="details-metrics">
-                    <div>
-                      <small>Avg inclusive</small>
-                      <strong>{formatMs(selectedReact.avgActualDurationMs)}</strong>
-                    </div>
-                    <div>
-                      <small>Max inclusive</small>
-                      <strong>{formatMs(selectedReact.maxActualDurationMs)}</strong>
-                    </div>
-                    <div>
-                      <small>Renders</small>
-                      <strong>{selectedReact.renderCount}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {selectedReact.metadataMissing && (
-                  <p className="details-summary">Component metadata was missing from this export; the display name is a fallback.</p>
-                )}
-
-
-              </section>
-            )}
-            </details>
           </>
         )}
 
@@ -737,52 +739,19 @@ function InspectorApp() {
                   <p>{selected.suggestedFix}</p>
                 </div>
 
-                <div className="details-block prompt-block">
-                  <div className="prompt-head">
-                    <h3>Debugging prompt</h3>
-                    <span className="prompt-head-actions">
-                      {selectedPromptUsage && (
-                        <span className="usage-chip" title="Tokens consumed by the agent that generated this prompt">
-                          {formatTokens(selectedPromptUsage.totalTokens)} tokens · {usageBreakdown(selectedPromptUsage)}
-                        </span>
-                      )}
-                      <Button
-                        size="sm"
-                        disabled={!prompts[selected.id]}
-                        onClick={() => void copyPrompt()}
-                      >
-                        {copied ? "Copied!" : "Copy prompt"}
-                      </Button>
-                    </span>
-                  </div>
-
-                  {promptLoadingId === selected.id ? (
-                    <p className="prompt-loading">
-                      <span className="spinner" aria-hidden="true" />
-                      Generating a prompt from the hotspot details…
-                    </p>
-                  ) : prompts[selected.id] ? (
-                    <details className="prompt-details" open={false}>
-                      <summary>View generated prompt</summary>
-                      <pre className="prompt-box">{prompts[selected.id]}</pre>
-                    </details>
-                  ) : promptErrors[selected.id] ? (
-                    <p className="prompt-error">
-                      {promptErrors[selected.id]}
-                      <Button size="sm" tone="danger" variant="outline" onClick={() => void generatePrompt(selected.id)}>Retry</Button>
-                    </p>
-                  ) : (
-                    <div className="prompt-generate">
-                      <p className="prompt-loading">No prompt generated for this hotspot yet.</p>
-                      <Button
-                        disabled={promptLoadingId !== null}
-                        onClick={() => void generatePrompt(selected.id)}
-                      >
-                        Generate prompt
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <DebuggingPromptSection
+                  id={selected.id}
+                  emptyLabel="No prompt generated for this hotspot yet."
+                  loadingLabel="Generating a prompt from the hotspot details…"
+                  prompt={prompts[selected.id]}
+                  usage={selectedPromptUsage}
+                  loading={promptLoadingId === selected.id}
+                  error={promptErrors[selected.id]}
+                  copied={copiedId === selected.id}
+                  busy={promptLoadingId !== null}
+                  onGenerate={(id) => void generatePrompt(id)}
+                  onCopy={(id) => void copyPrompt(id)}
+                />
               </section>
             )}
           </>

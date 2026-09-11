@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MAX_UPLOAD_BYTES } from "./analysis.ts";
+import { MAX_UPLOAD_BYTES, putRecord } from "./analysis.ts";
 import { parseReactProfileOptions, ReactProfileError } from "./react-profile.ts";
 import type { extractReactProfile } from "./react-profile.ts";
 import { requireReactEvidence, withinReactBudget, noReactIssues, ZERO_REACT_USAGE, discardSubBudgetReactIssues, type analyzeReactProfile } from "./react-analyzer.ts";
@@ -38,10 +39,24 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
         : await dependencies.analyze(result, dir, frameBudgetMs);
       if (request.signal.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");
       const report = discardSubBudgetReactIssues(analysis, evidence, frameBudgetMs);
-      return Response.json({ profileType: "react", summary: { ...result.summary, ...evidence.summary,
+      const analysisId = report.issues.length > 0 ? randomUUID() : null;
+      if (analysisId) {
+        putRecord({
+          id: analysisId,
+          createdAt: Date.now(),
+          dir: "",
+          totalMs: evidence.summary.totalCommitRenderDurationMs,
+          hotspots: [],
+          reactIssues: report.issues,
+          prompts: {},
+          usage: analysis.usage,
+          promptUsage: {},
+        });
+      }
+      return Response.json({ profileType: "react", analysisId, summary: { ...evidence.summary,
         commitsOverBudget: evidence.commitDurations.filter(ms => ms > frameBudgetMs).length,
         omittedEvidenceCommitCount: evidence.omittedCommitCount,
-      }, components: result.components, ...report, frameBudgetMs, usage: analysis.usage });
+      }, ...report, frameBudgetMs, usage: analysis.usage });
     } catch (error) {
       if (error instanceof ReactProfileError || (error instanceof Error && "status" in error && typeof error.status === "number"
           && error.status >= 400 && error.status <= 599)) {

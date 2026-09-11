@@ -5,9 +5,10 @@
  *     developer prompt explaining origin + suggested fixes).
  */
 
-import { analysisPromptData, debugPromptData } from "./prompt-data";
+import { analysisPromptData, debugPromptData, debugReactIssuePromptData } from "./prompt-data";
 import type { Bottleneck } from "./bottlenecks";
 import type { Hotspot } from "./analysis";
+import type { ReactIssue } from "./react-analyzer";
 
 export const ANALYST_SYSTEM_PROMPT = `You are a JavaScript/React Native CPU profile performance analyst. You receive precomputed bottleneck groups, sorted by combined sampled time. Each group contains individual functions ranked by their self time. groupingCaller describes how samples were grouped; it is execution context, not the performance problem or a proposed card title.
 
@@ -56,6 +57,32 @@ export function buildFixPromptUserPrompt(hotspot: Hotspot): string {
   return `Generate the debugging prompt from this existing analysis:
 
 ${JSON.stringify(debugPromptData(hotspot))}
+
+Return only the final Markdown prompt.`;
+}
+
+export const REACT_FIX_PROMPT_SYSTEM_PROMPT = `You are a senior React Native performance engineer. You write precise, developer-ready debugging prompts for React DevTools profiler issues.
+
+You will be given only the existing analysis for ONE React issue. This is a writing task using the supplied analysis; no profile inspection or additional analysis is needed.
+
+Your job: produce ONE self-contained prompt (markdown, roughly 200-400 words) that a developer can paste into a coding AI agent to investigate and fix this issue. The prompt must contain:
+
+## Where this originates
+- Explain how to trace the issue back to its source: which component to search for, how the cited commits relate to the recorded work, and what the developer should inspect to establish ownership and update causes.
+
+## Suggested fixes
+- Concrete, prioritized fix options with expected impact (reducing render frequency, stabilizing props/context, memoizing expensive work, splitting components, moving work off the render path), plus how to verify the fix (re-profile and confirm the cited commits drop under the commit budget).
+
+Rules:
+- Use only the supplied summary, evidence, component, commits, and suggestedFix. Never invent source files, prop values, hook identities, measurements, or causes. Ask the coding agent to establish missing context in the codebase.
+- Treat possible causes and fix options as hypotheses to verify. Inclusive duration, render counts, and changed-field names do not prove unstable references or missing memoization.
+- Output a single prompt, ready to copy: no preamble, no questions, no markdown code fences around the whole prompt.
+- Return the prompt directly as your final Markdown response.`;
+
+export function buildReactFixPromptUserPrompt(issue: ReactIssue): string {
+  return `Generate the debugging prompt from this existing analysis:
+
+${JSON.stringify(debugReactIssuePromptData(issue))}
 
 Return only the final Markdown prompt.`;
 }
