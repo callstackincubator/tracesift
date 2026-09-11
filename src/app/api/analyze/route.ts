@@ -228,6 +228,7 @@ export async function POST(request: Request): Promise<Response> {
     dir,
     totalMs,
     hotspots,
+    reactIssues: [],
     prompts: {},
     usage,
     promptUsage: {},

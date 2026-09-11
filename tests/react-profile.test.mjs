@@ -9,6 +9,7 @@ import { extractReactProfile, parseReactProfileOptions, resolveReactProfilerCli,
 import { analyzeReactProfile, reactAnalystPrompt, validateReactIssueReport, discardSubBudgetReactIssues } from '../src/lib/react-analyzer.ts';
 import { parseFrameBudget, validateReactEvidence } from '../src/lib/react-evidence.ts';
 import { createReactAnalysisHandler } from '../src/lib/react-analysis-handler.ts';
+import { destroyRecord, getRecord } from '../src/lib/analysis.ts';
 
 const exec = promisify(execFile);
 const fixture = path.resolve('test-fixtures/react/react-native-v5.synthetic.json');
@@ -223,7 +224,29 @@ test('HTTP success runs actual CLI, forwards filtered results, and cleans its up
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.profileType, 'react');
-  assert.equal(body.components[0].avgActualDurationMs, 10);
+  assert.equal(body.analysisId, null);
+  assert.equal(body.components, undefined);
+  assert.deepEqual(body.issues, []);
+  await assert.rejects(access(seenDir), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(root), []);
+});
+
+test('HTTP issue reports persist an analysis id for prompt generation and still remove the upload', async t => {
+  const root = await temporary(t);
+  let seenDir;
+  const handler = createReactAnalysisHandler({ extract: extractReactProfile, temporaryRoot: root, analyze: async (result, cwd) => {
+    seenDir = cwd;
+    return { ...validateReactIssueReport(issueReport(result), result.evidence, 16), usage };
+  } });
+  const response = await handler(request(await readFile(fixture)));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(typeof body.analysisId, 'string');
+  assert.ok(body.issues.length > 0);
+  const record = getRecord(body.analysisId);
+  assert.equal(record.reactIssues[0].id, body.issues[0].id);
+  assert.equal(record.hotspots.length, 0);
+  t.after(() => destroyRecord(body.analysisId));
   await assert.rejects(access(seenDir), { code: 'ENOENT' });
   assert.deepEqual(await readdir(root), []);
 });
@@ -439,7 +462,7 @@ test('HTTP empty ranking succeeds, budget is forwarded, and cheap profiles have 
     const response = await handler(request(await readFile(fixture), { minAvgDurationMs: 1000, frameBudgetMs: budget }));
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.deepEqual(body.components, []);
+    assert.equal(body.components, undefined);
     assert.deepEqual(body.issues, []);
     assert.equal(body.noIssue, true);
     assert.equal(body.frameBudgetMs, budget);

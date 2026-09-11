@@ -1,5 +1,6 @@
 import type { Hotspot } from "./analysis";
 import type { Bottleneck } from "./bottlenecks";
+import type { ReactIssue } from "./react-analyzer";
 
 export const MAX_GROUP_PROMPT_BYTES = 6_000;
 const MAX_FUNCTIONS = 8;
@@ -72,5 +73,20 @@ export function debugPromptData(hotspot: Hotspot) {
       .filter((fn) => shortlisted.has(fn.id))
       .slice(0, MAX_FUNCTIONS)
       .map((fn) => compactText(fn.title)),
+  };
+}
+
+/** The prompt writer needs the existing React finding, not another profile analysis. */
+export function debugReactIssuePromptData(issue: ReactIssue) {
+  return {
+    summary: compactAnnotation(issue.summary),
+    evidence: compactAnnotation(issue.evidence),
+    suggestedFix: compactAnnotation(issue.suggestedFix),
+    component: compactText(issue.component),
+    severity: issue.severity,
+    commits: issue.commits.slice(0, MAX_FUNCTIONS).map((commit) => ({
+      commitIndex: commit.commitIndex,
+      durationMs: commit.durationMs,
+    })),
   };
 }

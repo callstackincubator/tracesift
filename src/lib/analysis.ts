@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Bottleneck } from "./bottlenecks";
+import type { ReactIssue } from "./react-analyzer";
 
 export interface Hotspot extends Bottleneck {
   groupingCaller: string;
@@ -31,14 +32,16 @@ export interface TokenUsage {
 export interface AnalysisRecord {
   id: string;
   createdAt: number;
+  /** Profile working directory. Empty when the upload was removed after analysis. */
   dir: string;
   totalMs: number;
   hotspots: Hotspot[];
-  /** hotspotId -> generated fix prompt (cached after the second agent run). */
+  reactIssues: ReactIssue[];
+  /** item id -> generated fix prompt (cached after the second agent run). */
   prompts: Record<string, string>;
   /** Token usage of the analyzer agent run. */
   usage: TokenUsage;
-  /** hotspotId -> token usage of the agent run that generated that prompt. */
+  /** item id -> token usage of the agent run that generated that prompt. */
   promptUsage: Record<string, TokenUsage>;
 }
 

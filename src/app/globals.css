@@ -315,4 +315,3 @@ button, input { font: inherit; }
 .react-issues > h2 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
 .react-severity { font-size: 13px; text-transform: capitalize; white-space: nowrap; }
 .react-commit-list { margin: 12px 0; padding-left: 20px; list-style: disc; font-size: 13px; }
-.react-ranking > summary { cursor: pointer; font-weight: 600; padding: 16px 0; }

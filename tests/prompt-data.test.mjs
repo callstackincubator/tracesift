@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { analysisPromptData, bottleneckPromptData, debugPromptData, MAX_GROUP_PROMPT_BYTES } from '../src/lib/prompt-data.ts';
+import { analysisPromptData, bottleneckPromptData, debugPromptData, debugReactIssuePromptData, MAX_GROUP_PROMPT_BYTES } from '../src/lib/prompt-data.ts';
 
 function largeGroup(id = 'b1') {
   return {
@@ -69,4 +69,23 @@ test('debug prompt context stays bounded even with oversized annotations and sho
   const data = debugPromptData(hotspot);
   assert.equal(data.summary.length, 2000);
   assert.equal(data.functions.length, 8);
+});
+
+test('React issue prompt context uses the finding, not a second analysis of the profile', () => {
+  const issue = {
+    id: 'react-issue-1', summary: 'Expensive list work', severity: 'high',
+    evidence: 'Own work in over-budget commits.', suggestedFix: 'Inspect list rendering.',
+    componentId: '1:4', component: 'ExpensiveList',
+    commits: Array.from({length: 20}, (_, i) => ({ rootID: 1, commitIndex: i, timestampMs: i * 100, durationMs: 30 })),
+  };
+  assert.deepEqual(debugReactIssuePromptData(issue), {
+    summary: 'Expensive list work', evidence: 'Own work in over-budget commits.',
+    suggestedFix: 'Inspect list rendering.', component: 'ExpensiveList', severity: 'high',
+    commits: issue.commits.slice(0, 8).map(commit => ({ commitIndex: commit.commitIndex, durationMs: commit.durationMs })),
+  });
+  const oversized = debugReactIssuePromptData({ ...issue, summary: 'x'.repeat(100000), evidence: 'y'.repeat(100000), suggestedFix: 'z'.repeat(100000) });
+  assert.equal(oversized.summary.length, 2000);
+  assert.equal(oversized.evidence.length, 2000);
+  assert.equal(oversized.suggestedFix.length, 2000);
+  assert.equal(oversized.commits.length, 8);
 });
