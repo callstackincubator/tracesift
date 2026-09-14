@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
+  clientHotspots,
   createAnalysisFiles,
   destroyRecord,
   MAX_UPLOAD_BYTES,
@@ -32,8 +33,7 @@ const hotspotReportSchema = Type.Object({
       id: Type.String(),
       title: Type.String({ minLength: 1, maxLength: 120, description: "Describe the dominant expensive work, using the supporting functions." }),
       supportingFunctionIds: Type.Array(Type.String(), { minItems: 1, maxItems: 8, description: "IDs of supplied functions supporting the title and summary; include the heaviest function." }),
-      summary: Type.String(),
-      suggestedFix: Type.String(),
+      summary: Type.Array(Type.String({ minLength: 1, maxLength: 180 }), { minItems: 1, maxItems: 3, description: "At most three short bullets describing the expensive work." }),
     }),
     { minItems: 1, maxItems: 12 }
   ),
@@ -235,5 +235,5 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   log(`analysis ${id} complete in ${Math.round((Date.now() - startedAt) / 1000)}s — ${hotspots.length} hotspots (analyzer tokens: ${usage.totalTokens}) — ` + hotspots.map((h) => `${h.title} (${h.combinedTimeMs} ms)`).join(" | "));
-  return json({ analysisId: id, totalMs, hotspots, usage });
+  return json({ analysisId: id, totalMs, hotspots: clientHotspots(hotspots), usage });
 }

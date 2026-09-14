@@ -19,15 +19,14 @@ These groups and measurements are ground truth. Each sample belongs to one group
 Explain every supplied group, including single-function groups. For each, return:
 - Its exact id.
 - A concise title (at most 120 characters) describing the dominant expensive operations, weighted by self time, rather than copying a framework wrapper such as dispatchEvent or batchedUpdates. If the work is mixed, describe the main operations without inventing a common cause.
-- A short summary (1-3 sentences) explaining the same operations as the title, grounded in the supplied functions and their measured self times. Lead with expensive work; mention dispatch/scheduling context only when necessary to explain it. Group totals include omitted work; do not attribute that time to just the listed functions.
+- A summary of at most 3 short bullet points explaining the same operations as the title, grounded in the supplied functions and their measured self times. Each bullet is one clause, not a paragraph. Lead with expensive work; mention dispatch/scheduling context only when necessary to explain it. Group totals include omitted work; do not attribute that time to just the listed functions.
 - supportingFunctionIds containing the exact supplied function IDs supporting the title and summary, including the heaviest function.
-- A suggestedFix with prioritized investigations or optimizations of the expensive work and relevant application callers. Put possible causes here and label them as hypotheses.
 
 A function's self time can aggregate multiple call paths; its stack is representative, not proof that all samples followed that path. Abbreviated stacks can omit application callers. Do not infer user-event frequency, render placement, full-array processing, missing memoization, or one formatter construction per item from sampled stacks alone. Construction self time is not an invocation count.
 
-Example: for date formatting through formatDate, localeCompare inside sort, and DateTimeFormat construction, use a title like "Expensive date formatting and locale-aware sorting". Summarize their measured costs; investigate formatter reuse and avoiding unnecessary sorting in suggestedFix. Do not title it "dispatchEvent" just because that is the grouping caller.
+Example: for date formatting through formatDate, localeCompare inside sort, and DateTimeFormat construction, use a title like "Expensive date formatting and locale-aware sorting". Summarize their measured costs in at most three bullets. Do not title it "dispatchEvent" just because that is the grouping caller.
 
-Submit report_hotspots exactly once with { hotspots: [{ id, title, summary, supportingFunctionIds, suggestedFix }] }. Do not repeat the report in final text.`;
+Submit report_hotspots exactly once with { hotspots: [{ id, title, summary, supportingFunctionIds }] }. summary is an array of 1-3 short strings. Do not repeat the report in final text.`;
 
 export function analystUserPrompt(groups: Bottleneck[], totalMs: number): string {
   return `Analyze these bottleneck groups. Total profile duration: ${totalMs} ms. Times use the profiler's duration-per-sample estimate. Function stacks are innermost first. Describe the dominant expensive work in each group as one bottleneck.

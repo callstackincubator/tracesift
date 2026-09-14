@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { groupBottlenecks } from '../src/lib/bottlenecks.ts';
-import { normalizeHotspots } from '../src/lib/analysis.ts';
+import { clientHotspots, normalizeHotspots } from '../src/lib/analysis.ts';
 
 const node = (id, name, children = [], url = 'app.js') => ({ id, children, callFrame: { functionName: name, scriptId: '1', url, lineNumber: 0, columnNumber: 0 } });
 const profile = (nodes, samples) => ({ nodes, samples, startTime: 0, endTime: 100000 });
@@ -103,7 +103,7 @@ test('agent cannot alter measured times, omit groups, or duplicate cards', () =>
   ], 100, groups);
   assert.equal(hotspots.length, 1);
   assert.equal(hotspots[0].combinedTimeMs, 100);
-  assert.equal(hotspots[0].summary, 'Measured work');
+  assert.deepEqual(hotspots[0].summary, ['Measured work']);
   assert.equal(normalizeHotspots([], 100, groups).hotspots.length, 1);
 });
 
@@ -118,8 +118,8 @@ test('descriptive annotations replace wrapper titles without changing measured t
   const group = groups[0];
   const result = normalizeHotspots([{
     id: group.id, title: 'Expensive date formatting and locale-aware sorting',
-    summary: 'Date formatting dominates, with additional sorting and formatter construction costs.',
-    supportingFunctionIds: group.functions.map(fn => fn.id), suggestedFix: 'Investigate formatter reuse.',
+    summary: ['Date formatting dominates, with additional sorting and formatter construction costs.'],
+    supportingFunctionIds: group.functions.map(fn => fn.id),
     functions: [], percentOfTotal: 999,
   }], 700, groups).hotspots[0];
   assert.equal(group.title, 'dispatchEvent');
@@ -139,15 +139,35 @@ test('missing, foreign, or incomplete evidence falls back to measured work', () 
   for (const ids of [undefined, [], ['invented'], [group.functions[0].id, 'foreign'], [group.functions[1].id]]) {
     const result = normalizeHotspots([{
       id: group.id, title: 'Unsupported title', summary: 'Unsupported summary',
-      suggestedFix: 'Unsupported fix', supportingFunctionIds: ids,
+      supportingFunctionIds: ids,
     }], 90, groups).hotspots[0];
     assert.equal(result.title, 'formatDate / compare');
-    assert.match(result.summary, /formatDate \(60 ms self time\)/);
-    assert.doesNotMatch(result.suggestedFix, /Unsupported/);
+    assert.match(result.summary.join(' '), /formatDate \(60 ms self time\)/);
     assert.equal(result.combinedTimeMs, 90);
   }
 });
 
+
+test('summary annotations become at most three bullets', () => {
+  const groups = groupBottlenecks(profile([node(1, 'formatDate')], [1]), 100);
+  const { hotspots } = normalizeHotspots([{
+    id: groups[0].id,
+    title: 'Expensive date formatting',
+    supportingFunctionIds: [groups[0].functions[0].id],
+    summary: ['First', 'Second', 'Third', 'Fourth'],
+  }], 100, groups);
+  assert.deepEqual(hotspots[0].summary, ['First', 'Second', 'Third']);
+  assert.deepEqual(normalizeHotspots([{
+    id: groups[0].id,
+    title: 'Expensive date formatting',
+    supportingFunctionIds: [groups[0].functions[0].id],
+    summary: 'Date formatting dominates. Sorting adds cost. Formatter construction is extra.',
+  }], 100, groups).hotspots[0].summary, [
+    'Date formatting dominates.',
+    'Sorting adds cost.',
+    'Formatter construction is extra.',
+  ]);
+});
 
 test('invalid descriptive titles fall back together with their explanations', () => {
   const groups = groupBottlenecks(profile([node(1, 'formatDate')], [1]), 100);
@@ -157,6 +177,21 @@ test('invalid descriptive titles fall back together with their explanations', ()
       supportingFunctionIds: [groups[0].functions[0].id],
     }], 100, groups).hotspots[0];
     assert.equal(result.title, 'formatDate');
-    assert.doesNotMatch(result.summary, /Unusable/);
+    assert.doesNotMatch(result.summary.join(' '), /Unusable/);
   }
+});
+
+test('client hotspots keep card function names and omit stacks', () => {
+  const groups = groupBottlenecks(profile([
+    node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3, 4, 5]),
+    node(2, 'one'), node(3, 'two'), node(4, 'three'), node(5, 'four'),
+  ], [2, 3, 4, 5]), 120);
+  const stored = normalizeHotspots([], 120, groups).hotspots[0];
+  const published = clientHotspots([stored])[0];
+  assert.ok(stored.functions.length > 3);
+  assert.ok(stored.functions.some((fn) => fn.stack.length > 0));
+  assert.equal(published.functions.length, 3);
+  assert.deepEqual(published.functions.map((fn) => fn.title), stored.functions.slice(0, 3).map((fn) => fn.title));
+  assert.ok(published.functions.every((fn) => fn.stack.length === 0));
+  assert.deepEqual(published.stack, []);
 });

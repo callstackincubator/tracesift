@@ -68,7 +68,7 @@ export function compactAnnotation(text: string): string {
 export function debugPromptData(hotspot: Hotspot) {
   const shortlisted = new Set(hotspot.supportingFunctionIds);
   return {
-    summary: compactAnnotation(hotspot.summary),
+    summary: compactAnnotation(hotspot.summary.join("\n")),
     functions: hotspot.functions
       .filter((fn) => shortlisted.has(fn.id))
       .slice(0, MAX_FUNCTIONS)

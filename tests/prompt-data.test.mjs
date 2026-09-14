@@ -53,7 +53,7 @@ test('prompt separates grouping context from the descriptive title and qualifies
 
 test('debug prompt context contains only the summary and shortlisted function names', () => {
   const hotspot = {
-    ...largeGroup(), summary: 'Expensive formatting', suggestedFix: 'Investigate caching',
+    ...largeGroup(), summary: ['Expensive formatting'],
     supportingFunctionIds: ['b1-f0', 'b1-f7'],
   };
   assert.deepEqual(debugPromptData(hotspot), {
@@ -63,7 +63,7 @@ test('debug prompt context contains only the summary and shortlisted function na
 
 test('debug prompt context stays bounded even with oversized annotations and shortlists', () => {
   const hotspot = {
-    ...largeGroup(), summary: 'x'.repeat(100000),
+    ...largeGroup(), summary: ['x'.repeat(100000)],
     supportingFunctionIds: Array.from({length: 10000}, (_, i) => `b1-f${i}`),
   };
   const data = debugPromptData(hotspot);
