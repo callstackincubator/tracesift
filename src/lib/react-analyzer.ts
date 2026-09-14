@@ -13,7 +13,9 @@ Frequent renders, cheap work, normal list mounts, provider updates, and navigati
 Inclusive duration includes descendants and overlaps across ancestors. Do not add inclusive durations together, use timestamp gaps as render time, or compare summed self time across a recording to a per-commit budget. Attribute work using self timings within commits. Multiple cheap components can collectively explain an expensive commit; do not report this as a root-level or unattributed issue.
 Deduplicate ancestor/descendant reports describing the same work. Each issue must identify a non-root component responsible for actionable expensive work and cite supplied commits containing that component. Root commit duration is supporting context, not a component issue. When attribution is not supported, return noIssue true with issues [] and omit reasoning if there are no other actionable component findings. Do not select an arbitrary ancestor merely to supply a componentId.
 renderCount includes mounts and zero-duration entries; it is not an exact re-render or invocation count. Null self timings and unknown render causes are unavailable evidence. Recorded changed props/hooks are names/indices, not historical values or proof of unstable references. Do not invent source code, values, render reasons, or causes. Suggested fixes must be hypotheses to inspect and verify in a new recording.
-Report summary, severity (low/medium/high), evidence, componentId, commits (rootID and commitIndex), and suggestedFix for each selected issue. Return noIssue true exactly when issues is empty. For zero issues, return only {"noIssue":true,"issues":[]} with no reasoning, description, or explanatory prose. Provide reasoning only when issues is nonempty. Do not return measurements or component names; the server resolves them. Finish as soon as the report is supported.`;
+Write each issue for a developer, not a profiler dump. summary is a concise self-explanatory title (at most 120 characters) naming the component and the user-visible delay. evidence is at most 3 short sentences: only the important timings (self time, commit duration, share of the commit) and what those numbers mean. Omit root/fiber IDs, keys, commitIndex, field names, unknown causes, unchanged props/hooks, sibling components with negligible cost, and other commits that were in budget. Round milliseconds to one decimal or whole numbers. Put commit identities only in the commits array; the server resolves measured commit timings and the component display name.
+Example: title "HeavyActivityHeatmap mount delayed explore-details first paint". Evidence: "HeavyActivityHeatmap used 125 ms self time, about 74% of a 170 ms over-budget commit. That was a single mount, so the cost is work inside that render."
+Report summary, severity (low/medium/high), evidence, componentId, commits (rootID and commitIndex), and suggestedFix for each selected issue. Return noIssue true exactly when issues is empty. For zero issues, return only {"noIssue":true,"issues":[]} with no reasoning, description, or explanatory prose. Provide reasoning only when issues is nonempty. Finish as soon as the report is supported.`;
 
 export interface ReactIssue {
   id: string;
@@ -98,8 +100,23 @@ export function reactAnalystPrompt(result: ReactProfileResult, budget = 16): str
   return JSON.stringify(promptEvidence(result, budget));
 }
 
+const MAX_ISSUE_TITLE = 120;
+const MAX_EVIDENCE_LINE = 180;
+const MAX_EVIDENCE_LINES = 3;
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0 && v.length <= 2000;
+function clipLine(value: string, max: number) {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+function normalizeIssueTitle(value: string) {
+  return clipLine(value.trim().split(/\n+/)[0]?.trim() ?? "", MAX_ISSUE_TITLE);
+}
+function normalizeIssueEvidence(value: string) {
+  const trimmed = value.trim();
+  const lines = trimmed.split(/\n+/).map(line => line.replace(/^[-*•\d.)]+\s+/, "").trim()).filter(Boolean);
+  const parts = lines.length > 1 ? lines : trimmed.split(/(?<=[.!?])\s+/).map(part => part.trim()).filter(Boolean);
+  return parts.slice(0, MAX_EVIDENCE_LINES).map(line => clipLine(line, MAX_EVIDENCE_LINE)).join("\n");
+}
 
 /** Model text can select findings, but cannot replace measured identities or timings. */
 export function validateReactIssueReport(raw: unknown, evidence: ReactEvidence, budget: number): ReactAnalysis {
@@ -131,11 +148,14 @@ export function validateReactIssueReport(raw: unknown, evidence: ReactEvidence, 
     // Older model responses may still report an entire root commit as an issue.
     // Do not count unattributed work as a finding.
     if (item.componentId === undefined) return [];
+    const summary = normalizeIssueTitle(item.summary);
+    const evidenceText = normalizeIssueEvidence(item.evidence);
+    if (!summary || !evidenceText) return fail();
     const signature = `${item.componentId}|${[...references].sort().join(",")}`;
     if (seen.has(signature)) return fail();
     seen.add(signature);
-    return [{ id: `react-issue-${index + 1}`, summary: item.summary.trim(), severity: item.severity as ReactIssue["severity"],
-      evidence: item.evidence.trim(), suggestedFix: item.suggestedFix.trim(), commits,
+    return [{ id: `react-issue-${index + 1}`, summary, severity: item.severity as ReactIssue["severity"],
+      evidence: evidenceText, suggestedFix: item.suggestedFix.trim(), commits,
       componentId: item.componentId as string, component: componentName!,
     }];
   });
@@ -154,12 +174,12 @@ export async function analyzeReactProfile(
   let report: ReactAnalysis | undefined;
   const reportTool = defineTool({
     name: "report_react_issues", label: "Report React issues",
-    description: "Submit only evidence-backed issues with reasoning, or noIssue true and issues [] without reasoning or a description. Do not return measurements.",
+    description: "Submit only evidence-backed issues with a concise title and a 1-3 sentence description, or noIssue true and issues [] without reasoning.",
     parameters: Type.Object({ noIssue: Type.Boolean(), reasoning: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Required only when issues is nonempty. Omit for zero issues." })),
       issues: Type.Array(Type.Object({
-        summary: Type.String({ minLength: 1, maxLength: 2000 }),
+        summary: Type.String({ minLength: 1, maxLength: 120, description: "Concise self-explanatory title naming the component and the delay. No profiler IDs." }),
         severity: Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")]),
-        evidence: Type.String({ minLength: 1, maxLength: 2000 }), componentId: Type.String({ minLength: 1 }),
+        evidence: Type.String({ minLength: 1, maxLength: 540, description: "At most 3 short sentences. Cite only important timings; omit IDs, keys, and negligible siblings." }), componentId: Type.String({ minLength: 1 }),
         commits: Type.Array(Type.Object({ rootID: Type.Integer({ minimum: 0 }), commitIndex: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 50 }),
         suggestedFix: Type.String({ minLength: 1, maxLength: 2000 }),
       }), { maxItems: 12 }),

@@ -435,6 +435,18 @@ test('report validation rejects fabricated, duplicate, mismatched and sub-budget
   assert.deepEqual(validateReactIssueReport(emptyReport, result.evidence, 16), emptyReport);
 });
 
+test('issue title and evidence are clipped to a concise developer-facing shape', async () => {
+  const result = await loadEvidence();
+  const raw = issueReport(result);
+  raw.issues[0].summary = `HeavyActivityHeatmap's mount render accounts for most of the over-budget commit (124.8 ms self time inside a 169.7 ms commit), delaying the explore-details screen's first paint.`;
+  raw.issues[0].evidence = `rootID 1 / commitIndex 1 durationMs 169.74 is the only commit over the 16 ms budget and the peak commit. Within it, HeavyActivityHeatmap (id 1:728, key ".2") records selfDurationMs 124.823 of durationMs 151.611. renderCount is 1 with cause "unknown". Next-largest self timings are far smaller.`;
+  const validated = validateReactIssueReport(raw, result.evidence, 16);
+  assert.equal(validated.issues[0].summary.length, 120);
+  assert.ok(validated.issues[0].summary.endsWith('…'));
+  assert.equal(validated.issues[0].evidence.split('\n').length, 3);
+  assert.doesNotMatch(validated.issues[0].evidence, /Next-largest/);
+});
+
 test('evidence validation rejects corrupt summaries, references and measurements', async () => {
   const { evidence } = await loadEvidence();
   for (const edit of [

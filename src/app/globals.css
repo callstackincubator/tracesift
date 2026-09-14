@@ -202,7 +202,7 @@ button, input { font: inherit; }
 .hotspot-head {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 10px;
 }
 .hotspot-rank {
@@ -221,11 +221,18 @@ button, input { font: inherit; }
   min-width: 0;
   font-size: 15px;
   letter-spacing: -0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.hotspot-time {
+  flex: 0 0 auto;
+  padding-top: 2px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 650;
   white-space: nowrap;
 }
-.hotspot-time { flex: 0 0 auto; color: var(--muted-foreground); font-family: var(--font-mono, monospace); font-size: 13px; font-weight: 650; }
 .hotspot-bar { height: 4px; background: var(--muted); overflow: hidden; border-radius: 999px; }
 .hotspot-bar span { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
 
@@ -234,6 +241,8 @@ button, input { font: inherit; }
   grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
 }
+.hotspot-columns.count-1 { grid-template-columns: minmax(0, 1fr); }
+.hotspot-columns.count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .hotspot-column {
   display: grid;
   gap: 10px;
@@ -247,9 +256,6 @@ button, input { font: inherit; }
 .function-chip {
   max-width: 100%;
   width: fit-content;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   padding: 6px 10px;
   color: var(--muted-foreground);
   background: transparent;
@@ -257,11 +263,15 @@ button, input { font: inherit; }
   border-radius: 10px;
   font-family: var(--font-mono, monospace);
   font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 .column-detail {
   color: var(--muted-foreground);
   font-size: 13px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .hotspot-footer {
@@ -304,55 +314,6 @@ button, input { font: inherit; }
   text-align: right;
 }
 
-.details-panel { margin-top: 22px; padding: 24px; background: var(--card); border: 1px solid var(--border); }
-.details-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.details-heading h2 { margin: 7px 0 0; font-size: 22px; letter-spacing: -0.02em; }
-.details-summary { margin: 14px 0 0; color: var(--muted-foreground); font-size: 15px; line-height: 1.6; }
-.details-block { margin-top: 22px; }
-.details-block h3 { margin: 0 0 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); }
-.details-block > p { margin: 0; font-size: 15px; line-height: 1.6; }
-
-.prompt-block { padding-top: 22px; border-top: 1px solid var(--border); }
-.prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-.prompt-head h3 { margin: 0; }
-.prompt-actions {
-  display: grid;
-  justify-items: start;
-  gap: 6px;
-  margin-top: 10px;
-}
-.prompt-actions .token-breakdown {
-  text-align: left;
-}
-.prompt-loading { display: flex; align-items: center; gap: 10px; margin: 10px 0 0; color: var(--muted-foreground); font-size: 14px; }
-.prompt-error { margin: 10px 0 0; color: var(--danger); font-size: 14px; line-height: 1.5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.prompt-details summary { cursor: pointer; color: var(--primary); font-size: 13.5px; font-weight: 650; user-select: none; }
-.prompt-details[open] summary { margin-bottom: 4px; }
-.prompt-box {
-  margin: 12px 0 0;
-  padding: 16px;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono, monospace);
-  font-size: 12.5px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 440px;
-  overflow: auto;
-}
-
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 800ms linear infinite;
-  flex: 0 0 auto;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
 @media (max-width: 680px) {
   .workspace { width: min(100% - 28px, 520px); padding: 32px 0 36px; }
   .workspace.results { width: min(100% - 28px, 520px); }
@@ -374,13 +335,7 @@ button, input { font: inherit; }
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
 
-.grouping-note { color: var(--muted-foreground); font-size: 13px; line-height: 1.5; margin-top: 20px; }
-
 .react-budget-field { display: grid; gap: 8px; margin-top: 20px; }
 .react-budget-field label { font-weight: 600; }
 .react-budget-field input { width: 150px; border: 1px solid var(--border, #555); border-radius: 6px; padding: 8px 12px; background: transparent; color: inherit; }
 .react-budget-field p { font-size: 13px; opacity: .75; }
-.react-issues { margin-bottom: 28px; }
-.react-issues > h2 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
-.react-severity { font-size: 13px; text-transform: capitalize; white-space: nowrap; }
-.react-commit-list { margin: 12px 0; padding-left: 20px; list-style: disc; font-size: 13px; }
