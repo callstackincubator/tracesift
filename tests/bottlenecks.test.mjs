@@ -149,24 +149,38 @@ test('missing, foreign, or incomplete evidence falls back to measured work', () 
 
 
 test('summary annotations become at most three bullets', () => {
+  const groups = groupBottlenecks(profile([
+    node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3, 4]),
+    node(2, 'formatDate'), node(3, 'compare'), node(4, 'sort'),
+  ], [2, 3, 4]), 90);
+  const { hotspots } = normalizeHotspots([{
+    id: groups[0].id,
+    title: 'Expensive date formatting',
+    supportingFunctionIds: groups[0].functions.map((fn) => fn.id),
+    summary: ['First', 'Second', 'Third', 'Fourth'],
+  }], 90, groups);
+  assert.deepEqual(hotspots[0].summary, ['First', 'Second', 'Third']);
+  assert.deepEqual(normalizeHotspots([{
+    id: groups[0].id,
+    title: 'Expensive date formatting',
+    supportingFunctionIds: groups[0].functions.map((fn) => fn.id),
+    summary: 'Date formatting dominates. Sorting adds cost. Formatter construction is extra.',
+  }], 90, groups).hotspots[0].summary, [
+    'Date formatting dominates.',
+    'Sorting adds cost.',
+    'Formatter construction is extra.',
+  ]);
+});
+
+test('single-function groups get exactly one summary bullet, even from an over-eager annotation', () => {
   const groups = groupBottlenecks(profile([node(1, 'formatDate')], [1]), 100);
   const { hotspots } = normalizeHotspots([{
     id: groups[0].id,
     title: 'Expensive date formatting',
     supportingFunctionIds: [groups[0].functions[0].id],
-    summary: ['First', 'Second', 'Third', 'Fourth'],
+    summary: ['First', 'Second', 'Third'],
   }], 100, groups);
-  assert.deepEqual(hotspots[0].summary, ['First', 'Second', 'Third']);
-  assert.deepEqual(normalizeHotspots([{
-    id: groups[0].id,
-    title: 'Expensive date formatting',
-    supportingFunctionIds: [groups[0].functions[0].id],
-    summary: 'Date formatting dominates. Sorting adds cost. Formatter construction is extra.',
-  }], 100, groups).hotspots[0].summary, [
-    'Date formatting dominates.',
-    'Sorting adds cost.',
-    'Formatter construction is extra.',
-  ]);
+  assert.deepEqual(hotspots[0].summary, ['First']);
 });
 
 test('invalid descriptive titles fall back together with their explanations', () => {

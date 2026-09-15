@@ -81,7 +81,6 @@ export function debugReactIssuePromptData(issue: ReactIssue) {
   return {
     summary: compactAnnotation(issue.summary),
     evidence: compactAnnotation(issue.evidence),
-    suggestedFix: compactAnnotation(issue.suggestedFix),
     component: compactText(issue.component),
     severity: issue.severity,
     commits: issue.commits.slice(0, MAX_FUNCTIONS).map((commit) => ({

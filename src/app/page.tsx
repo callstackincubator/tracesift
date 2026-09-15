@@ -145,36 +145,67 @@ function issuePeakMs(issue: ReactIssue): number {
   return issue.commits.reduce((max, commit) => Math.max(max, commit.durationMs), 0);
 }
 
-function hotspotColumns(hotspot: Hotspot): Array<{ chip?: string; chipTitle?: string; detail?: string }> {
-  console.log(hotspot);
-  return hotspot.functions
-    .map((fn, index) => ({ fn, detail: hotspot.summary[index] }))
-    .sort((a, b) => b.fn.selfTimeMs - a.fn.selfTimeMs)
-    .slice(0, MAX_RESULT_CARDS)
-    .map(({ fn, detail }) => ({
-      chip: shortFunctionName(fn.title),
-      chipTitle: fn.title,
-      detail: detail,
-    }));
+/** One "hot path" row: a single function's share of a card's total time. */
+interface HotPathRow {
+  fnName: string;
+  fnTitle?: string;
+  ms?: number;
+  percentLabel?: string;
+  barPercent?: number;
+  caption?: string;
 }
 
-function reactIssueColumns(issue: ReactIssue): Array<{ chip?: string; chipTitle?: string; detail?: string }> {
-  const chip = issue.component || undefined;
-  const detail = issue.evidence.trim() || undefined;
-  if (!chip && !detail) return [];
-  return [{
-    chip,
-    chipTitle: issue.component ? `${issue.component} (${issue.componentId})` : undefined,
-    detail,
-  }];
+interface HotPathCard {
+  rows: HotPathRow[];
+  footnote?: string;
+}
+
+function hotspotRows(hotspot: Hotspot): HotPathCard {
+  console.log('== hotspot', hotspot);
+  const ranked = hotspot.functions
+    .map((fn, index) => ({ fn, detail: hotspot.summary[index] }))
+    .sort((a, b) => b.fn.selfTimeMs - a.fn.selfTimeMs);
+  const shown = ranked.slice(0, MAX_RESULT_CARDS);
+  const rows: HotPathRow[] = shown.map(({ fn, detail }) => ({
+    fnName: shortFunctionName(fn.title),
+    fnTitle: fn.title,
+    ms: fn.selfTimeMs,
+    percentLabel: `${Math.round(fn.percentOfGroup)}% of group`,
+    barPercent: fn.percentOfGroup,
+    caption: detail,
+  }));
+
+  const attributedMs = ranked.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
+  const leftoverMs = hotspot.combinedTimeMs - attributedMs;
+  const footnote = leftoverMs >= 1
+    ? `+ ~${formatMs(leftoverMs)} other self time not attributed to a named function`
+    : undefined;
+
+  return { rows, footnote };
+}
+
+function reactIssueRows(issue: ReactIssue): HotPathCard {
+  const fnName = issue.component || undefined;
+  const caption = issue.evidence.trim() || undefined;
+  if (!fnName && !caption) return { rows: [] };
+  return {
+    rows: [{
+      fnName: fnName ?? "Component",
+      fnTitle: issue.component ? `${issue.component} (${issue.componentId})` : undefined,
+      ms: issue.selfTimeMs,
+      percentLabel: issue.percentOfCommit !== undefined ? `${Math.round(issue.percentOfCommit)}% of commit` : undefined,
+      barPercent: issue.percentOfCommit,
+      caption,
+    }],
+  };
 }
 
 function AnalysisResultCard({
   rank,
   title,
   timeLabel,
-  barPercent,
-  columns,
+  rows,
+  footnote,
   prompt,
   usage,
   loading,
@@ -187,8 +218,8 @@ function AnalysisResultCard({
   rank: number;
   title: string;
   timeLabel: string;
-  barPercent: number;
-  columns: Array<{ chip?: string; chipTitle?: string; detail?: string }>;
+  rows: HotPathRow[];
+  footnote?: string;
   prompt?: string;
   usage?: TokenUsage;
   loading: boolean;
@@ -205,21 +236,25 @@ function AnalysisResultCard({
         <strong>{title}</strong>
         <span className="hotspot-time">{timeLabel}</span>
       </div>
-      <div className="hotspot-bar" aria-hidden="true">
-        <span style={{ width: `${barPercent}%` }} />
-      </div>
-      {columns.length > 0 && (
-        <div className={`hotspot-columns count-${Math.min(columns.length, MAX_RESULT_CARDS)}`}>
-          {columns.map((column, columnIndex) => (
-            <div className="hotspot-column" key={columnIndex}>
-              {column.chip ? (
-                <span className="function-chip" title={column.chipTitle ?? column.chip}>
-                  {column.chip}
-                </span>
-              ) : null}
-              {column.detail ? <span className="column-detail">{column.detail}</span> : null}
+      {rows.length > 0 && (
+        <div className="hot-path-rows">
+          {rows.map((row, rowIndex) => (
+            <div className="hot-path-row" key={rowIndex}>
+              {row.ms !== undefined && (
+                <>
+                  <div className="row-figure-line">
+                    <span className="row-figure">{formatMs(row.ms)}</span>
+                    {row.percentLabel ? <span className="row-share">{row.percentLabel}</span> : null}
+                  </div>
+                  <div className="row-bar-track" aria-hidden="true">
+                    <span className="row-bar-fill" style={{ width: `${row.barPercent ?? 0}%` }} />
+                  </div>
+                </>
+              )}
+              {row.caption ? <p className="row-caption">{row.caption}</p> : null}
             </div>
           ))}
+          {footnote ? <p className="hot-path-footnote">{footnote}</p> : null}
         </div>
       )}
       <div className="hotspot-footer">
@@ -547,9 +582,7 @@ function InspectorApp() {
     setCopiedId(null);
   };
 
-  const maxPercent = hotspots.length > 0 ? Math.max(...hotspots.map((hotspot) => hotspot.percentOfTotal)) : 0;
   const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
-  const maxReactPeakMs = reactIssueCards.length > 0 ? Math.max(...reactIssueCards.map(issuePeakMs)) : 0;
 
   return (
     <PluginShell>
@@ -682,14 +715,15 @@ function InspectorApp() {
             <div className="hotspot-list">
               {reactIssueCards.map((issue, index) => {
                 const peakMs = issuePeakMs(issue);
+                const { rows, footnote } = reactIssueRows(issue);
                 return (
                   <AnalysisResultCard
                     key={issue.id}
                     rank={index + 1}
                     title={issue.summary}
                     timeLabel={`${issue.severity} · ${formatMs(peakMs)}`}
-                    barPercent={maxReactPeakMs > 0 ? Math.max(4, (peakMs / maxReactPeakMs) * 100) : 0}
-                    columns={reactIssueColumns(issue)}
+                    rows={rows}
+                    footnote={footnote}
                     prompt={prompts[issue.id]}
                     usage={promptUsages[issue.id]}
                     loading={promptLoadingId === issue.id}
@@ -724,14 +758,16 @@ function InspectorApp() {
             </div>
 
             <div className="hotspot-list">
-              {hotspots.map((hotspot, index) => (
+              {hotspots.map((hotspot, index) => {
+                const { rows, footnote } = hotspotRows(hotspot);
+                return (
                 <AnalysisResultCard
                   key={hotspot.id}
                   rank={index + 1}
                   title={hotspot.title}
                   timeLabel={formatMs(hotspot.combinedTimeMs)}
-                  barPercent={maxPercent > 0 ? Math.max(4, (hotspot.percentOfTotal / maxPercent) * 100) : 0}
-                  columns={hotspotColumns(hotspot)}
+                  rows={rows}
+                  footnote={footnote}
                   prompt={prompts[hotspot.id]}
                   usage={promptUsages[hotspot.id]}
                   loading={promptLoadingId === hotspot.id}
@@ -741,7 +777,8 @@ function InspectorApp() {
                   onGenerate={() => void generatePrompt(hotspot.id)}
                   onCopy={() => void copyPrompt(hotspot.id)}
                 />
-              ))}
+                );
+              })}
             </div>
           </>
         )}

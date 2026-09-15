@@ -22,7 +22,7 @@ const issueReport = (result) => {
   const commit = result.evidence.commits.find(c => c.durationMs > 16 && c.components.length);
   return { noIssue: false, reasoning: 'Expensive own work is recorded.', issues: [{
     componentId: commit.components[0].id, summary: 'Expensive render work', severity: 'medium',
-    evidence: 'Own work contributes to this over-budget commit.', suggestedFix: 'Inspect this component and verify a new recording.',
+    evidence: 'Own work contributes to this over-budget commit.',
     commits: [{ rootID: commit.rootID, commitIndex: commit.commitIndex }],
   }] };
 };
@@ -443,7 +443,7 @@ test('issue title and evidence are clipped to a concise developer-facing shape',
   const validated = validateReactIssueReport(raw, result.evidence, 16);
   assert.equal(validated.issues[0].summary.length, 120);
   assert.ok(validated.issues[0].summary.endsWith('…'));
-  assert.equal(validated.issues[0].evidence.split('\n').length, 3);
+  assert.equal(validated.issues[0].evidence.split('\n').length, 2);
   assert.doesNotMatch(validated.issues[0].evidence, /Next-largest/);
 });
 

@@ -19,7 +19,7 @@ These groups and measurements are ground truth. Each sample belongs to one group
 Explain every supplied group, including single-function groups. For each, return:
 - Its exact id.
 - A concise title (at most 120 characters) describing the dominant expensive operations, weighted by self time, rather than copying a framework wrapper such as dispatchEvent or batchedUpdates. If the work is mixed, describe the main operations without inventing a common cause.
-- A summary of at most 3 short bullet points explaining the same operations as the title, grounded in the supplied functions and their measured self times. Each bullet is one clause, not a paragraph. Lead with expensive work; mention dispatch/scheduling context only when necessary to explain it. Group totals include omitted work; do not attribute that time to just the listed functions.
+- A summary of at most 3 short bullet points explaining the same operations as the title, grounded in the supplied functions and their measured self times. Each bullet is one clause, not a paragraph. Lead with expensive work; mention dispatch/scheduling context only when necessary to explain it. Group totals include omitted work; do not attribute that time to just the listed functions. If the group has only one function, return exactly one bullet describing it — do not split a single function's cost into multiple bullets.
 - supportingFunctionIds containing the exact supplied function IDs supporting the title and summary, including the heaviest function.
 
 A function's self time can aggregate multiple call paths; its stack is representative, not proof that all samples followed that path. Abbreviated stacks can omit application callers. Do not infer user-event frequency, render placement, full-array processing, missing memoization, or one formatter construction per item from sampled stacks alone. Construction self time is not an invocation count.
@@ -73,7 +73,7 @@ Your job: produce ONE self-contained prompt (markdown, roughly 200-400 words) th
 - Concrete, prioritized fix options with expected impact (reducing render frequency, stabilizing props/context, memoizing expensive work, splitting components, moving work off the render path), plus how to verify the fix (re-profile and confirm the cited commits drop under the commit budget).
 
 Rules:
-- Use only the supplied summary, evidence, component, commits, and suggestedFix. Never invent source files, prop values, hook identities, measurements, or causes. Ask the coding agent to establish missing context in the codebase.
+- Use only the supplied summary, evidence, component, and commits. Never invent source files, prop values, hook identities, measurements, or causes. Ask the coding agent to establish missing context in the codebase.
 - Treat possible causes and fix options as hypotheses to verify. Inclusive duration, render counts, and changed-field names do not prove unstable references or missing memoization.
 - Output a single prompt, ready to copy: no preamble, no questions, no markdown code fences around the whole prompt.
 - Return the prompt directly as your final Markdown response.`;

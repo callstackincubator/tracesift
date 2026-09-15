@@ -109,8 +109,8 @@ function splitSummaryText(text: string): string[] {
   return trimmed.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
-/** Accept an array, a prose string, or missing text; always return at most three bullets. */
-export function normalizeSummary(raw: unknown, fallback: string[]): string[] {
+/** Accept an array, a prose string, or missing text; return at most `maxBullets` bullets. */
+export function normalizeSummary(raw: unknown, fallback: string[], maxBullets: number = MAX_SUMMARY_BULLETS): string[] {
   const source = Array.isArray(raw)
     ? raw.filter((item): item is string => typeof item === "string")
     : typeof raw === "string"
@@ -119,7 +119,7 @@ export function normalizeSummary(raw: unknown, fallback: string[]): string[] {
   const bullets = source
     .map((item) => item.replace(/^[-*•]\s+/, "").trim())
     .filter(Boolean)
-    .slice(0, MAX_SUMMARY_BULLETS)
+    .slice(0, maxBullets)
     .map((item) => (item.length > MAX_BULLET_LENGTH ? `${item.slice(0, MAX_BULLET_LENGTH - 1)}…` : item));
   return bullets.length > 0 ? bullets : fallback;
 }
@@ -152,7 +152,7 @@ export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottlen
         groupingCaller: group.title,
         title: annotation ? title : fallbackTitle,
         supportingFunctionIds: annotation ? [...new Set(ids as string[])] : heaviest.map((fn) => fn.id),
-        summary: normalizeSummary(annotation?.summary, fallbackSummary),
+        summary: normalizeSummary(annotation?.summary, fallbackSummary, heaviest.length),
       };
     }).sort((a, b) => b.combinedTimeMs - a.combinedTimeMs),
   };
