@@ -14,6 +14,7 @@ import {
   Text,
 } from "@rozenite/ui";
 
+import { HowToUseGuide } from "@/app/how-to-use";
 import type { Hotspot } from "@/lib/analysis";
 import type { ReactIssue } from "@/lib/react-analyzer";
 
@@ -161,7 +162,6 @@ interface HotPathCard {
 }
 
 function hotspotRows(hotspot: Hotspot): HotPathCard {
-  console.log('== hotspot', hotspot);
   const ranked = hotspot.functions
     .map((fn, index) => ({ fn, detail: hotspot.summary[index] }))
     .sort((a, b) => b.fn.selfTimeMs - a.fn.selfTimeMs);
@@ -376,6 +376,7 @@ export default function Home() {
 }
 
 function InspectorApp() {
+  const [guideOpen, setGuideOpen] = useState(false);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
   const [modelStatus, setModelStatus] = useState<{ configured: boolean; provider?: string; model?: string; error?: string } | null>(null);
@@ -592,6 +593,9 @@ function InspectorApp() {
           RN Profile Inspector
         </PluginHeader.Title>
         <PluginHeader.Actions>
+          <Button type="button" size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
+            How to use it?
+          </Button>
           <Text variant="caption" className="local-badge">
             <IndicatorDot tone="success" size="lg" />
             Runs locally · AI-assisted
@@ -599,6 +603,7 @@ function InspectorApp() {
           <PluginHeader.ThemeSwitcher />
         </PluginHeader.Actions>
       </PluginHeader>
+      <HowToUseGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <PluginShell.Body>
       <section className={`workspace${phase === "results" ? " results" : ""}`}>

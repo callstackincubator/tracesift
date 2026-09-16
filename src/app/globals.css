@@ -345,3 +345,124 @@ button, input { font: inherit; }
 .react-budget-field label { font-weight: 600; }
 .react-budget-field input { width: 150px; border: 1px solid var(--border, #555); border-radius: 6px; padding: 8px 12px; background: transparent; color: inherit; }
 .react-budget-field p { font-size: 13px; opacity: .75; }
+
+.how-to-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  isolation: isolate;
+}
+.how-to-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, #000 45%, transparent);
+  animation: how-to-fade-in 180ms ease-out;
+}
+.how-to-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px 20px 24px;
+  color: var(--foreground);
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  box-shadow: -16px 0 40px color-mix(in srgb, #000 28%, transparent);
+  animation: how-to-slide-in 180ms ease-out;
+}
+.how-to-drawer-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.how-to-drawer-header [data-slot="heading"] {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.how-to-intro {
+  display: grid;
+  flex-shrink: 0;
+  gap: 8px;
+  margin: 16px 0 18px;
+}
+.how-to-intro p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.how-to-intro code,
+.how-to-steps code {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+}
+.how-to-tabs {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+}
+.how-to-tabs [data-slot="tabs-list"] {
+  flex-shrink: 0;
+  width: fit-content;
+  max-width: 100%;
+}
+.how-to-panel {
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.how-to-panel:not([hidden]) {
+  display: flex;
+}
+.how-to-panel[hidden] {
+  display: none;
+}
+.how-to-scroll {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.how-to-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0 8px 8px 1.2em;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@keyframes how-to-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes how-to-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 680px) {
+  .how-to-drawer {
+    width: 100%;
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+    border-left: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .how-to-drawer,
+  .how-to-backdrop { animation: none; }
+}
