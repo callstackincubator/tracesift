@@ -83,6 +83,12 @@ button, input { font: inherit; }
 }
 
 .profile-option:hover { border-color: var(--ring); }
+.profile-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.profile-option:disabled:hover { border-color: var(--border); }
+.profile-option.selected:disabled:hover { border-color: var(--primary); }
 .profile-option.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--accent);
@@ -145,6 +151,13 @@ button, input { font: inherit; }
 }
 
 .upload-pane:hover, .upload-pane.is-dragging { background: var(--accent); border-color: var(--primary); }
+.upload-pane.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.upload-pane.is-disabled:hover { background: var(--muted); border-color: var(--border); }
+.upload-pane.has-file.is-disabled:hover { background: color-mix(in srgb, var(--primary) 18%, var(--muted)); border-color: var(--primary); }
 .upload-pane.has-file { background: color-mix(in srgb, var(--primary) 18%, var(--muted)); border-color: var(--primary); }
 .upload-pane input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .upload-icon { width: 44px; height: 44px; display: grid; place-items: center; color: var(--primary); background: var(--accent); border-radius: 50%; }
@@ -344,6 +357,7 @@ button, input { font: inherit; }
 .react-budget-field { display: grid; gap: 8px; margin-top: 20px; }
 .react-budget-field label { font-weight: 600; }
 .react-budget-field input { width: 150px; border: 1px solid var(--border, #555); border-radius: 6px; padding: 8px 12px; background: transparent; color: inherit; }
+.react-budget-field input:disabled { cursor: not-allowed; opacity: 0.55; }
 .react-budget-field p { font-size: 13px; opacity: .75; }
 
 .how-to-overlay {

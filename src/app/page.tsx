@@ -308,40 +308,45 @@ function UploadPane({
   title,
   detail,
   file,
+  disabled,
   onFile,
 }: {
   kind: UploadKind;
   title: string;
   detail: string;
   file?: File;
+  disabled?: boolean;
   onFile: (file?: File) => void;
 }) {
   const inputId = useId();
   const [isDragging, setIsDragging] = useState(false);
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     onFile(event.target.files?.[0]);
   };
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     setIsDragging(false);
+    if (disabled) return;
     onFile(event.dataTransfer.files?.[0]);
   };
 
   return (
     <label
-      className={`upload-pane${isDragging ? " is-dragging" : ""}${file ? " has-file" : ""}`}
-      htmlFor={inputId}
+      className={`upload-pane${isDragging && !disabled ? " is-dragging" : ""}${file ? " has-file" : ""}${disabled ? " is-disabled" : ""}`}
+      htmlFor={disabled ? undefined : inputId}
+      aria-disabled={disabled}
       onDragEnter={(event) => {
         event.preventDefault();
-        setIsDragging(true);
+        if (!disabled) setIsDragging(true);
       }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
     >
-      <input id={inputId} type="file" accept={acceptedFiles[kind]} onChange={handleChange} />
+      <input id={inputId} type="file" accept={acceptedFiles[kind]} disabled={disabled} onChange={handleChange} />
       <span className="upload-icon"><UploadIcon /></span>
       <span className="upload-title">{file ? file.name : title}</span>
       <span className="upload-detail">{file ? "Ready to analyze" : detail}</span>
@@ -584,6 +589,7 @@ function InspectorApp() {
   };
 
   const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
+  const analyzing = phase === "analyzing";
 
   return (
     <PluginShell>
@@ -615,14 +621,14 @@ function InspectorApp() {
               <p>Choose a profile type, then add the profile captured from your React Native app.</p>
             </div>
 
-            <div className="profile-options" role="radiogroup" aria-label="Profile type">
-              <button type="button" role="radio" aria-checked={profileType === "javascript"} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
+            <div className="profile-options" role="radiogroup" aria-label="Profile type" aria-disabled={analyzing}>
+              <button type="button" role="radio" aria-checked={profileType === "javascript"} disabled={analyzing} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
                 <span className="profile-icon"><ProfileIcon type="javascript" /></span>
                 <span className="option-copy"><strong>JavaScript CPU profile</strong><small>Inspect call stacks and JavaScript execution time</small></span>
                 <span className="radio-indicator" />
               </button>
 
-              <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
+              <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
                 <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
                 <span className="radio-indicator" />
@@ -637,9 +643,9 @@ function InspectorApp() {
 
               <div className="upload-grid single">
                 {profileType === "javascript" ? (
-                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
+                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} disabled={analyzing} onFile={(file) => updateFile("cpu", file)} />
                 ) : (
-                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
+                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} disabled={analyzing} onFile={(file) => updateFile("reactProfile", file)} />
                 )}
               </div>
 
@@ -647,6 +653,7 @@ function InspectorApp() {
                 <div className="react-budget-field">
                   <label htmlFor="react-frame-budget">Commit budget (ms)</label>
                   <input id="react-frame-budget" type="number" step="any" value={frameBudget}
+                    disabled={analyzing}
                     aria-invalid={!validBudget} aria-describedby="react-budget-help"
                     onChange={event => setFrameBudget(event.target.value)} />
                   <p id="react-budget-help">Defaults to 16 ms. Use a lower budget, such as 8.33 ms, for a higher refresh-rate target.</p>
@@ -678,7 +685,7 @@ function InspectorApp() {
 
             <div className="action-row">
               <p>Your profile stays on this device and is analyzed locally.</p>
-              <Button size="lg" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
+              <Button size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
                     <RozeniteLoader size={16} label="" />
