@@ -4,18 +4,53 @@ import type { ReactIssue } from "./react-analyzer";
 
 export const MAX_GROUP_PROMPT_BYTES = 6_000;
 const MAX_FUNCTIONS = 8;
-const MAX_STACK_FRAMES = 6;
+const MAX_STACK_FRAMES = 24;
 
 function compactText(text: string): string {
   return text.length <= 200 ? text : `${text.slice(0, 140)}…${text.slice(-59)}`;
 }
 
+/** Keep names from URL-backed frames, but never present a URL as a source file. */
+function sourceFrame(label: string): { name: string; location?: string } {
+  const match = /^(.*) \((.*):\d+:\d+\)$/.exec(label);
+  if (!match) return { name: label };
+  const [, name, location] = match;
+  const readable = !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(location)
+    || /^[a-z]:[\\/]/i.test(location);
+  return {
+    name,
+    location: readable && /\.(?:[cm]?[jt]sx?|vue|svelte)(?::|$)/i.test(location)
+      ? label.slice(name.length + 2, -1)
+      : undefined,
+  };
+}
+
 function compactStack(stack: string[]): string[] {
-  // Retain both the hot leaf and the owning caller when the path is deep.
-  const frames = stack.length > MAX_STACK_FRAMES
-    ? [...stack.slice(0, 3), "… (intermediate frames omitted)", ...stack.slice(-2)]
-    : stack;
-  return frames.map(compactText);
+  const parsed = stack.map(sourceFrame);
+  const selected = new Set<number>();
+  const add = (index: number) => {
+    if (index >= 0 && index < stack.length && selected.size < MAX_STACK_FRAMES) selected.add(index);
+  };
+  // Anchor the hot work and outer context, then prioritize source-bearing callers
+  // and event handlers anywhere in the stack (including directly below dispatch).
+  [0, 1, 2, stack.length - 2, stack.length - 1].forEach(add);
+  parsed.forEach((frame, index) => {
+    if (/^_?on[A-Z]/.test(frame.name) || parsed[index + 1]?.name === "executeDispatch") add(index);
+  });
+  parsed.forEach((frame, index) => { if (frame.location && !/node_modules/.test(frame.location)) add(index); });
+  parsed.forEach((frame, index) => {
+    if (!/^(?:\(anonymous\)|dispatch|executeDispatch|batchedUpdates|processDispatch|perform|workLoop|flush|runWith)/.test(frame.name)) add(index);
+  });
+  parsed.forEach((_, index) => add(index));
+  const result: string[] = [];
+  let previous = -1;
+  for (const index of [...selected].sort((a, b) => a - b)) {
+    if (index > previous + 1) result.push("… (intermediate frames omitted)");
+    const { name, location } = parsed[index];
+    result.push(compactText(location ? `${name} (${location})` : name));
+    previous = index;
+  }
+  return result;
 }
 
 /** Separate bounded agent context from the complete measurements retained for the UI. */
@@ -64,15 +99,19 @@ export function compactAnnotation(text: string): string {
   return text.slice(0, 2_000);
 }
 
-/** The prompt writer needs the existing conclusion, not another profile analysis. */
+/** Carry the recorded caller evidence forward with the existing conclusion. */
 export function debugPromptData(hotspot: Hotspot) {
   const shortlisted = new Set(hotspot.supportingFunctionIds);
+  const context = bottleneckPromptData({
+    ...hotspot,
+    title: hotspot.groupingCaller,
+    functions: hotspot.functions.filter((fn) => shortlisted.has(fn.id)),
+  });
   return {
-    summary: compactAnnotation(hotspot.summary),
-    functions: hotspot.functions
-      .filter((fn) => shortlisted.has(fn.id))
-      .slice(0, MAX_FUNCTIONS)
-      .map((fn) => compactText(fn.title)),
+    summary: compactAnnotation(hotspot.summary.join("\n")),
+    groupingCaller: context.groupingCaller,
+    stack: context.stack,
+    functions: context.functions,
   };
 }
 
@@ -81,7 +120,6 @@ export function debugReactIssuePromptData(issue: ReactIssue) {
   return {
     summary: compactAnnotation(issue.summary),
     evidence: compactAnnotation(issue.evidence),
-    suggestedFix: compactAnnotation(issue.suggestedFix),
     component: compactText(issue.component),
     severity: issue.severity,
     commits: issue.commits.slice(0, MAX_FUNCTIONS).map((commit) => ({

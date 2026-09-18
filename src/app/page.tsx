@@ -5,6 +5,8 @@ import {
   Alert,
   ArrowRight,
   Button,
+  Check,
+  Copy,
   IndicatorDot,
   PluginHeader,
   PluginShell,
@@ -12,6 +14,7 @@ import {
   Text,
 } from "@rozenite/ui";
 
+import { HowToUseGuide } from "@/app/how-to-use";
 import type { Hotspot } from "@/lib/analysis";
 import type { ReactIssue } from "@/lib/react-analyzer";
 
@@ -49,6 +52,11 @@ const acceptedFiles: Record<UploadKind, string> = {
   reactProfile: ".json,application/json",
 };
 
+function shortFunctionName(title: string): string {
+  const cut = title.indexOf(" (");
+  return cut > 0 ? title.slice(0, cut) : title;
+}
+
 function formatMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
   if (ms < 1000) return `${Math.round(ms)} ms`;
@@ -85,10 +93,119 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function DebuggingPromptSection({
-  id,
-  emptyLabel,
-  loadingLabel,
+function SparklesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3 13.6 8.4 19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6Z" />
+      <path d="M19 3v4M21 5h-4M5 16v3M6.5 17.5h-3" />
+    </svg>
+  );
+}
+
+function PromptActionButton({
+  prompt,
+  loading,
+  copied,
+  busy,
+  onGenerate,
+  onCopy,
+}: {
+  prompt?: string;
+  loading: boolean;
+  copied: boolean;
+  busy: boolean;
+  onGenerate: () => void;
+  onCopy: () => void;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="prompt-action-button"
+      disabled={loading || (!prompt && busy)}
+      onClick={() => (prompt ? onCopy() : onGenerate())}
+    >
+      {loading ? <RozeniteLoader size={14} label="" /> : prompt ? (copied ? <Check /> : <Copy />) : <SparklesIcon />}
+      {loading ? "Generating…" : prompt ? (copied ? "Copied!" : "Copy Prompt") : "Generate Prompt"}
+    </Button>
+  );
+}
+
+function TokenBreakdown({ usage }: { usage?: TokenUsage }) {
+  if (!usage) return null;
+  return (
+    <p className="token-breakdown" title="Tokens consumed by the agent that generated this prompt">
+      {formatTokens(usage.totalTokens)} tokens · {usageBreakdown(usage)}
+    </p>
+  );
+}
+
+const MAX_RESULT_CARDS = 3;
+
+function issuePeakMs(issue: ReactIssue): number {
+  return issue.commits.reduce((max, commit) => Math.max(max, commit.durationMs), 0);
+}
+
+/** One "hot path" row: a single function's share of a card's total time. */
+interface HotPathRow {
+  fnName: string;
+  fnTitle?: string;
+  ms?: number;
+  percentLabel?: string;
+  barPercent?: number;
+  caption?: string;
+}
+
+interface HotPathCard {
+  rows: HotPathRow[];
+  footnote?: string;
+}
+
+function hotspotRows(hotspot: Hotspot): HotPathCard {
+  const ranked = hotspot.functions
+    .map((fn, index) => ({ fn, detail: hotspot.summary[index] }))
+    .sort((a, b) => b.fn.selfTimeMs - a.fn.selfTimeMs);
+  const shown = ranked.slice(0, MAX_RESULT_CARDS);
+  const rows: HotPathRow[] = shown.map(({ fn, detail }) => ({
+    fnName: shortFunctionName(fn.title),
+    fnTitle: fn.title,
+    ms: fn.selfTimeMs,
+    percentLabel: `${Math.round(fn.percentOfGroup)}% of group`,
+    barPercent: fn.percentOfGroup,
+    caption: detail,
+  }));
+
+  const attributedMs = ranked.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
+  const leftoverMs = hotspot.combinedTimeMs - attributedMs;
+  const footnote = leftoverMs >= 1
+    ? `+ ~${formatMs(leftoverMs)} other self time not attributed to a named function`
+    : undefined;
+
+  return { rows, footnote };
+}
+
+function reactIssueRows(issue: ReactIssue): HotPathCard {
+  const fnName = issue.component || undefined;
+  const caption = issue.evidence.trim() || undefined;
+  if (!fnName && !caption) return { rows: [] };
+  return {
+    rows: [{
+      fnName: fnName ?? "Component",
+      fnTitle: issue.component ? `${issue.component} (${issue.componentId})` : undefined,
+      ms: issue.selfTimeMs,
+      percentLabel: issue.percentOfCommit !== undefined ? `${Math.round(issue.percentOfCommit)}% of commit` : undefined,
+      barPercent: issue.percentOfCommit,
+      caption,
+    }],
+  };
+}
+
+function AnalysisResultCard({
+  rank,
+  title,
+  timeLabel,
+  rows,
+  footnote,
   prompt,
   usage,
   loading,
@@ -98,65 +215,63 @@ function DebuggingPromptSection({
   onGenerate,
   onCopy,
 }: {
-  id: string;
-  emptyLabel: string;
-  loadingLabel: string;
+  rank: number;
+  title: string;
+  timeLabel: string;
+  rows: HotPathRow[];
+  footnote?: string;
   prompt?: string;
   usage?: TokenUsage;
   loading: boolean;
   error?: string;
   copied: boolean;
   busy: boolean;
-  onGenerate: (id: string) => void;
-  onCopy: (id: string) => void;
+  onGenerate: () => void;
+  onCopy: () => void;
 }) {
   return (
-    <div className="details-block prompt-block">
-      <div className="prompt-head">
-        <h3>Debugging prompt</h3>
-        <span className="prompt-head-actions">
-          {usage && (
-            <span className="usage-chip" title="Tokens consumed by the agent that generated this prompt">
-              {formatTokens(usage.totalTokens)} tokens · {usageBreakdown(usage)}
-            </span>
-          )}
-          <Button
-            size="sm"
-            disabled={!prompt}
-            onClick={() => void onCopy(id)}
-          >
-            {copied ? "Copied!" : "Copy prompt"}
-          </Button>
-        </span>
+    <article className="hotspot-card">
+      <div className="hotspot-head">
+        <span className="hotspot-rank">{rank}</span>
+        <strong>{title}</strong>
+        <span className="hotspot-time">{timeLabel}</span>
       </div>
-
-      {loading ? (
-        <p className="prompt-loading">
-          <span className="spinner" aria-hidden="true" />
-          {loadingLabel}
-        </p>
-      ) : prompt ? (
-        <details className="prompt-details" open={false}>
-          <summary>View generated prompt</summary>
-          <pre className="prompt-box">{prompt}</pre>
-        </details>
-      ) : error ? (
-        <p className="prompt-error">
-          {error}
-          <Button size="sm" tone="danger" variant="outline" onClick={() => void onGenerate(id)}>Retry</Button>
-        </p>
-      ) : (
-        <div className="prompt-generate">
-          <p className="prompt-loading">{emptyLabel}</p>
-          <Button
-            disabled={busy}
-            onClick={() => void onGenerate(id)}
-          >
-            Generate prompt
-          </Button>
+      {rows.length > 0 && (
+        <div className="hot-path-rows">
+          {rows.map((row, rowIndex) => (
+            <div className="hot-path-row" key={rowIndex}>
+              {row.ms !== undefined && (
+                <>
+                  <div className="row-figure-line">
+                    <span className="row-figure">{formatMs(row.ms)}</span>
+                    {row.percentLabel ? <span className="row-share">{row.percentLabel}</span> : null}
+                  </div>
+                  <div className="row-bar-track" aria-hidden="true">
+                    <span className="row-bar-fill" style={{ width: `${row.barPercent ?? 0}%` }} />
+                  </div>
+                </>
+              )}
+              {row.caption ? <p className="row-caption">{row.caption}</p> : null}
+            </div>
+          ))}
+          {footnote ? <p className="hot-path-footnote">{footnote}</p> : null}
         </div>
       )}
-    </div>
+      <div className="hotspot-footer">
+        {error ? <p className="hotspot-prompt-error">{error}</p> : null}
+        <div className="hotspot-actions">
+          <PromptActionButton
+            prompt={prompt}
+            loading={loading}
+            copied={copied}
+            busy={busy}
+            onGenerate={onGenerate}
+            onCopy={onCopy}
+          />
+          <TokenBreakdown usage={usage} />
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -193,40 +308,45 @@ function UploadPane({
   title,
   detail,
   file,
+  disabled,
   onFile,
 }: {
   kind: UploadKind;
   title: string;
   detail: string;
   file?: File;
+  disabled?: boolean;
   onFile: (file?: File) => void;
 }) {
   const inputId = useId();
   const [isDragging, setIsDragging] = useState(false);
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     onFile(event.target.files?.[0]);
   };
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     setIsDragging(false);
+    if (disabled) return;
     onFile(event.dataTransfer.files?.[0]);
   };
 
   return (
     <label
-      className={`upload-pane${isDragging ? " is-dragging" : ""}${file ? " has-file" : ""}`}
-      htmlFor={inputId}
+      className={`upload-pane${isDragging && !disabled ? " is-dragging" : ""}${file ? " has-file" : ""}${disabled ? " is-disabled" : ""}`}
+      htmlFor={disabled ? undefined : inputId}
+      aria-disabled={disabled}
       onDragEnter={(event) => {
         event.preventDefault();
-        setIsDragging(true);
+        if (!disabled) setIsDragging(true);
       }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
     >
-      <input id={inputId} type="file" accept={acceptedFiles[kind]} onChange={handleChange} />
+      <input id={inputId} type="file" accept={acceptedFiles[kind]} disabled={disabled} onChange={handleChange} />
       <span className="upload-icon"><UploadIcon /></span>
       <span className="upload-title">{file ? file.name : title}</span>
       <span className="upload-detail">{file ? "Ready to analyze" : detail}</span>
@@ -261,6 +381,7 @@ export default function Home() {
 }
 
 function InspectorApp() {
+  const [guideOpen, setGuideOpen] = useState(false);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
   const [modelStatus, setModelStatus] = useState<{ configured: boolean; provider?: string; model?: string; error?: string } | null>(null);
@@ -284,10 +405,7 @@ function InspectorApp() {
   const [frameBudget, setFrameBudget] = useState("16");
   const [appliedBudget, setAppliedBudget] = useState(16);
   const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
-  const [reactReasoning, setReactReasoning] = useState("");
   const [reactSummary, setReactSummary] = useState<ReactSummary | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [promptUsages, setPromptUsages] = useState<Record<string, TokenUsage>>({});
   const [analyzerUsage, setAnalyzerUsage] = useState<TokenUsage | null>(null);
@@ -370,11 +488,9 @@ function InspectorApp() {
         setAnalysisId(data.analysisId ?? null);
         setHotspots([]);
         setReactIssues(data.issues);
-        setReactReasoning(data.issues.length > 0 ? data.reasoning ?? "" : "");
         setAppliedBudget(data.frameBudgetMs ?? Number(frameBudget));
         setReactSummary(data.summary ?? null);
         setTotalMs(data.summary?.totalCommitRenderDurationMs ?? 0);
-        setSelectedId(null);
         setPhase("results");
         return;
       }
@@ -394,18 +510,12 @@ function InspectorApp() {
       setTotalMs(result.totalMs);
       setHotspots(result.hotspots);
       setReactSummary(null);
-      setSelectedId(result.hotspots[0]?.id ?? null);
       setPhase("results");
     } catch (err) {
       setError(errorMessageFrom(err));
       setErrorDetail(null);
       setPhase("upload");
     }
-  };
-
-  const selectHotspot = (id: string) => {
-    setSelectedId(id);
-    setCopiedId(null);
   };
 
   const generatePrompt = async (id: string) => {
@@ -470,8 +580,6 @@ function InspectorApp() {
     setHotspots([]);
     setReactSummary(null);
     setReactIssues([]);
-    setReactReasoning("");
-    setSelectedId(null);
     setPrompts({});
     setPromptUsages({});
     setAnalyzerUsage(null);
@@ -480,9 +588,8 @@ function InspectorApp() {
     setCopiedId(null);
   };
 
-  const selected = hotspots.find((hotspot) => hotspot.id === selectedId);
-  const selectedPromptUsage = selected ? promptUsages[selected.id] : undefined;
-  const maxPercent = hotspots.length > 0 ? Math.max(...hotspots.map((hotspot) => hotspot.percentOfTotal)) : 0;
+  const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
+  const analyzing = phase === "analyzing";
 
   return (
     <PluginShell>
@@ -492,6 +599,9 @@ function InspectorApp() {
           RN Profile Inspector
         </PluginHeader.Title>
         <PluginHeader.Actions>
+          <Button type="button" size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
+            How to use it?
+          </Button>
           <Text variant="caption" className="local-badge">
             <IndicatorDot tone="success" size="lg" />
             Runs locally · AI-assisted
@@ -499,9 +609,10 @@ function InspectorApp() {
           <PluginHeader.ThemeSwitcher />
         </PluginHeader.Actions>
       </PluginHeader>
+      <HowToUseGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <PluginShell.Body>
-      <section className="workspace">
+      <section className={`workspace${phase === "results" ? " results" : ""}`}>
         {(phase === "upload" || phase === "analyzing") && (
           <>
             <div className="intro">
@@ -510,14 +621,14 @@ function InspectorApp() {
               <p>Choose a profile type, then add the profile captured from your React Native app.</p>
             </div>
 
-            <div className="profile-options" role="radiogroup" aria-label="Profile type">
-              <button type="button" role="radio" aria-checked={profileType === "javascript"} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
+            <div className="profile-options" role="radiogroup" aria-label="Profile type" aria-disabled={analyzing}>
+              <button type="button" role="radio" aria-checked={profileType === "javascript"} disabled={analyzing} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
                 <span className="profile-icon"><ProfileIcon type="javascript" /></span>
                 <span className="option-copy"><strong>JavaScript CPU profile</strong><small>Inspect call stacks and JavaScript execution time</small></span>
                 <span className="radio-indicator" />
               </button>
 
-              <button type="button" role="radio" aria-checked={profileType === "react"} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
+              <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
                 <span className="option-copy"><strong>React component profile</strong><small>Find expensive renders and component updates</small></span>
                 <span className="radio-indicator" />
@@ -532,9 +643,9 @@ function InspectorApp() {
 
               <div className="upload-grid single">
                 {profileType === "javascript" ? (
-                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} onFile={(file) => updateFile("cpu", file)} />
+                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} disabled={analyzing} onFile={(file) => updateFile("cpu", file)} />
                 ) : (
-                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} onFile={(file) => updateFile("reactProfile", file)} />
+                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} disabled={analyzing} onFile={(file) => updateFile("reactProfile", file)} />
                 )}
               </div>
 
@@ -542,6 +653,7 @@ function InspectorApp() {
                 <div className="react-budget-field">
                   <label htmlFor="react-frame-budget">Commit budget (ms)</label>
                   <input id="react-frame-budget" type="number" step="any" value={frameBudget}
+                    disabled={analyzing}
                     aria-invalid={!validBudget} aria-describedby="react-budget-help"
                     onChange={event => setFrameBudget(event.target.value)} />
                   <p id="react-budget-help">Defaults to 16 ms. Use a lower budget, such as 8.33 ms, for a higher refresh-rate target.</p>
@@ -573,7 +685,7 @@ function InspectorApp() {
 
             <div className="action-row">
               <p>Your profile stays on this device and is analyzed locally.</p>
-              <Button size="lg" disabled={!isReady || phase === "analyzing"} onClick={() => void handleAnalyze()}>
+              <Button size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
                     <RozeniteLoader size={16} label="" />
@@ -595,10 +707,13 @@ function InspectorApp() {
             <div className="results-header">
               <div className="intro">
                 <span className="eyebrow">Analysis results</span>
-                <h1 className="results-title">{reactIssues.length} React issue{reactIssues.length === 1 ? "" : "s"} found</h1>
+                <h1 className="results-title">React issues</h1>
                 <p>
-                  {appliedBudget} ms budget
+                  {reactIssues.length} issue{reactIssues.length === 1 ? "" : "s"} · {appliedBudget} ms budget
                   {reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : ""}
+                  {reactSummary && reactSummary.omittedEvidenceCommitCount > 0
+                    ? ` · ${reactSummary.omittedEvidenceCommitCount} commits omitted from detailed analysis`
+                    : ""}
                 </p>
                 {analyzerUsage && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
@@ -609,42 +724,30 @@ function InspectorApp() {
               <Button tone="primary" variant="outline" onClick={resetToUpload}>New analysis</Button>
             </div>
 
-            <section className="react-issues" aria-label="React issues">
-              {reactIssues.length === 0 && <h2>No significant React issues found in this recording</h2>}
-              {reactIssues.length > 0 && <p className="details-summary">{reactReasoning}</p>}
-              {reactIssues.length > 0 && reactSummary && reactSummary.omittedEvidenceCommitCount > 0 && (
-                <p className="grouping-note">Detailed analysis used the 50 slowest commits; {reactSummary.omittedEvidenceCommitCount} other commits are included in the summary measurements.</p>
-              )}
-              {reactIssues.map(issue => (
-                <article key={issue.id} className="details-panel">
-                  <div className="details-heading">
-                    <h2>{issue.summary}</h2>
-                    <span className="react-severity">{issue.severity} severity</span>
-                  </div>
-                  {issue.component && <p><strong>{issue.component}</strong> · {issue.componentId}</p>}
-                  <p className="details-summary">{issue.evidence}</p>
-                  <ul className="react-commit-list">
-                    {issue.commits.map(commit => <li key={`${commit.rootID}:${commit.commitIndex}`} title={`React root ${commit.rootID}`}>
-                      Commit {commit.commitIndex + 1}: {commit.durationMs} ms at {commit.timestampMs} ms
-                    </li>)}
-                  </ul>
-                  <div className="details-block"><h3>Suggested fix to verify</h3><p>{issue.suggestedFix}</p></div>
-                  <DebuggingPromptSection
-                    id={issue.id}
-                    emptyLabel="No prompt generated for this issue yet."
-                    loadingLabel="Generating a prompt from the issue details…"
+            <div className="hotspot-list">
+              {reactIssueCards.map((issue, index) => {
+                const peakMs = issuePeakMs(issue);
+                const { rows, footnote } = reactIssueRows(issue);
+                return (
+                  <AnalysisResultCard
+                    key={issue.id}
+                    rank={index + 1}
+                    title={issue.summary}
+                    timeLabel={`${issue.severity} · ${formatMs(peakMs)}`}
+                    rows={rows}
+                    footnote={footnote}
                     prompt={prompts[issue.id]}
                     usage={promptUsages[issue.id]}
                     loading={promptLoadingId === issue.id}
                     error={promptErrors[issue.id]}
                     copied={copiedId === issue.id}
                     busy={promptLoadingId !== null}
-                    onGenerate={(id) => void generatePrompt(id)}
-                    onCopy={(id) => void copyPrompt(id)}
+                    onGenerate={() => void generatePrompt(issue.id)}
+                    onCopy={() => void copyPrompt(issue.id)}
                   />
-                </article>
-              ))}
-            </section>
+                );
+              })}
+            </div>
           </>
         )}
 
@@ -655,7 +758,7 @@ function InspectorApp() {
                 <span className="eyebrow">Analysis results</span>
                 <h1 className="results-title">Bottlenecks, slowest first</h1>
                 <p>
-                  {hotspots.length} bottleneck{hotspots.length === 1 ? "" : "s"} found · total profile time {formatMs(totalMs)}
+                  {hotspots.length} bottleneck{hotspots.length === 1 ? "" : "s"} · {formatMs(totalMs)} total
                 </p>
                 {analyzerUsage && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
@@ -666,94 +769,29 @@ function InspectorApp() {
               <Button tone="primary" variant="outline" onClick={resetToUpload}>New analysis</Button>
             </div>
 
-            <p className="grouping-note">Related calls share one card. Combined time adds their self times, counting each sample once.</p>
             <div className="hotspot-list">
-              {hotspots.map((hotspot, index) => (
-                <button
+              {hotspots.map((hotspot, index) => {
+                const { rows, footnote } = hotspotRows(hotspot);
+                return (
+                <AnalysisResultCard
                   key={hotspot.id}
-                  type="button"
-                  className={`hotspot-card${selectedId === hotspot.id ? " selected" : ""}`}
-                  aria-pressed={selectedId === hotspot.id}
-                  onClick={() => selectHotspot(hotspot.id)}
-                >
-                  <span className="hotspot-rank">{index + 1}</span>
-                  <span className="hotspot-main">
-                    <span className="hotspot-top">
-                      <strong>{hotspot.title}</strong>
-                      <span className="hotspot-time">{formatMs(hotspot.combinedTimeMs)} · {hotspot.percentOfTotal}%</span>
-                    </span>
-                    <span className="hotspot-bar" aria-hidden="true">
-                      <span style={{ width: `${maxPercent > 0 ? Math.max(4, (hotspot.percentOfTotal / maxPercent) * 100) : 0}%` }} />
-                    </span>
-                    <small>{hotspot.summary}</small>
-                    <span className="function-breakdown">
-                      <span className="function-heading">{hotspot.functions.length} function{hotspot.functions.length === 1 ? "" : "s"} · self time within this bottleneck</span>
-                      {hotspot.functions.map((fn) => (
-                        <span className="function-row" key={fn.id}>
-                          <span className="function-name" title={fn.stack.join("\n")}>{fn.title}</span>
-                          <span>{formatMs(fn.selfTimeMs)} · {fn.percentOfGroup}%</span>
-                        </span>
-                      ))}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {selected && (
-              <section className="details-panel" aria-live="polite">
-                <div className="details-heading">
-                  <div>
-                    <span className="eyebrow">Bottleneck details</span>
-                    <h2>{selected.title}</h2>
-                  </div>
-                  <div className="details-metrics">
-                    <div>
-                      <small>Combined time</small>
-                      <strong>{formatMs(selected.combinedTimeMs)}</strong>
-                    </div>
-                    <div>
-                      <small>Share of total</small>
-                      <strong>{selected.percentOfTotal}%</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="details-summary">{selected.summary}</p>
-
-                <div className="details-block">
-                  <h3>Functions in this bottleneck</h3>
-                  {selected.functions.map((fn) => (
-                    <details className="function-detail" key={fn.id}>
-                      <summary>{fn.title} · {formatMs(fn.selfTimeMs)} self time · {fn.percentOfGroup}% of bottleneck</summary>
-                      <p>Representative stack; self time may include other call paths.</p>
-                      <ol className="stack-view">
-                        {fn.stack.map((frame, index) => <li key={index}>{frame}</li>)}
-                      </ol>
-                    </details>
-                  ))}
-                </div>
-
-                <div className="details-block">
-                  <h3>Possible solution</h3>
-                  <p>{selected.suggestedFix}</p>
-                </div>
-
-                <DebuggingPromptSection
-                  id={selected.id}
-                  emptyLabel="No prompt generated for this hotspot yet."
-                  loadingLabel="Generating a prompt from the hotspot details…"
-                  prompt={prompts[selected.id]}
-                  usage={selectedPromptUsage}
-                  loading={promptLoadingId === selected.id}
-                  error={promptErrors[selected.id]}
-                  copied={copiedId === selected.id}
+                  rank={index + 1}
+                  title={hotspot.title}
+                  timeLabel={formatMs(hotspot.combinedTimeMs)}
+                  rows={rows}
+                  footnote={footnote}
+                  prompt={prompts[hotspot.id]}
+                  usage={promptUsages[hotspot.id]}
+                  loading={promptLoadingId === hotspot.id}
+                  error={promptErrors[hotspot.id]}
+                  copied={copiedId === hotspot.id}
                   busy={promptLoadingId !== null}
-                  onGenerate={(id) => void generatePrompt(id)}
-                  onCopy={(id) => void copyPrompt(id)}
+                  onGenerate={() => void generatePrompt(hotspot.id)}
+                  onCopy={() => void copyPrompt(hotspot.id)}
                 />
-              </section>
-            )}
+                );
+              })}
+            </div>
           </>
         )}
       </section>

@@ -6,11 +6,14 @@ import path from "node:path";
 import type { Bottleneck } from "./bottlenecks";
 import type { ReactIssue } from "./react-analyzer";
 
+export const MAX_SUMMARY_BULLETS = 3;
+const MAX_BULLET_LENGTH = 180;
+
 export interface Hotspot extends Bottleneck {
   groupingCaller: string;
   supportingFunctionIds: string[];
-  summary: string;
-  suggestedFix: string;
+  /** At most three short bullets describing the expensive work. */
+  summary: string[];
 }
 
 /** Token accounting for one agent run, summed across all assistant turns. */
@@ -98,6 +101,29 @@ export async function destroyRecord(id: string, dir?: string): Promise<void> {
   await rm(target, { recursive: true, force: true }).catch(() => undefined);
 }
 
+function splitSummaryText(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const lines = trimmed.split(/\n+/).map((line) => line.replace(/^[-*•\d.)]+\s+/, "").trim()).filter(Boolean);
+  if (lines.length > 1) return lines;
+  return trimmed.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
+}
+
+/** Accept an array, a prose string, or missing text; return at most `maxBullets` bullets. */
+export function normalizeSummary(raw: unknown, fallback: string[], maxBullets: number = MAX_SUMMARY_BULLETS): string[] {
+  const source = Array.isArray(raw)
+    ? raw.filter((item): item is string => typeof item === "string")
+    : typeof raw === "string"
+      ? splitSummaryText(raw)
+      : [];
+  const bullets = source
+    .map((item) => item.replace(/^[-*•]\s+/, "").trim())
+    .filter(Boolean)
+    .slice(0, maxBullets)
+    .map((item) => (item.length > MAX_BULLET_LENGTH ? `${item.slice(0, MAX_BULLET_LENGTH - 1)}…` : item));
+  return bullets.length > 0 ? bullets : fallback;
+}
+
 /** Keep measured groups authoritative; the agent only supplies explanations. */
 export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottleneck[]): { hotspots: Hotspot[]; totalMs: number } {
   const annotations = new Map<string, Record<string, unknown>>();
@@ -118,16 +144,31 @@ export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottlen
         && ids.includes(group.functions[0]?.id);
       const title = typeof candidate?.title === "string" ? candidate.title.trim() : "";
       const annotation = validEvidence && title.length > 0 && title.length <= 120 ? candidate : undefined;
-      const heaviest = group.functions.slice(0, 3);
+      const heaviest = group.functions.slice(0, MAX_SUMMARY_BULLETS);
       const fallbackTitle = heaviest.map((fn) => fn.title).join(" / ") || "Sampled CPU work";
+      const fallbackSummary = heaviest.map((fn) => `${fn.title} (${Math.round(fn.selfTimeMs)} ms self time)`);
       return {
         ...group,
         groupingCaller: group.title,
         title: annotation ? title : fallbackTitle,
         supportingFunctionIds: annotation ? [...new Set(ids as string[])] : heaviest.map((fn) => fn.id),
-        summary: typeof annotation?.summary === "string" && annotation.summary.trim() ? annotation.summary.trim() : `The heaviest sampled functions are ${heaviest.map((fn) => `${fn.title} (${Math.round(fn.selfTimeMs)} ms self time)`).join(", ")}.`,
-        suggestedFix: typeof annotation?.suggestedFix === "string" && annotation.suggestedFix.trim() ? annotation.suggestedFix.trim() : "Inspect the heaviest functions below and re-profile after optimizing their caller.",
+        summary: normalizeSummary(annotation?.summary, fallbackSummary, heaviest.length),
       };
     }).sort((a, b) => b.combinedTimeMs - a.combinedTimeMs),
   };
+}
+
+/** Card results keep top function names; stacks stay on the server record for prompt generation. */
+export function clientHotspots(hotspots: Hotspot[]): Hotspot[] {
+  return hotspots.map((hotspot) => ({
+    ...hotspot,
+    stack: [],
+    functions: hotspot.functions.slice(0, MAX_SUMMARY_BULLETS).map((fn) => ({
+      id: fn.id,
+      title: fn.title,
+      selfTimeMs: fn.selfTimeMs,
+      percentOfGroup: fn.percentOfGroup,
+      stack: [],
+    })),
+  }));
 }
