@@ -124,6 +124,69 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
   return <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]}</svg>;
 }
 
+function ProfileSnapshot({ type, active }: { type: "cpu" | "react"; active: boolean }) {
+  const isCpu = type === "cpu";
+  const title = isCpu ? "Bottlenecks, slowest first" : "React issues";
+  const summary = isCpu
+    ? "2 bottlenecks · 8.13 s total"
+    : "1 issue · 16 ms budget · 4 commits · 169.74 ms peak · 1 over budget";
+  const usage = isCpu
+    ? "analyzer · 6.1k tokens · 5.3k in · 711 out"
+    : "analyzer · 20k tokens · 12k in · 403 out · 8.0k cached";
+  const issueTitle = isCpu
+    ? "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus"
+    : "HeavyActivityHeatmap mount stalls explore-details first paint by ~125 ms";
+  const time = isCpu ? "2.05 s" : "125 ms";
+  const share = isCpu ? "97% of group" : "74% of commit";
+  const detail = isCpu
+    ? "Native datePrototypeToLocaleStringHelper costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch."
+    : "HeavyActivityHeatmap used 124.8 ms self time on its single mount, about 74% of the 169.7 ms commit that opened explore-details.";
+
+  return (
+    <article className={`signal-snapshot signal-snapshot-${type}${active ? " is-active" : ""}`} aria-label={`${title} example`}>
+      {isCpu ? null : <span className="snapshot-kicker">Analysis results</span>}
+      <h2>{title}</h2>
+      <p className="snapshot-summary">{summary}</p>
+      <p className="snapshot-usage">{usage}</p>
+      <div className="snapshot-divider" />
+      <section className="snapshot-issue">
+        <div className="snapshot-issue-head">
+          <span className="snapshot-rank">#1</span>
+          <strong>{issueTitle}</strong>
+          <span className="snapshot-budget">{isCpu ? "2.11 s" : "high · 170 ms"}</span>
+        </div>
+        <div className="snapshot-issue-body">
+          <div className="snapshot-time-line">
+            <span>{time}</span>
+            <small>{share}</small>
+          </div>
+          <div className="snapshot-meter" aria-hidden="true"><span /></div>
+          <p>{detail}</p>
+        </div>
+      </section>
+    </article>
+  );
+}
+
+function ProfileSnapshotGallery() {
+  const [activeSnapshot, setActiveSnapshot] = useState<"cpu" | "react">("cpu");
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setActiveSnapshot((current) => current === "cpu" ? "react" : "cpu");
+    }, 2000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="signal-snapshot-gallery" aria-label="Example CPU and React analysis results">
+      <ProfileSnapshot type="cpu" active={activeSnapshot === "cpu"} />
+      <ProfileSnapshot type="react" active={activeSnapshot === "react"} />
+    </div>
+  );
+}
+
 function PromptActionButton({
   prompt,
   loading,
@@ -891,39 +954,11 @@ function InspectorApp() {
                   <span><ProfileIcon type="javascript" />JavaScript</span>
                   <span><ProfileIcon type="react" />React Native</span>
                 </div>
+                <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
+                  Get Started <HeaderIcon type="arrow" />
+                </Button>
               </div>
-              <div className="signal-board" aria-label="Example CPU and React analysis results">
-                <div className="signal-board-head">
-                  <span>Profile signal</span>
-                  <i>Result snapshots</i>
-                </div>
-                <div className="signal-snapshot-stack">
-                  <figure className="signal-snapshot signal-snapshot-cpu">
-                    <Image
-                      src="/profile-signal-cpu.png"
-                      alt="CPU profile results with bottlenecks ranked slowest first"
-                      width={1123}
-                      height={461}
-                      sizes="(max-width: 760px) 78vw, 390px"
-                      loading="eager"
-                    />
-                  </figure>
-                  <figure className="signal-snapshot signal-snapshot-react">
-                    <Image
-                      src="/profile-signal-react.png"
-                      alt="React profile results showing a slow component render"
-                      width={1156}
-                      height={576}
-                      sizes="(max-width: 760px) 78vw, 390px"
-                    />
-                  </figure>
-                </div>
-              </div>
-            </div>
-            <div className="get-started-action">
-              <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
-                Get Started <HeaderIcon type="arrow" />
-              </Button>
+              <ProfileSnapshotGallery />
             </div>
               </>
             ) : (
