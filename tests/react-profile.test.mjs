@@ -224,7 +224,8 @@ test('HTTP success runs actual CLI, forwards filtered results, and cleans its up
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.profileType, 'react');
-  assert.equal(body.analysisId, null);
+  assert.equal(typeof body.analysisId, 'string');
+  t.after(() => destroyRecord(body.analysisId));
   assert.equal(body.components, undefined);
   assert.deepEqual(body.issues, []);
   await assert.rejects(access(seenDir), { code: 'ENOENT' });

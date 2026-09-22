@@ -1,4 +1,4 @@
-import { getRecord, type TokenUsage } from "@/lib/analysis";
+import { getRecord, getSavedAnalysis, updateSavedAnalysis, type TokenUsage } from "@/lib/analysis";
 import { AgentError, runAgent } from "@/lib/pi-agent";
 import { buildReactFixPromptUserPrompt, REACT_FIX_PROMPT_SYSTEM_PROMPT } from "@/lib/prompts";
 import { tmpdir } from "node:os";
@@ -30,7 +30,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!analysisId || !issueId) {
     return json({ error: "analysisId and issueId are required." }, 400);
   }
-  const record = getRecord(analysisId);
+  const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
   }
@@ -82,6 +82,7 @@ export async function POST(request: Request): Promise<Response> {
 
   record.prompts[issueId] = prompt;
   record.promptUsage[issueId] = usage;
+  await updateSavedAnalysis(record);
   log(`prompt generated in ${Math.round((Date.now() - startedAt) / 1000)}s (${prompt.length} chars, ${usage.totalTokens} tokens)`);
   return json({ prompt, usage });
 }

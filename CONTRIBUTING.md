@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- macOS, Linux, or WSL.
+- macOS, Linux.
 - Node.js 22.19.0 or newer, npm, and Git available on `PATH`.
 - Internet access to clone the repository, install dependencies, and build the app.
 - An OpenAI, Anthropic, or Callstack Apex API key for manual analysis. Automated tests and builds do not require a real key.

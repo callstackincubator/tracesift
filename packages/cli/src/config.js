@@ -13,8 +13,20 @@ export async function ensureHome(home = getHome()) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   await chmod(home, 0o700);
 }
+/** HTTP auth headers only accept ASCII; pasted keys often pick up em dashes from rich text. */
+export function isAsciiApiKey(value) {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) > 127) return false;
+  return true;
+}
+
 export function validateConfig(value) {
-  if (!value || value.version !== 1 || !Object.hasOwn(providers, value.provider) || typeof value.model !== 'string' || !value.model.trim() || !value.keys || typeof value.keys !== 'object' || Array.isArray(value.keys) || Object.entries(value.keys).some(([p, k]) => !Object.hasOwn(providers, p) || typeof k !== 'string' || !k.trim()) || !value.keys[value.provider]) {
+  const keys = value?.keys;
+  const keyEntries = keys && typeof keys === 'object' && !Array.isArray(keys) ? Object.entries(keys) : null;
+  if (keyEntries?.some(([, k]) => typeof k === 'string' && k.trim() && !isAsciiApiKey(k))) {
+    throw new Error('API keys must be plain ASCII. Copy the key again from the provider dashboard; rich text often turns a hyphen into a dash. Run perf-ai model to replace it.');
+  }
+  if (!value || value.version !== 1 || !Object.hasOwn(providers, value.provider) || typeof value.model !== 'string' || !value.model.trim() || !keyEntries || keyEntries.some(([p, k]) => !Object.hasOwn(providers, p) || typeof k !== 'string' || !k.trim()) || !value.keys[value.provider]) {
     throw new Error('Invalid model configuration. Run perf-ai model to configure it.');
   }
   return { version: 1, provider: value.provider, model: value.model, keys: { ...value.keys } };
@@ -25,7 +37,10 @@ export async function readConfig(home = getHome()) {
   try { raw = await readFile(join(home, 'config.json'), 'utf8'); }
   catch (error) { if (error.code === 'ENOENT') return null; throw new Error('Cannot read model configuration. Check permissions on config.json.'); }
   try { return validateConfig(JSON.parse(raw)); }
-  catch { throw new Error('Invalid model configuration. Run perf-ai model to replace it.'); }
+  catch (error) {
+    if (error instanceof Error && error.message.includes('plain ASCII')) throw error;
+    throw new Error('Invalid model configuration. Run perf-ai model to replace it.');
+  }
 }
 /** @param {ModelConfig} value */
 export async function writeConfig(value, home = getHome()) {

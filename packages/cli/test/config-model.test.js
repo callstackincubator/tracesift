@@ -4,7 +4,7 @@ import { mkdtemp, readFile, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { readConfig, writeConfig } from '../src/config.js';
+import { isAsciiApiKey, readConfig, writeConfig } from '../src/config.js';
 import { getCatalog } from '../src/models.js';
 import { selectModel, Cancelled } from '../src/model.js';
 
@@ -19,7 +19,16 @@ test('configuration validates, writes privately, and preserves old data on inval
   assert.equal((await stat(dir)).mode & 0o777, 0o700);
   assert.equal((await stat(join(dir, 'config.json'))).mode & 0o777, 0o600);
   await assert.rejects(writeConfig({ ...config, provider: 'other' }, dir), /Invalid/);
+  assert.equal(isAsciiApiKey('sk-ant-api03-abcdefgh'), true);
+  assert.equal(isAsciiApiKey('sk-ant-api03-abcd\u2014efgh'), false);
+  await assert.rejects(
+    writeConfig({ ...config, keys: { apex: 'secret-test-key\u2014dash' } }, dir),
+    /plain ASCII/,
+  );
   assert.deepEqual(await readConfig(dir), config);
+  await writeFile(join(dir, 'config.json'), JSON.stringify({ ...config, keys: { apex: 'secret-test-key\u2014dash' } }));
+  await assert.rejects(readConfig(dir), /plain ASCII/);
+  await writeConfig(config, dir);
   await writeFile(join(dir, 'config.json'), '{ secret-test-key');
   await assert.rejects(readConfig(dir), error => !error.message.includes('secret-test-key') && /Invalid/.test(error.message));
 });

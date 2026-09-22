@@ -209,3 +209,46 @@ test('client hotspots keep card function names and omit stacks', () => {
   assert.ok(published.functions.every((fn) => fn.stack.length === 0));
   assert.deepEqual(published.stack, []);
 });
+
+test('groups made only of React internals are dropped before ranking', () => {
+  const nodes = [
+    node(0, '(root)', [1, 4], ''),
+    node(1, 'scheduleRender', [2, 3]), node(2, 'reconcileChildFibersImpl'), node(3, 'commitMutationEffects'),
+    node(4, 'renderList', [5]), node(5, 'formatDate'),
+  ];
+  const groups = groupBottlenecks(profile(nodes, [2, 2, 3, 3, 5]), 150);
+  assert.deepEqual(groups.map(g => g.title), ['renderList']);
+  assert.deepEqual(groups[0].functions.map(f => f.title), ['formatDate']);
+});
+
+test('internal frames stay inside a group that also holds application work', () => {
+  const groups = groupBottlenecks(profile([
+    node(0, '(root)', [1], ''), node(1, 'renderList', [2, 3]),
+    node(2, 'beginWork'), node(3, 'formatDate'),
+  ], [2, 2, 3, 3]), 120);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].frameworkOnly, false);
+  assert.deepEqual(groups[0].functions.map(f => f.title).sort(), ['beginWork', 'formatDate']);
+});
+
+test('React internals are recognized by dev-build names and renderer module paths', () => {
+  const rendererUrl = 'node_modules/react-native/Libraries/Renderer/implementations/ReactFabric-dev.js';
+  for (const leaf of [node(2, 'beginWork$1'), node(2, 'appendChild', [], rendererUrl)]) {
+    assert.deepEqual(groupBottlenecks(profile([
+      node(0, '(root)', [1], ''), node(1, 'performWorkUntilDeadline', [2]), leaf,
+    ], [2, 2]), 60), []);
+  }
+});
+
+test('hot functions carry a readable source location and omit bundle and native frames', () => {
+  const groups = groupBottlenecks(profile([
+    node(0, '(root)', [1], ''), node(1, 'render', [2, 3, 4]),
+    { ...node(2, 'formatDate', [], 'src/explore.tsx'), callFrame: { functionName: 'formatDate', scriptId: '1', url: 'src/explore.tsx', lineNumber: 41, columnNumber: 6 } },
+    node(3, 'parseJSON', [], 'http://localhost:8081/index.bundle'),
+    node(4, 'nativeSort', [], '(native)'),
+  ], [2, 2, 3, 3, 4, 4]), 180);
+  const located = Object.fromEntries(groups[0].functions.map(fn => [fn.title, fn.location]));
+  assert.deepEqual(located, { formatDate: 'src/explore.tsx:42:7', parseJSON: undefined, nativeSort: undefined });
+  const published = clientHotspots(normalizeHotspots([], 180, groups).hotspots)[0];
+  assert.equal(published.functions.find(fn => fn.title === 'formatDate').location, 'src/explore.tsx:42:7');
+});

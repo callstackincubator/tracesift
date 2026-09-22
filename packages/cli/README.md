@@ -1,6 +1,6 @@
 # perf-ai CLI
 
-Managed local AI-assisted CPU profile analysis. Requires macOS or Linux (including WSL), Node.js ≥22.19.0, npm, and Git.
+Managed local AI-assisted CPU profile analysis. Requires macOS or Linux, Node.js ≥22.19.0, npm, and Git.
 
 ```sh
 npm install -g @callstack/perf-ai
@@ -32,5 +32,3 @@ Replacing an installation requires its server to be stopped. Dependencies and bu
 ## Releases
 
 From a clean, committed repository containing the CLI implementation, run `npm pack --workspace @callstack/perf-ai`. Its prepack step writes ignored `release.json` with the public repository URL and current immutable commit. Push that commit to the public repository before publishing; an unpushed commit cannot be installed by users. Keep the CLI and root SDK versions aligned and bump both the CLI version and root workspace dependency for each release. Validate the package in a fresh checkout/home on macOS and Linux and verify npm scope publishing access before publishing the reviewed tarball. Never bypass prepack for production artifacts.
-
-Native Windows, background services, automatic updates, and hosted multi-user credentials are not supported in this release.

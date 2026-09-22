@@ -1,3 +1,5 @@
+import { isFrameworkInternalFrame } from "./framework-frames.ts";
+import { frameSourceLocation } from "./source-location.ts";
 import type { CdpCallFrame, CdpProfile, CdpProfileNode } from "../app/js-profiler/types";
 
 export const MIN_HOTSPOT_TIME_MS = 20;
@@ -7,6 +9,8 @@ export interface HotFunction {
   title: string;
   selfTimeMs: number;
   percentOfGroup: number;
+  /** `path:line:column` of the function itself, when the frame names a readable source file. */
+  location?: string;
   stack: string[];
 }
 
@@ -17,6 +21,8 @@ export interface Bottleneck {
   percentOfTotal: number;
   stack: string[];
   functions: HotFunction[];
+  /** Every hot function is React/scheduler internals, so the group is not actionable. */
+  frameworkOnly: boolean;
 }
 
 const runtimeNames = new Set(["(root)", "(idle)", "(program)", "(garbage collector)", "(optimized code)"]);
@@ -55,7 +61,9 @@ export function groupBottlenecks(profile: CdpProfile, durationMs: number): Bottl
         ? durationMs / samples.length
         : 0
   );
-  type Group = Bottleneck & { members: Map<string, HotFunction> };
+  type Member = HotFunction & { frameworkInternal: boolean };
+  // frameworkOnly is derived once each group's hot functions are known.
+  type Group = Omit<Bottleneck, "frameworkOnly"> & { members: Map<string, Member> };
   const groups: Group[] = [];
   const contexts = new Map<number, { owner: CdpProfileNode | undefined; meaningful: CdpProfileNode[] }>();
   function contextFor(id: number) {
@@ -101,15 +109,32 @@ export function groupBottlenecks(profile: CdpProfile, durationMs: number): Bottl
     const leafKey = identity(leaf.callFrame);
     let member = group.members.get(leafKey);
     if (!member) {
-      member = { id: `${group.id}-f${group.members.size + 1}`, title: leaf.callFrame.functionName || "(anonymous)", selfTimeMs: 0, percentOfGroup: 0, stack: meaningful.map(node => label(node.callFrame)) };
+      member = { id: `${group.id}-f${group.members.size + 1}`, title: leaf.callFrame.functionName || "(anonymous)", selfTimeMs: 0, percentOfGroup: 0, location: frameSourceLocation(leaf.callFrame), stack: meaningful.map(node => label(node.callFrame)), frameworkInternal: isFrameworkInternalFrame(leaf.callFrame) };
       group.members.set(leafKey, member);
     }
     member.selfTimeMs += sampleMs;
   }
-  return groups.map(({ members, ...group }) => ({
-    ...group,
-    percentOfTotal: durationMs > 0 ? Math.round(group.combinedTimeMs / durationMs * 10000) / 100 : 0,
+  return groups.map(({ members, ...group }) => {
     // Filter after aggregating each function's samples; keep the full umbrella total.
-    functions: [...members.values()].filter((member) => member.selfTimeMs > MIN_HOTSPOT_TIME_MS).map((member) => ({ ...member, percentOfGroup: group.combinedTimeMs > 0 ? Math.round(member.selfTimeMs / group.combinedTimeMs * 10000) / 100 : 0 })).sort((a, b) => b.selfTimeMs - a.selfTimeMs),
-  })).filter((group) => group.combinedTimeMs > MIN_HOTSPOT_TIME_MS && group.functions.length > 0).sort((a, b) => b.combinedTimeMs - a.combinedTimeMs).slice(0, 12);
+    const hot = [...members.values()].filter((member) => member.selfTimeMs > MIN_HOTSPOT_TIME_MS).sort((a, b) => b.selfTimeMs - a.selfTimeMs);
+    return {
+      ...group,
+      percentOfTotal: durationMs > 0 ? Math.round(group.combinedTimeMs / durationMs * 10000) / 100 : 0,
+      // Framework internals stay in a group that also holds application work, where
+      // they explain its cost; a group made of nothing else is dropped below.
+      frameworkOnly: hot.length > 0 && hot.every((member) => member.frameworkInternal),
+      functions: hot.map((member) => ({
+        id: member.id,
+        title: member.title,
+        selfTimeMs: member.selfTimeMs,
+        percentOfGroup: group.combinedTimeMs > 0 ? Math.round(member.selfTimeMs / group.combinedTimeMs * 10000) / 100 : 0,
+        location: member.location,
+        stack: member.stack,
+      })),
+    };
+  })
+    // Drop framework-only groups before ranking, so excluding them promotes the
+    // next actionable group rather than shortening the report.
+    .filter((group) => group.combinedTimeMs > MIN_HOTSPOT_TIME_MS && group.functions.length > 0 && !group.frameworkOnly)
+    .sort((a, b) => b.combinedTimeMs - a.combinedTimeMs).slice(0, 12);
 }
