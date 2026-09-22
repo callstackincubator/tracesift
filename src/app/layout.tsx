@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RN Profile Inspector",
-  description: "Analyze JavaScript CPU and React component profiles from React Native apps.",
+  title: "Perf AI — React & React Native Performance Analysis",
+  description: "Analyze JavaScript CPU and React component profiles from React and React Native apps.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

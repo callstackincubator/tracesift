@@ -18,7 +18,7 @@ perf-ai init
 perf-ai start
 ```
 
-Setup clones and builds a pinned revision and offers model selection. Change your provider, model, or API key with `perf-ai model`, then restart the server. See [CLI documentation](packages/cli/README.md) for prerequisites, storage, troubleshooting, and releases.
+Setup clones and builds a pinned revision. After starting Perf AI, choose your provider and model and enter its API key in **Analysis settings**. See [CLI documentation](packages/cli/README.md) for prerequisites, storage, troubleshooting, and releases.
 
 ## Development
 

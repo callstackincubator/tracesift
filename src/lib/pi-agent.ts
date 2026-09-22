@@ -94,7 +94,7 @@ function isNonAsciiApiKeyFailure(detail: string): boolean {
 }
 
 const NON_ASCII_API_KEY_MESSAGE =
-  "The saved API key contains non-ASCII characters (often an em dash copied from rich text), so the provider request cannot be sent. Run perf-ai model and paste the key again from the provider dashboard, then restart the server.";
+  "The saved API key contains non-ASCII characters (often an em dash copied from rich text), so the provider request cannot be sent. Replace it in Analysis settings with a key copied directly from the provider dashboard.";
 
 export interface RunAgentOptions {
   /** Short label used in the logs, e.g. "analyze" or "hotspot-prompt". */
@@ -316,7 +316,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       const detail = error instanceof Error ? error.message : String(error);
       log(logPrefix, `session.prompt threw: ${truncate(detail, 800)}`);
       if (isAuthFailure(detail)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Run perf-ai model to replace it, then restart the server.");
+        throw new AgentError(401, "The API key was rejected by the provider. Replace it in Analysis settings.");
       }
       if (isNonAsciiApiKeyFailure(detail)) {
         throw new AgentError(401, NON_ASCII_API_KEY_MESSAGE);
@@ -338,7 +338,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     }
     if (lastError) {
       if (isAuthFailure(lastError)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Run perf-ai model to replace it, then restart the server.");
+        throw new AgentError(401, "The API key was rejected by the provider. Replace it in Analysis settings.");
       }
       if (isNonAsciiApiKeyFailure(lastError)) {
         throw new AgentError(401, NON_ASCII_API_KEY_MESSAGE);

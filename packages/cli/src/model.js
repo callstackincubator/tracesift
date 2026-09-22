@@ -57,6 +57,6 @@ export async function selectModel({ home = getHome(), prompt, catalog } = {}) {
       }
     }
     await writeConfig({ version: 1, provider, model: model.id, keys: { ...previous?.keys, [provider]: key } }, home);
-    console.log(`Selected ${providers[provider]} / ${model.name}. Restart the server to apply changes; restarting clears analysis results.`);
+    console.log(`Selected ${providers[provider]} / ${model.name}.`);
   } finally { prompt.close(); }
 }

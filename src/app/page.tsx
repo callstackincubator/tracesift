@@ -33,6 +33,16 @@ interface AnalyzeResponse {
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
 interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; promptUsage: Record<string, TokenUsage>; usage: TokenUsage; }
+interface ModelProvider { id: string; name: string; keyConfigured: boolean; models: Array<{ id: string; name: string }>; }
+interface ModelSettings {
+  configured: boolean;
+  providerId?: string;
+  modelId?: string;
+  provider?: string;
+  model?: string;
+  error?: string;
+  providers: ModelProvider[];
+}
 
 interface ReactSummary {
   peakCommitDurationMs: number | null;
@@ -404,15 +414,25 @@ function InspectorApp() {
   const [autoSave, setAutoSave] = useState(true);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
+  const [showWelcome, setShowWelcome] = useState(true);
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
-  const [modelStatus, setModelStatus] = useState<{ configured: boolean; provider?: string; model?: string; error?: string } | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelSettings | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelSettingsMessage, setModelSettingsMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   useEffect(() => {
     try { localStorage.removeItem("perf-ai.apex-api-key"); } catch { /* Storage may be disabled. */ }
     const controller = new AbortController();
     fetch("/api/model", { signal: controller.signal, cache: "no-store" })
       .then((response) => { if (!response.ok) throw new Error(); return response.json(); })
-      .then(setModelStatus)
-      .catch(() => { if (!controller.signal.aborted) setModelStatus({ configured: false, error: "Could not load model configuration. Reload the page." }); });
+      .then((settings: ModelSettings) => {
+        setModelStatus(settings);
+        setSelectedProvider(settings.providerId ?? "");
+        setSelectedModel(settings.modelId ?? "");
+      })
+      .catch(() => { if (!controller.signal.aborted) setModelStatus({ configured: false, providers: [], error: "Could not load model configuration. Reload the page." }); });
     return () => controller.abort();
   }, []);
   const refreshHistory = async () => {
@@ -480,7 +500,7 @@ function InspectorApp() {
       return;
     }
     if (!modelStatus?.configured) {
-      setError("Run perf-ai model, then restart the server.");
+      setError("Choose a provider and model in Analysis settings first.");
       setErrorDetail(null);
       return;
     }
@@ -667,6 +687,61 @@ function InspectorApp() {
     setAutoSave(enabled);
     await fetch("/api/analysis-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoSave: enabled }) });
   };
+  const providerModels = modelStatus?.providers.find(provider => provider.id === selectedProvider)?.models ?? [];
+  const selectedProviderSettings = modelStatus?.providers.find(provider => provider.id === selectedProvider);
+  const updateProvider = (provider: string) => {
+    setSelectedProvider(provider);
+    setSelectedModel(provider === modelStatus?.providerId ? modelStatus.modelId ?? "" : "");
+    setApiKey("");
+    setModelSettingsMessage(null);
+  };
+  const updateModel = (model: string) => {
+    setSelectedModel(model);
+    setApiKey("");
+    setModelSettingsMessage(null);
+  };
+  const saveModelSettings = async () => {
+    if (!selectedProvider || !selectedModel || modelSaving) return;
+    setModelSaving(true);
+    setModelSettingsMessage(null);
+    try {
+      const response = await fetch("/api/model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: selectedProvider, model: selectedModel, ...(apiKey.trim() ? { apiKey } : {}) }),
+      });
+      const data = await response.json() as ModelSettings & { error?: string };
+      if (!response.ok) throw new Error(data.error || `Could not save model settings (${response.status}).`);
+      setModelStatus(data);
+      setSelectedProvider(data.providerId ?? selectedProvider);
+      setSelectedModel(data.modelId ?? selectedModel);
+      setApiKey("");
+      setModelSettingsMessage({ tone: "success", text: "Model and API key saved on this device." });
+    } catch (err) {
+      setModelSettingsMessage({ tone: "error", text: errorMessageFrom(err) });
+    } finally {
+      setModelSaving(false);
+    }
+  };
+  const clearModelSettings = async () => {
+    if (modelSaving || !window.confirm("Clear the selected model and all saved provider API keys from this device?")) return;
+    setModelSaving(true);
+    setModelSettingsMessage(null);
+    try {
+      const response = await fetch("/api/model", { method: "DELETE" });
+      const data = await response.json() as ModelSettings & { error?: string };
+      if (!response.ok) throw new Error(data.error || `Could not clear model settings (${response.status}).`);
+      setModelStatus(data);
+      setSelectedProvider("");
+      setSelectedModel("");
+      setApiKey("");
+      setModelSettingsMessage({ tone: "success", text: "Saved model configuration cleared." });
+    } catch (err) {
+      setModelSettingsMessage({ tone: "error", text: errorMessageFrom(err) });
+    } finally {
+      setModelSaving(false);
+    }
+  };
   const loadCpuSample = async () => {
     const response = await fetch("/api/samples/cpu", { cache: "force-cache" });
     if (!response.ok) return;
@@ -705,9 +780,58 @@ function InspectorApp() {
             {settingsOpen && (
               <div className="settings-popover" role="dialog" aria-label="Analysis settings">
                 <div className="popover-arrow" />
+                <div className="settings-popover-scroll">
                 <div className="settings-popover-head">
                   <div><strong>Analysis settings</strong><small>Preferences are saved on this device.</small></div>
                   <button className="icon-button" aria-label="Close analysis settings" onClick={() => setSettingsOpen(false)}><HeaderIcon type="close" /></button>
+                </div>
+                <div className="model-settings-form">
+                  <label htmlFor="analysis-provider">Provider</label>
+                  <select id="analysis-provider" value={selectedProvider} onChange={event => updateProvider(event.target.value)} disabled={!modelStatus || modelSaving}>
+                    <option value="">Select a provider</option>
+                    {modelStatus?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+                  </select>
+                  {selectedProvider && (
+                    <>
+                      <label htmlFor="analysis-model">Model</label>
+                      <select id="analysis-model" value={selectedModel} onChange={event => updateModel(event.target.value)} disabled={modelSaving}>
+                        <option value="">Select a model</option>
+                        {providerModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+                      </select>
+                    </>
+                  )}
+                  {selectedModel && (
+                    <>
+                      <label htmlFor="analysis-api-key">API key</label>
+                      <input
+                        id="analysis-api-key"
+                        type="password"
+                        value={apiKey}
+                        autoComplete="new-password"
+                        placeholder={selectedProviderSettings?.keyConfigured ? "Saved key (enter to replace)" : "Enter API key"}
+                        onChange={event => { setApiKey(event.target.value); setModelSettingsMessage(null); }}
+                        disabled={modelSaving}
+                      />
+                      <small className="model-key-help">
+                        {selectedProviderSettings?.keyConfigured ? "A key is already saved for this provider." : "Required to use this provider."} The key stays in the local Perf AI configuration.
+                      </small>
+                      <Button
+                        className="model-save-button"
+                        type="button"
+                        size="sm"
+                        onClick={() => void saveModelSettings()}
+                        disabled={modelSaving || (!selectedProviderSettings?.keyConfigured && !apiKey.trim())}
+                      >
+                        {modelSaving ? "Saving…" : "Save model settings"}
+                      </Button>
+                    </>
+                  )}
+                  {modelSettingsMessage && <p className={`model-settings-message ${modelSettingsMessage.tone}`} role="status">{modelSettingsMessage.text}</p>}
+                  {(modelStatus?.configured || modelStatus?.providers.some(provider => provider.keyConfigured)) && (
+                    <button className="clear-model-button" type="button" disabled={modelSaving} onClick={() => void clearModelSettings()}>
+                      Clear saved model and API keys
+                    </button>
+                  )}
                 </div>
                 <label className="autosave-toggle">
                   <span className="toggle-copy"><strong>Save analyses automatically</strong><small>Keep completed reports in your local analysis history.</small></span>
@@ -715,6 +839,7 @@ function InspectorApp() {
                   <span className="toggle-control" aria-hidden="true"><span /></span>
                 </label>
                 <p className="settings-privacy">Raw profile uploads are never retained.</p>
+                </div>
               </div>
             )}
           </div>
@@ -755,11 +880,54 @@ function InspectorApp() {
       <section className={`workspace${phase === "results" ? " results" : ""}`}>
         {(phase === "upload" || phase === "analyzing") && (
           <>
-            <div className="intro">
-              <span className="eyebrow">Performance analysis</span>
-              <h1>Find what’s slowing down<br />your React Native app.</h1>
-              <p>Choose the profile you captured. We’ll surface the most useful bottlenecks first.</p>
+            {showWelcome ? (
+              <>
+            <div className="hero-stage">
+              <div className="intro intro-copy">
+                <h1>Find the code that makes your app feel slow</h1>
+                <p>Turn profiler traces into a focused list of bottlenecks</p>
+                <div className="platform-list" aria-label="Supported platforms">
+                <span><ProfileIcon type="react" />React</span>
+                  <span><ProfileIcon type="javascript" />JavaScript</span>
+                  <span><ProfileIcon type="react" />React Native</span>
+                </div>
+              </div>
+              <div className="signal-board" aria-label="Example CPU and React analysis results">
+                <div className="signal-board-head">
+                  <span>Profile signal</span>
+                  <i>Result snapshots</i>
+                </div>
+                <div className="signal-snapshot-stack">
+                  <figure className="signal-snapshot signal-snapshot-cpu">
+                    <Image
+                      src="/profile-signal-cpu.png"
+                      alt="CPU profile results with bottlenecks ranked slowest first"
+                      width={1123}
+                      height={461}
+                      sizes="(max-width: 760px) 78vw, 390px"
+                      loading="eager"
+                    />
+                  </figure>
+                  <figure className="signal-snapshot signal-snapshot-react">
+                    <Image
+                      src="/profile-signal-react.png"
+                      alt="React profile results showing a slow component render"
+                      width={1156}
+                      height={576}
+                      sizes="(max-width: 760px) 78vw, 390px"
+                    />
+                  </figure>
+                </div>
+              </div>
             </div>
+            <div className="get-started-action">
+              <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
+                Get Started <HeaderIcon type="arrow" />
+              </Button>
+            </div>
+              </>
+            ) : (
+              <>
 
             <div className="workflow-label"><span>1</span><div><strong>Choose a profile type</strong><small>Select the tool you used to capture performance.</small></div></div>
             <div className="profile-options" role="radiogroup" aria-label="Profile type" aria-disabled={analyzing}>
@@ -809,9 +977,9 @@ function InspectorApp() {
               <div className="key-field">
                 <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
                   ? `Model: ${modelStatus.provider} / ${modelStatus.model}`
-                  : modelStatus.error || "Run perf-ai model, then restart the server."}</Text>
+                  : modelStatus.error || "Choose a model in Analysis settings."}</Text>
                   <br />
-                <Text className="italic text-muted-foreground">Change models with <code>perf-ai model</code> and restart the server.</Text>
+                <Text className="italic text-muted-foreground">Change the provider or model from Analysis settings.</Text>
               </div>
             </section>
 
@@ -845,6 +1013,8 @@ function InspectorApp() {
                 )}
               </Button>
             </div>
+              </>
+            )}
           </>
         )}
 
