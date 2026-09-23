@@ -20,7 +20,7 @@ export async function acquireLock(home) {
       };
       unlock.trackChild = async childPid => {
         const record = JSON.parse(await readFile(path, 'utf8'));
-        if (record.token !== token) throw new Error('Lost perf-ai operation lock.');
+        if (record.token !== token) throw new Error('Lost TraceSift operation lock.');
         const temporary = join(home, `.process-${token}`);
         try {
           await writeFile(temporary, JSON.stringify({ pid: process.pid, token, childPid }), { mode: 0o600 });
@@ -32,19 +32,19 @@ export async function acquireLock(home) {
       if (error.code !== 'EEXIST') throw error;
       let record;
       try { record = JSON.parse(await readFile(path, 'utf8')); }
-      catch { throw new Error('Cannot read process.json. Stop any perf-ai processes before removing this lock.'); }
-      if (alive(record.pid) || alive(record.childPid)) throw new Error('Another perf-ai operation or server is running. Stop it first.');
+      catch { throw new Error('Cannot read process.json. Stop any TraceSift processes before removing this lock.'); }
+      if (alive(record.pid) || alive(record.childPid)) throw new Error('Another TraceSift operation or server is running. Stop it first.');
       // Serialize stale recovery with an exclusive recovery lock.
       const recovery = `${path}.recovery`;
       try { await writeFile(recovery, '', { flag: 'wx', mode: 0o600 }); }
-      catch { throw new Error('Another perf-ai operation is recovering its lock. Retry shortly.'); }
+      catch { throw new Error('Another TraceSift operation is recovering its lock. Retry shortly.'); }
       try {
         const current = JSON.parse(await readFile(path, 'utf8'));
         if (current.token === record.token && !alive(current.pid) && !alive(current.childPid)) await rm(path);
       } finally { await rm(recovery, { force: true }); }
     }
   }
-  throw new Error('Could not acquire the perf-ai operation lock. Retry shortly.');
+  throw new Error('Could not acquire the TraceSift operation lock. Retry shortly.');
 }
 
 export function launch(command, args, options = {}) {

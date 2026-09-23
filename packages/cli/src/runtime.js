@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // Workspace packages may be bundled by Next.js even with serverExternalPackages.
 // Share the startup promise across instrumentation and route module graphs.
 /** @type {{startup?: ReturnType<typeof loadRuntime>}} */
-const shared = globalThis[Symbol.for('perf-ai.model-runtime.v1')] ??= {};
+const shared = globalThis[Symbol.for('tracesift.model-runtime.v1')] ??= {};
 export function initializeRuntime() {
   return shared.startup ??= loadRuntime();
 }

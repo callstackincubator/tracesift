@@ -11,4 +11,4 @@ if (app.dependencies['@earendil-works/pi-coding-agent'] !== cli.dependencies['@e
 }
 const revision = git('rev-parse', 'HEAD');
 if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error('Invalid source revision');
-writeFileSync(new URL('../release.json', import.meta.url), JSON.stringify({ repository: 'https://github.com/callstackincubator/perf-ai.git', revision }, null, 2) + '\n');
+writeFileSync(new URL('../release.json', import.meta.url), JSON.stringify({ repository: 'https://github.com/callstackincubator/tracesift.git', revision }, null, 2) + '\n');

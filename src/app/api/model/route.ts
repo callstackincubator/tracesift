@@ -1,11 +1,11 @@
-import { clearModelConfiguration, configureModel, getModelSettings } from "@callstack/perf-ai/runtime";
+import { clearModelConfiguration, configureModel, getModelSettings } from "@callstack/tracesift/runtime";
 
 export const dynamic = "force-dynamic";
 export async function GET(): Promise<Response> {
   return Response.json(await getModelSettings(), {
     headers: {
       "Cache-Control": "no-store",
-      ...(process.env.PERF_AI_INSTANCE ? { "x-perf-ai-instance": process.env.PERF_AI_INSTANCE } : {}),
+      ...(process.env.TRACE_SIFT_INSTANCE ? { "x-tracesift-instance": process.env.TRACE_SIFT_INSTANCE } : {}),
     },
   });
 }

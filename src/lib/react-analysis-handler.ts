@@ -28,7 +28,7 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       const options = parseReactProfileOptions(form);
       const frameBudgetMs = parseFrameBudget(form);
       if (request.signal.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");
-      dir = await mkdtemp(path.join(dependencies.temporaryRoot ?? tmpdir(), "perf-ai-react-"));
+      dir = await mkdtemp(path.join(dependencies.temporaryRoot ?? tmpdir(), "tracesift-react-"));
       const file = path.join(dir, "profile.json");
       await writeFile(file, Buffer.from(await profile.arrayBuffer()));
       const result = await dependencies.extract(file, options, request.signal, { analysisEvidence: true, maxBuffer: 8 * 1024 * 1024 });
@@ -59,20 +59,20 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       let saved = false;
       if (settings.autoSave) {
         try { await saveAnalysis(record); saved = true; }
-        catch (error) { console.warn("[perf-ai] could not auto-save analysis:", error); }
+        catch (error) { console.warn("[tracesift] could not auto-save analysis:", error); }
       }
       const response = { profileType: "react", title: profile.name, saved, analysisId, summary: { ...evidence.summary,
         commitsOverBudget: evidence.commitDurations.filter(ms => ms > frameBudgetMs).length,
         omittedEvidenceCommitCount: evidence.omittedCommitCount,
       }, ...report, frameBudgetMs, usage: analysis.usage };
-      console.log("[perf-ai] SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
+      console.log("[tracesift] SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
       return Response.json(response);
     } catch (error) {
       if (error instanceof ReactProfileError || (error instanceof Error && "status" in error && typeof error.status === "number"
           && error.status >= 400 && error.status <= 599)) {
         return Response.json({ error: error.message }, { status: error.status as number });
       }
-      console.error("[perf-ai] React analysis failed", error);
+      console.error("[tracesift] React analysis failed", error);
       return Response.json({ error: "Unexpected server error while analyzing the React profile." }, { status: 500 });
     } finally {
       if (dir) await rm(dir, { recursive: true, force: true });

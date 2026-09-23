@@ -12,14 +12,14 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const initial = { version: 1, provider: 'apex', model: 'callstack/Apex', keys: { apex: 'production-smoke-secret' } };
 for (const mode of ['configured', 'missing', 'malformed']) {
   test(`production startup freezes ${mode} configuration before first request`, async () => {
-    const home = await mkdtemp(join(tmpdir(), 'perf-ai-production-'));
+    const home = await mkdtemp(join(tmpdir(), 'tracesift-production-'));
     const probe = createServer();
     await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.1', resolve); });
     const port = probe.address().port;
     await new Promise(resolve => probe.close(resolve));
     if (mode === 'configured') await writeConfig(initial, home);
     if (mode === 'malformed') await writeFile(join(home, 'config.json'), 'invalid');
-    const child = spawn(process.execPath, ['--import', '@callstack/perf-ai/bootstrap', 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: root, env: { ...process.env, PERF_AI_HOME: home, PERF_AI_INSTANCE: 'production-smoke' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, ['--import', '@callstack/tracesift/bootstrap', 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: root, env: { ...process.env, TRACE_SIFT_HOME: home, TRACE_SIFT_INSTANCE: 'production-smoke' }, stdio: ['ignore', 'pipe', 'pipe'] });
     const exited = new Promise(resolve => child.on('exit', resolve));
     let logs = '';
     try {
@@ -32,7 +32,7 @@ for (const mode of ['configured', 'missing', 'malformed']) {
       });
       await writeConfig({ ...initial, model: 'changed-before-first-request' }, home);
       const response = await fetch(`http://127.0.0.1:${port}/api/model`, { signal: AbortSignal.timeout(10000) });
-      assert.equal(response.headers.get('x-perf-ai-instance'), 'production-smoke');
+      assert.equal(response.headers.get('x-tracesift-instance'), 'production-smoke');
       const status = await response.json();
       assert.equal(status.configured, mode === 'configured');
       if (mode === 'configured') assert.equal(status.model, 'Apex');

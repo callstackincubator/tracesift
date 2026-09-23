@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 const LOG = "api/hotspot-prompt";
 
 function log(...parts: unknown[]): void {
-  console.log(`[perf-ai] ${new Date().toISOString()} [${LOG}]`, ...parts);
+  console.log(`[tracesift] ${new Date().toISOString()} [${LOG}]`, ...parts);
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {
@@ -62,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
     if (error instanceof AgentError) {
       return json({ error: error.message }, error.status);
     }
-    console.error("[perf-ai] hotspot prompt failed", error);
+    console.error("[tracesift] hotspot prompt failed", error);
     return json({ error: "Unexpected server error while generating the prompt." }, 500);
   }
 

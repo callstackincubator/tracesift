@@ -8,7 +8,7 @@ import { deleteConfig, isAsciiApiKey, readConfig, writeConfig } from '../src/con
 import { getCatalog } from '../src/models.js';
 import { selectModel, Cancelled } from '../src/model.js';
 
-async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'perf-ai-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
+async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const config = { version: 1, provider: 'apex', model: 'callstack/Apex', keys: { apex: 'secret-test-key' } };
 
 test('configuration validates, writes privately, and preserves old data on invalid writes', async t => {
@@ -73,7 +73,7 @@ test('startup freezes configured, missing and malformed states before first agen
       if (before.configured) { const {runtime,model} = await getConfiguredRuntime(); assert.equal(model.id,'callstack/Apex'); assert.equal((await runtime.getAuth(model)).auth.apiKey,'secret-test-key'); }
       else await assert.rejects(getConfiguredRuntime());
     `;
-    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, PERF_AI_HOME: dir } });
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TRACE_SIFT_HOME: dir } });
   }
 });
 
@@ -92,7 +92,7 @@ test('runtime selects each provider adapter and injects only the saved runtime k
       assert.equal((await runtime.getAuth(model)).auth.apiKey, 'saved-test-key');
       assert.equal(runtime.getRegisteredProviderIds().includes('unrelated-custom-provider'), false);
     `;
-    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, PERF_AI_HOME: dir, OPENAI_API_KEY: 'ambient-must-not-win', ANTHROPIC_API_KEY: 'ambient-must-not-win' } });
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TRACE_SIFT_HOME: dir, OPENAI_API_KEY: 'ambient-must-not-win', ANTHROPIC_API_KEY: 'ambient-must-not-win' } });
   }
 });
 
@@ -121,5 +121,5 @@ test('runtime model settings expose no secrets and apply UI configuration immedi
     assert(cleared.providers.every(provider => provider.keyConfigured === false));
     await assert.rejects(getConfiguredRuntime(), /Analysis settings/);
   `;
-  execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, PERF_AI_HOME: dir } });
+  execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TRACE_SIFT_HOME: dir } });
 });

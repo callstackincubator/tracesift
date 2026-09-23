@@ -66,9 +66,9 @@ const MAX_RECORDS = 24;
 
 const records = new Map<string, AnalysisRecord>();
 
-function perfAiHome(): string { return process.env.PERF_AI_HOME || path.join(homedir(), ".perf-ai"); }
-function historyDir(): string { return path.join(perfAiHome(), "analyses"); }
-function settingsPath(): string { return path.join(perfAiHome(), "settings.json"); }
+function traceSiftHome(): string { return process.env.TRACE_SIFT_HOME || path.join(homedir(), ".tracesift"); }
+function historyDir(): string { return path.join(traceSiftHome(), "analyses"); }
+function settingsPath(): string { return path.join(traceSiftHome(), "settings.json"); }
 function recordPath(id: string): string { return path.join(historyDir(), `${id}.json`); }
 function safeId(id: string): boolean { return /^[a-zA-Z0-9-]{1,100}$/.test(id); }
 
@@ -109,7 +109,7 @@ export async function getSavedAnalysis(id: string): Promise<AnalysisRecord | und
     records.set(id, record);
     return record;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`[perf-ai] could not read saved analysis ${id}:`, error);
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`[tracesift] could not read saved analysis ${id}:`, error);
     return undefined;
   }
 }
@@ -133,7 +133,7 @@ export async function updateSavedAnalysis(record: AnalysisRecord): Promise<void>
 }
 
 function baseDir(): string {
-  return path.join(tmpdir(), "perf-ai-profiles");
+  return path.join(tmpdir(), "tracesift-profiles");
 }
 
 export async function createAnalysisFiles(profile: File): Promise<{ id: string; dir: string }> {

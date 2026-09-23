@@ -1,18 +1,18 @@
 {
-  "name": "perf-ai",
+  "name": "tracesift",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "postinstall": "patch-package --error-on-fail",
-    "dev": "node --import @callstack/perf-ai/bootstrap node_modules/next/dist/bin/next dev",
+    "dev": "node --import @callstack/tracesift/bootstrap node_modules/next/dist/bin/next dev",
     "build": "next build",
-    "start": "node --import @callstack/perf-ai/bootstrap node_modules/next/dist/bin/next start",
+    "start": "node --import @callstack/tracesift/bootstrap node_modules/next/dist/bin/next start",
     "lint": "eslint",
     "test": "node --experimental-strip-types --test tests/*.test.mjs packages/cli/test/*.test.js",
     "test:production": "node --test packages/cli/test/production.smoke.js tests/react-profile.production.mjs"
   },
   "dependencies": {
-    "@callstack/perf-ai": "0.1.0",
+    "@callstack/tracesift": "0.1.0",
     "@earendil-works/pi-coding-agent": "0.84.4",
     "@rozenite/ui": "^2.4.0",
     "agent-react-devtools": "0.4.0",

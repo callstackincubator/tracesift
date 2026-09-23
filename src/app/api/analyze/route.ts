@@ -21,7 +21,7 @@ import { ANALYST_SYSTEM_PROMPT, analystUserPrompt } from "@/lib/prompts";
 const LOG = "api/analyze";
 
 function log(...parts: unknown[]): void {
-  console.log(`[perf-ai] ${new Date().toISOString()} [${LOG}]`, ...parts);
+  console.log(`[tracesift] ${new Date().toISOString()} [${LOG}]`, ...parts);
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {
@@ -191,7 +191,7 @@ export async function POST(request: Request): Promise<Response> {
     if (error instanceof AgentError) {
       return json({ error: error.message }, error.status);
     }
-    console.error("[perf-ai] analyze failed", error);
+    console.error("[tracesift] analyze failed", error);
     return json({ error: "Unexpected server error while running the analysis agent." }, 500);
   }
 

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-const home = await mkdtemp(path.join(tmpdir(), "perf-ai-history-"));
-process.env.PERF_AI_HOME = home;
+const home = await mkdtemp(path.join(tmpdir(), "tracesift-history-"));
+process.env.TRACE_SIFT_HOME = home;
 const store = await import("../src/lib/analysis.ts");
 const { CPU_SAMPLE_ANALYSIS, REACT_SAMPLE_ANALYSIS, REACT_SAMPLE_SUMMARY } = await import("../src/lib/sample-analyses.ts");
 

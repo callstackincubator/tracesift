@@ -1,4 +1,4 @@
-# Contributing to perf-ai
+# Contributing to TraceSift
 
 ## Prerequisites
 
@@ -10,8 +10,8 @@
 ## Set up the current checkout
 
 ```sh
-git clone https://github.com/callstackincubator/perf-ai.git
-cd perf-ai
+git clone https://github.com/callstackincubator/tracesift.git
+cd tracesift
 npm ci
 ```
 
@@ -20,13 +20,13 @@ If you already have a checkout, run `npm ci` from its root. The root install als
 Use a separate home for development so testing does not change your normal CLI configuration:
 
 ```sh
-export PERF_AI_HOME="$HOME/.perf-ai-local-test"
+export TRACE_SIFT_HOME="$HOME/.tracesift-local-test"
 node packages/cli/src/cli.js model
 ```
 
 Select a provider, search for a model (or press Enter to list all), choose its number, and enter the API key at the hidden prompt. For Apex, enter your `sk-...` virtual key, not the API endpoint URL. When replacing a saved key, answer `n` to “Reuse saved API key?”.
 
-Configuration and keys are saved in `$PERF_AI_HOME/config.json`. Keep that file private and out of Git. Set the same `PERF_AI_HOME` in every terminal used for these steps; without it, the app uses `~/.perf-ai`.
+Configuration and keys are saved in `$TRACE_SIFT_HOME/config.json`. Keep that file private and out of Git. Set the same `TRACE_SIFT_HOME` in every terminal used for these steps; without it, the app uses `~/.tracesift`.
 
 Start the development server:
 
@@ -44,7 +44,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
 4. Change the model or key in **Analysis settings**.
 5. Confirm the new selection applies without restarting and run another analysis.
 
-Model configuration is stored in the local Perf AI home and changes apply immediately.
+Model configuration is stored in the local TraceSift home and changes apply immediately.
 
 ## Run automated checks
 
@@ -81,8 +81,8 @@ Open the same local URL and repeat the manual analysis steps. Rebuild after chan
 From that clean checkout, create the package and release metadata:
 
 ```sh
-PERF_AI_PACK_DIR="$(mktemp -d)"
-npm pack --workspace @callstack/perf-ai --pack-destination "$PERF_AI_PACK_DIR"
+TRACE_SIFT_PACK_DIR="$(mktemp -d)"
+npm pack --workspace @callstack/tracesift --pack-destination "$TRACE_SIFT_PACK_DIR"
 ```
 
 This creates a local tarball and the ignored `packages/cli/release.json`; it does not publish to npm. Keeping the tarball outside the repository avoids making the checkout dirty for the next pack.
@@ -90,7 +90,7 @@ This creates a local tarball and the ignored `packages/cli/release.json`; it doe
 Use another isolated home to exercise installation:
 
 ```sh
-export PERF_AI_HOME="$HOME/.perf-ai-cli-test"
+export TRACE_SIFT_HOME="$HOME/.tracesift-cli-test"
 node packages/cli/src/cli.js init
 node packages/cli/src/cli.js start
 ```
