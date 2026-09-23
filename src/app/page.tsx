@@ -830,7 +830,7 @@ function InspectorApp() {
       <PluginHeader>
         <PluginHeader.Title className="brand" render={<div />}>
           <Image src="/callstack-logo.png" alt="" width={30} height={30} priority />
-          <span><strong>Perf AI</strong><small>by Callstack</small></span>
+          <span><span className="brand-name">Perf AI</span><small>by Callstack</small></span>
         </PluginHeader.Title>
         <PluginHeader.Actions>
           <Button className="header-action" type="button" size="sm" variant="ghost" onClick={() => { setSettingsOpen(false); setHistoryOpen(true); }}>
@@ -949,14 +949,16 @@ function InspectorApp() {
               <div className="intro intro-copy">
                 <h1>Find the code that makes your app feel slow</h1>
                 <p>Turn profiler traces into a focused list of bottlenecks</p>
-                <div className="platform-list" aria-label="Supported platforms">
-                <span><ProfileIcon type="react" />React</span>
-                  <span><ProfileIcon type="javascript" />JavaScript</span>
-                  <span><ProfileIcon type="react" />React Native</span>
+                <div className="intro-actions">
+                  <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
+                    Get Started <HeaderIcon type="arrow" />
+                  </Button>
+                  <div className="platform-list" aria-label="Supported platforms">
+                    <span><ProfileIcon type="react" />React</span>
+                    <span><ProfileIcon type="javascript" />JavaScript</span>
+                    <span><ProfileIcon type="react" />React Native</span>
+                  </div>
                 </div>
-                <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
-                  Get Started <HeaderIcon type="arrow" />
-                </Button>
               </div>
               <ProfileSnapshotGallery />
             </div>
