@@ -8,23 +8,105 @@ Each bottleneck includes a button to generate or copy a handoff prompt, so your 
 
 Runs locally with OpenAI, Anthropic, or Callstack Apex. Your credentials stay with you.
 
-## CLI
+<img src="./assets/landing.png" alt="Landing Page"/>
 
-Once the package is published:
+## Usage
+
+### 1. Install TraceSift
 
 ```sh
 npm install -g @callstack/tracesift
+```
+
+Installs the TraceSift command globally. Requires Node.js 22.19 or newer, npm, and Git on macOS or Linux.
+
+<!-- Add installation screenshot here -->
+
+### 2. Initialize TraceSift (one time only)
+
+```sh
 tracesift init
+```
+
+Run this once to download the pinned TraceSift source, install its dependencies, and build the local web app.
+
+<!-- Add initialization screenshot here -->
+
+### 3. Start TraceSift
+
+```sh
 tracesift start
 ```
 
-Setup clones and builds a pinned revision. After starting TraceSift, choose your provider and model and enter its API key in **Analysis settings**. See [CLI documentation](packages/cli/README.md) for prerequisites, storage, troubleshooting, and releases.
+Starts TraceSift at `http://127.0.0.1:3000` and opens it in your browser. Press Ctrl+C to stop the server.
+
+<!-- Add startup screenshot here -->
+
+See the [CLI documentation](packages/cli/README.md) for storage, troubleshooting, and release details.
+
+## Using the web interface
+
+### 1. Configure Analysis settings
+
+Open **Settings** before your first analysis. Choose a provider and model, enter its API key, and select **Save model settings**; credentials stay in your local TraceSift configuration.
+
+Enable **Save analyses automatically** to keep completed reports in local history, or disable it and save individual reports from their results page.
+
+<!-- Add Analysis settings screenshot here -->
+
+<img src="./assets/settings.png" alt="Analysis Settings"/>
+
+### 2. Start a new analysis
+
+Select **Get Started**, then choose the profile type that matches the profiler you used, then click on "Analyze Profile".
+
+<img src="./assets/drop-zone.png" alt="Profile Drop Zone"/>
+
+#### JavaScript CPU and Hermes profiles
+
+Visualize the results sorted by slowest. Each card provides a short summary of from where the issue originates and its impact on the recorded flow.
+
+<!-- Add CPU/Hermes analysis screenshot here -->
+
+<img src="./assets/cpu-result.png" alt="CPU analysis"/>
+
+#### React profiles
+
+Visualize the results sorted by longest to render. Each card provides a short summary of from where the issue originates and its impact on the recorded flow.
+
+<!-- Add React analysis screenshot here -->
+
+<img src="./assets/react-result.png" alt="React analysis"/>
+
+### 3. Generate a handoff prompt
+
+When the bottleneck or React issue cards appear, choose the card you want to investigate and select **Generate Prompt**. When generation finishes, select **Copy Prompt** and hand it to your coding agent.
+
+<!-- Add bottleneck card and handoff prompt screenshot here -->
+
+<img src="./assets/generate-prompt.gif" alt="Generate Prompt"/>
+
+### 4. Reopen an analysis
+
+Open **Analyses** to browse locally saved reports, including their findings and generated prompts. Select a report to reopen it, or delete reports you no longer need.
+
+<!-- Add analysis history screenshot here -->
+
+<img src="./assets/analyses.gif" alt="Analysis History"/>
+
+### 5. Open the guides
+
+Select **Guide** for built-in, step-by-step instructions for capturing and analyzing JavaScript CPU, Hermes, and React profiles.
+
+<!-- Add guides screenshot here -->
+
+<img src="./assets/guides.png" alt="How to use"/>
 
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, manual testing, automated checks, and testing the managed CLI installation.
 
-The web UI displays the active model and never collects API keys. Completed analyses can be stored locally under `~/.tracesift/analyses` (or `TRACE_SIFT_HOME`); auto-save is enabled by default and can be changed in Analysis settings. Saved reports include findings and generated handoff prompts, but never retain the raw uploaded profile. The CLI package lives in `packages/cli`; it exports shared configuration, catalog, and server-runtime modules and uses the same pinned agent SDK version as the app.
+The CLI package lives in `packages/cli`; it exports shared configuration, catalog, and server-runtime modules and uses the same pinned agent SDK version as the app.
 
 ## Made with ❤️ at Callstack
 

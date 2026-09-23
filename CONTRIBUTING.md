@@ -17,16 +17,13 @@ npm ci
 
 If you already have a checkout, run `npm ci` from its root. The root install also links the CLI workspace; no global CLI installation is needed.
 
-Use a separate home for development so testing does not change your normal CLI configuration:
+Use a separate home for development so testing does not change your normal TraceSift configuration:
 
 ```sh
 export TRACE_SIFT_HOME="$HOME/.tracesift-local-test"
-node packages/cli/src/cli.js model
 ```
 
-Select a provider, search for a model (or press Enter to list all), choose its number, and enter the API key at the hidden prompt. For Apex, enter your `sk-...` virtual key, not the API endpoint URL. When replacing a saved key, answer `n` to “Reuse saved API key?”.
-
-Configuration and keys are saved in `$TRACE_SIFT_HOME/config.json`. Keep that file private and out of Git. Set the same `TRACE_SIFT_HOME` in every terminal used for these steps; without it, the app uses `~/.tracesift`.
+Set the same `TRACE_SIFT_HOME` in every terminal used for these steps; without it, the app uses `~/.tracesift`.
 
 Start the development server:
 
@@ -35,6 +32,8 @@ npm run dev -- --hostname 127.0.0.1
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
+
+Configure the provider, model, and API key through **Analysis settings** in the web interface. For Apex, enter your `sk-...` virtual key, not the API endpoint URL. Configuration and keys are saved in `$TRACE_SIFT_HOME/config.json`; keep that file private and out of Git.
 
 ## Manually test analysis and model selection
 

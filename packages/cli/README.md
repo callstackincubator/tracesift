@@ -10,7 +10,7 @@ tracesift start
 
 `init` clones the immutable source commit embedded in your CLI release, runs `npm ci --include=dev`, and builds the web app. It needs internet access.
 
-`start` serves the production app on `127.0.0.1:3000`, opens the browser after readiness, and keeps server logs in your terminal. Use `--port 3001` or `--no-open` as needed. Ctrl+C stops the server. Choose OpenAI, Anthropic, or Callstack and enter the provider API key in **Analysis settings**. Model changes apply immediately, without restarting the server. No billable validation request is made; provider availability and account access are checked on the first analysis.
+`start` serves the production app on `127.0.0.1:3000`, opens the browser after readiness, and keeps server logs in your terminal. Use `--port 3001` or `--no-open` as needed. Ctrl+C stops the server. Configure the provider, model, and API key through **Analysis settings** in the web interface. Model changes apply immediately, without restarting the server. No billable validation request is made; provider availability and account access are checked on the first analysis.
 
 ## Local files
 

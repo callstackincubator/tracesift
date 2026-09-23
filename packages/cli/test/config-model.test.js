@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { deleteConfig, isAsciiApiKey, readConfig, writeConfig } from '../src/config.js';
 import { getCatalog } from '../src/models.js';
-import { selectModel, Cancelled } from '../src/model.js';
 
 async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const config = { version: 1, provider: 'apex', model: 'callstack/Apex', keys: { apex: 'secret-test-key' } };
@@ -41,19 +40,6 @@ test('offline catalog contains only supported providers and native adapters', as
   assert(models.some(m => m.provider === 'openai' && m.api === 'openai-responses'));
   assert(models.some(m => m.provider === 'anthropic' && m.api === 'anthropic-messages'));
   assert.equal(models.find(m => m.provider === 'apex').id, 'callstack/Apex');
-});
-
-test('picker reuses a saved key, searches, and cancellation leaves config untouched', async t => {
-  const dir = await home(t);
-  await writeConfig(config, dir);
-  const answers = ['3', 'apex', '1', ''];
-  let closed = false;
-  await selectModel({ home: dir, catalog: [{ provider: 'apex', id: 'callstack/Apex', name: 'Apex' }], prompt: { ask: async () => answers.shift(), close() { closed = true; } } });
-  assert(closed);
-  assert.deepEqual(await readConfig(dir), config);
-  const before = await readFile(join(dir, 'config.json'), 'utf8');
-  await assert.rejects(selectModel({ home: dir, catalog: [], prompt: { ask: async () => { throw new Cancelled(); }, close() {} } }), Cancelled);
-  assert.equal(await readFile(join(dir, 'config.json'), 'utf8'), before);
 });
 
 test('startup freezes configured, missing and malformed states before first agent access', async t => {

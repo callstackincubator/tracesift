@@ -214,7 +214,15 @@ button, input { font: inherit; }
 .result-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .results-header .intro { text-align: left; }
 .results-title { margin: 13px 0 12px; font-size: clamp(26px, 4vw, 34px); line-height: 1.12; letter-spacing: -0.04em; }
-.usage-line { margin: 8px 0 0; color: var(--muted-foreground); font-family: var(--font-mono, monospace); font-size: 12.5px; letter-spacing: -0.01em; }
+.usage-line {
+  max-width: none;
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
 
 .analysis-drawer { position: fixed; z-index: 20; inset: 0 auto 0 0; width: min(370px, 92vw); padding: 20px; overflow: auto; color: var(--foreground); background: var(--card); border-right: 1px solid var(--border); box-shadow: 12px 0 36px rgba(0,0,0,.35); }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -593,7 +601,7 @@ body { background: var(--background, #151419); }
   background: color-mix(in srgb, var(--card) 96%, var(--background));
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, .36), 0 2px 8px rgba(0, 0, 0, .18);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .45), 0 6px 18px rgba(0, 0, 0, .24);
   animation: popover-enter 150ms cubic-bezier(.2, .75, .25, 1);
 }
 .settings-popover-scroll {
