@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 
 export const providers = Object.freeze({ openai: 'OpenAI', anthropic: 'Anthropic', apex: 'Callstack' });
 /** Resolve the managed installation and configuration directory. */
-export function getHome() { return resolve(/* turbopackIgnore: true */ process.env.PERF_AI_HOME || join(homedir(), '.perf-ai')); }
+export function getHome() { return resolve(/* turbopackIgnore: true */ process.env.TRACE_SIFT_HOME || join(homedir(), '.tracesift')); }
 export async function ensureHome(home = getHome()) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   await chmod(home, 0o700);

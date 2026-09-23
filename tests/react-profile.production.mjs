@@ -7,13 +7,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 test('production React endpoint resolves the patched CLI and reaches the model boundary', async () => {
-  const home = await mkdtemp(path.join(tmpdir(), 'perf-ai-react-production-'));
+  const home = await mkdtemp(path.join(tmpdir(), 'tracesift-react-production-'));
   const probe = createServer();
   await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(0, '127.0.0.1', resolve); });
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
-  const child = spawn(process.execPath, ['--import', '@callstack/perf-ai/bootstrap', 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', String(port)], {
-    cwd: process.cwd(), env: { ...process.env, PERF_AI_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'],
+  const child = spawn(process.execPath, ['--import', '@callstack/tracesift/bootstrap', 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', String(port)], {
+    cwd: process.cwd(), env: { ...process.env, TRACE_SIFT_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exited = new Promise(resolve => child.once('exit', resolve));
   let logs = '';

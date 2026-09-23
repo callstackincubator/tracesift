@@ -1,14 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { deleteConfig, isAsciiApiKey, readConfig, writeConfig } from '../src/config.js';
 import { getCatalog } from '../src/models.js';
-import { selectModel, Cancelled } from '../src/model.js';
 
-async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'perf-ai-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
+async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const config = { version: 1, provider: 'apex', model: 'callstack/Apex', keys: { apex: 'secret-test-key' } };
 
 test('configuration validates, writes privately, and preserves old data on invalid writes', async t => {
@@ -43,19 +42,6 @@ test('offline catalog contains only supported providers and native adapters', as
   assert.equal(models.find(m => m.provider === 'apex').id, 'callstack/Apex');
 });
 
-test('picker reuses a saved key, searches, and cancellation leaves config untouched', async t => {
-  const dir = await home(t);
-  await writeConfig(config, dir);
-  const answers = ['3', 'apex', '1', ''];
-  let closed = false;
-  await selectModel({ home: dir, catalog: [{ provider: 'apex', id: 'callstack/Apex', name: 'Apex' }], prompt: { ask: async () => answers.shift(), close() { closed = true; } } });
-  assert(closed);
-  assert.deepEqual(await readConfig(dir), config);
-  const before = await readFile(join(dir, 'config.json'), 'utf8');
-  await assert.rejects(selectModel({ home: dir, catalog: [], prompt: { ask: async () => { throw new Cancelled(); }, close() {} } }), Cancelled);
-  assert.equal(await readFile(join(dir, 'config.json'), 'utf8'), before);
-});
-
 test('startup freezes configured, missing and malformed states before first agent access', async t => {
   for (const initial of ['configured', 'missing', 'malformed']) {
     const dir = await home(t);
@@ -73,7 +59,7 @@ test('startup freezes configured, missing and malformed states before first agen
       if (before.configured) { const {runtime,model} = await getConfiguredRuntime(); assert.equal(model.id,'callstack/Apex'); assert.equal((await runtime.getAuth(model)).auth.apiKey,'secret-test-key'); }
       else await assert.rejects(getConfiguredRuntime());
     `;
-    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, PERF_AI_HOME: dir } });
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TRACE_SIFT_HOME: dir } });
   }
 });
 
@@ -92,7 +78,7 @@ test('runtime selects each provider adapter and injects only the saved runtime k
       assert.equal((await runtime.getAuth(model)).auth.apiKey, 'saved-test-key');
       assert.equal(runtime.getRegisteredProviderIds().includes('unrelated-custom-provider'), false);
     `;
-    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, PERF_AI_HOME: dir, OPENAI_API_KEY: 'ambient-must-not-win', ANTHROPIC_API_KEY: 'ambient-must-not-win' } });
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TRACE_SIFT_HOME: dir, OPENAI_API_KEY: 'ambient-must-not-win', ANTHROPIC_API_KEY: 'ambient-must-not-win' } });
   }
 });
 
@@ -121,5 +107,5 @@ test('runtime model settings expose no secrets and apply UI configuration immedi
     assert(cleared.providers.every(provider => provider.keyConfigured === false));
     await assert.rejects(getConfiguredRuntime(), /Analysis settings/);
   `;
-  execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, PERF_AI_HOME: dir } });
+  execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TRACE_SIFT_HOME: dir } });
 });

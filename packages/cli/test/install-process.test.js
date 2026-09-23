@@ -9,8 +9,8 @@ import { install, verifyInstallation } from '../src/install.js';
 import { acquireLock, launch, alive, run } from '../src/process.js';
 import { parsePort, assertPortAvailable, waitForReady, openBrowser } from '../src/start.js';
 
-async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'perf-ai-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
-const release = { repository: 'https://github.com/callstackincubator/perf-ai.git', revision: 'a'.repeat(40) };
+async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
+const release = { repository: 'https://github.com/callstackincubator/tracesift.git', revision: 'a'.repeat(40) };
 async function fakeInstall(command, args, options) {
   if (command === 'git' && args[0] === 'clone') await mkdir(args.at(-1), { recursive: true });
   if (command === 'npm' && args[0] === 'run') {
@@ -60,7 +60,7 @@ test('process supervisor stops child group and reports command errors', async ()
   await proc.stop();
   await proc.done;
   assert.equal(alive(proc.child.pid), false);
-  const missing = launch('/does-not-exist-perf-ai', [], { stdio: 'ignore' });
+  const missing = launch('/does-not-exist-tracesift', [], { stdio: 'ignore' });
   await assert.rejects(missing.done, /ENOENT/);
 });
 
@@ -101,7 +101,7 @@ test('permission errors stopping a running child are still reported', async t =>
 });
 
 test('readiness checks instance identity, occupied port, early exits and timeout', async t => {
-  const server = createServer((_req, res) => { res.setHeader('x-perf-ai-instance', 'owned'); res.end('{}'); });
+  const server = createServer((_req, res) => { res.setHeader('x-tracesift-instance', 'owned'); res.end('{}'); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const port = server.address().port;

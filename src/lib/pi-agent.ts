@@ -6,7 +6,7 @@ import {
   type AgentSession,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { getConfiguredRuntime } from "@callstack/perf-ai/runtime";
+import { getConfiguredRuntime } from "@callstack/tracesift/runtime";
 import type { TokenUsage } from "./analysis";
 
 /** Error with an HTTP status so route handlers can map failures 1:1. */
@@ -26,7 +26,7 @@ export class AgentError extends Error {
 
 /** Everything the PI agent does is logged here — watch `next dev` output. */
 function log(label: string, ...parts: unknown[]): void {
-  console.log(`[perf-ai] ${new Date().toISOString()} [${label}]`, ...parts);
+  console.log(`[tracesift] ${new Date().toISOString()} [${label}]`, ...parts);
 }
 
 function truncate(value: unknown, max = 400): string {

@@ -486,7 +486,7 @@ function InspectorApp() {
   const [modelSaving, setModelSaving] = useState(false);
   const [modelSettingsMessage, setModelSettingsMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   useEffect(() => {
-    try { localStorage.removeItem("perf-ai.apex-api-key"); } catch { /* Storage may be disabled. */ }
+    try { localStorage.removeItem("tracesift.apex-api-key"); } catch { /* Storage may be disabled. */ }
     const controller = new AbortController();
     fetch("/api/model", { signal: controller.signal, cache: "no-store" })
       .then((response) => { if (!response.ok) throw new Error(); return response.json(); })
@@ -830,7 +830,7 @@ function InspectorApp() {
       <PluginHeader>
         <PluginHeader.Title className="brand" render={<div />}>
           <Image src="/callstack-logo.png" alt="" width={30} height={30} priority />
-          <span><span className="brand-name">Perf AI</span><small>by Callstack</small></span>
+          <span><span className="brand-name">TraceSift</span><small>by Callstack</small></span>
         </PluginHeader.Title>
         <PluginHeader.Actions>
           <Button className="header-action" type="button" size="sm" variant="ghost" onClick={() => { setSettingsOpen(false); setHistoryOpen(true); }}>
@@ -876,7 +876,7 @@ function InspectorApp() {
                         disabled={modelSaving}
                       />
                       <small className="model-key-help">
-                        {selectedProviderSettings?.keyConfigured ? "A key is already saved for this provider." : "Required to use this provider."} The key stays in the local Perf AI configuration.
+                        {selectedProviderSettings?.keyConfigured ? "A key is already saved for this provider." : "Required to use this provider."} The key stays in the local TraceSift configuration.
                       </small>
                       <Button
                         className="model-save-button"

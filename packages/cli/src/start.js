@@ -24,7 +24,7 @@ export async function waitForReady(proc, url, instance, timeout = 60000) {
     if (proc.finished) throw new Error('The web server exited before becoming ready. See the server logs above.');
     try {
       const response = await fetch(`${url}/api/model`, { signal: AbortSignal.timeout(1000), cache: 'no-store' });
-      if (response.ok && response.headers.get('x-perf-ai-instance') === instance && !proc.finished) return;
+      if (response.ok && response.headers.get('x-tracesift-instance') === instance && !proc.finished) return;
     } catch { /* Next.js is still starting */ }
     await delay(200);
   }
@@ -53,14 +53,14 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
     const instance = randomUUID();
     const url = `http://127.0.0.1:${port}`;
     const app = join(home, 'app');
-    proc = launch(process.execPath, ['--import', '@callstack/perf-ai/bootstrap', join(app, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '--hostname', '127.0.0.1', '--port', String(port)], { cwd: app, env: { ...process.env, PERF_AI_HOME: home, PERF_AI_INSTANCE: instance } });
+    proc = launch(process.execPath, ['--import', '@callstack/tracesift/bootstrap', join(app, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '--hostname', '127.0.0.1', '--port', String(port)], { cwd: app, env: { ...process.env, TRACE_SIFT_HOME: home, TRACE_SIFT_INSTANCE: instance } });
     for (const signal of ['SIGINT', 'SIGTERM']) {
       const handler = () => { stopping = true; void proc.stop(signal); };
       handlers.set(signal, handler); process.on(signal, handler);
     }
     await unlock.trackChild(proc.child.pid);
     await waitForReady(proc, url, instance);
-    console.log(`perf-ai is ready at ${url}\nPress Ctrl+C to stop. Restarting clears analysis results.`);
+    console.log(`TraceSift is ready at ${url}\nPress Ctrl+C to stop. Restarting clears analysis results.`);
     if (open && !stopping) openBrowser(url);
     const result = await proc.done;
     if (!stopping && result.code !== 0) throw new Error(`The web server exited (${result.signal || result.code}).`);

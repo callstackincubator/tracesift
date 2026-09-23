@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Perf AI — React & React Native Performance Analysis",
+  title: "TraceSift — React & React Native Performance Analysis",
   description: "Analyze JavaScript CPU and React component profiles from React and React Native apps.",
 };
 
