@@ -1,8 +1,12 @@
 # perf-ai
 
-Analyze JavaScript CPU profiles locally with OpenAI, Anthropic, or Callstack Apex.
+Finding performance bottlenecks in a CPU or React profile takes expertise. Handing the full profile to an agent can help, but it fills the context window and burns through tokens.
 
-React DevTools exports can also be analyzed in the web UI or through `POST /api/analyze/react`. See [React profile analysis](docs/react-profile-cli.md) for usage, supported formats, and patch maintenance.
+**perf-ai** identifies bottlenecks in your profile and presents them in a clear, readable format, with the slowest first.
+
+Each bottleneck includes a button to generate or copy a handoff prompt, so your agent can continue the investigation in the source code. You decide what gets fixed; the agent does the work.
+
+Runs locally with OpenAI, Anthropic, or Callstack Apex. Your credentials stay with you.
 
 ## CLI
 
@@ -14,27 +18,22 @@ perf-ai init
 perf-ai start
 ```
 
-Setup clones and builds a pinned revision and offers model selection. Change your provider, model, or API key with `perf-ai model`, then restart the server. See [CLI documentation](packages/cli/README.md) for prerequisites, storage, troubleshooting, and releases.
+Setup clones and builds a pinned revision. After starting Perf AI, choose your provider and model and enter its API key in **Analysis settings**. See [CLI documentation](packages/cli/README.md) for prerequisites, storage, troubleshooting, and releases.
 
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, manual testing, automated checks, and testing the managed CLI installation.
 
-```sh
-npm ci
-node packages/cli/src/cli.js model
-npm run dev
-```
+The web UI displays the active model and never collects API keys. Completed analyses can be stored locally under `~/.perf-ai/analyses` (or `PERF_AI_HOME`); auto-save is enabled by default and can be changed in Analysis settings. Saved reports include findings and generated handoff prompts, but never retain the raw uploaded profile. The CLI package lives in `packages/cli`; it exports shared configuration, catalog, and server-runtime modules and uses the same pinned agent SDK version as the app.
 
-Open http://localhost:3000. The development server reads the same private configuration as the CLI on startup. Use the npm scripts so the Node preload captures configuration before Next.js starts listening. Set `PERF_AI_HOME` to use a separate configuration. Production builds do not need credentials:
+## Made with ❤️ at Callstack
 
-```sh
-npm test
-npm run lint
-npx tsc --noEmit
-npm run build
-npm run test:production
-npm start
-```
+**perf-ai** is an open source project and will always remain free to use. If you think it's cool, please star it 🌟.
 
-The web UI displays the active model and never collects API keys. Analysis results are held in memory and disappear when the server restarts. The CLI package lives in `packages/cli`; it exports shared configuration, catalog, and server-runtime modules and uses the same pinned agent SDK version as the app.
+[Callstack](https://www.callstack.com/) is a group of React and React Native geeks, contact us at [hello@callstack.com](mailto:hello@callstack.com) if you need any help with these or just want to say hi!
+
+## License
+
+MIT
+
+[license]: https://github.com/callstackincubator/perf-ai/blob/main/LICENSE

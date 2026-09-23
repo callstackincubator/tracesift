@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, rm, rename, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Bottleneck } from "./bottlenecks";
@@ -46,6 +46,16 @@ export interface AnalysisRecord {
   usage: TokenUsage;
   /** item id -> token usage of the agent run that generated that prompt. */
   promptUsage: Record<string, TokenUsage>;
+  /** Durable history metadata. Raw profile uploads are deliberately never stored here. */
+  profileType?: "cpu" | "react";
+  title?: string;
+  saved?: boolean;
+}
+
+export interface AnalysisSettings { autoSave: boolean; }
+export interface AnalysisHistoryItem {
+  id: string; createdAt: number; profileType: "cpu" | "react"; title: string;
+  totalTokens: number; issueCount: number;
 }
 
 export const PROFILE_FILE_NAME = "profile.json";
@@ -55,6 +65,72 @@ const RECORD_TTL_MS = 60 * 60 * 1000;
 const MAX_RECORDS = 24;
 
 const records = new Map<string, AnalysisRecord>();
+
+function perfAiHome(): string { return process.env.PERF_AI_HOME || path.join(homedir(), ".perf-ai"); }
+function historyDir(): string { return path.join(perfAiHome(), "analyses"); }
+function settingsPath(): string { return path.join(perfAiHome(), "settings.json"); }
+function recordPath(id: string): string { return path.join(historyDir(), `${id}.json`); }
+function safeId(id: string): boolean { return /^[a-zA-Z0-9-]{1,100}$/.test(id); }
+
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await rename(temporary, file);
+}
+
+function durableRecord(record: AnalysisRecord): AnalysisRecord {
+  return { ...record, dir: "", saved: true, profileType: record.profileType ?? (record.reactIssues.length ? "react" : "cpu"), title: record.title || "Untitled analysis" };
+}
+
+export async function getAnalysisSettings(): Promise<AnalysisSettings> {
+  try {
+    const parsed = JSON.parse(await readFile(settingsPath(), "utf8")) as Partial<AnalysisSettings>;
+    return { autoSave: parsed.autoSave !== false };
+  } catch { return { autoSave: true }; }
+}
+export async function saveAnalysisSettings(settings: AnalysisSettings): Promise<AnalysisSettings> {
+  const next = { autoSave: settings.autoSave !== false };
+  await writeJsonAtomic(settingsPath(), next);
+  return next;
+}
+export async function saveAnalysis(record: AnalysisRecord): Promise<AnalysisRecord> {
+  const saved = durableRecord(record);
+  await writeJsonAtomic(recordPath(saved.id), saved);
+  records.set(saved.id, { ...record, saved: true });
+  return saved;
+}
+export async function getSavedAnalysis(id: string): Promise<AnalysisRecord | undefined> {
+  if (!safeId(id)) return undefined;
+  try {
+    const parsed = JSON.parse(await readFile(recordPath(id), "utf8")) as AnalysisRecord;
+    if (!parsed || parsed.id !== id || !Array.isArray(parsed.hotspots) || !Array.isArray(parsed.reactIssues)) throw new Error("invalid saved analysis");
+    const record = { ...parsed, dir: "", saved: true, profileType: parsed.profileType ?? (parsed.reactIssues.length ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
+    records.set(id, record);
+    return record;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`[perf-ai] could not read saved analysis ${id}:`, error);
+    return undefined;
+  }
+}
+export async function listSavedAnalyses(): Promise<AnalysisHistoryItem[]> {
+  let entries: string[];
+  try { entries = await readdir(historyDir()); } catch { return []; }
+  const result = await Promise.all(entries.filter((name) => name.endsWith(".json")).map(async (name) => getSavedAnalysis(name.slice(0, -5))));
+  return result.filter((entry): entry is AnalysisRecord => Boolean(entry)).map((entry) => ({
+    id: entry.id, createdAt: entry.createdAt, profileType: entry.profileType ?? (entry.reactIssues.length ? "react" : "cpu"), title: entry.title || "Untitled analysis",
+    totalTokens: entry.usage?.totalTokens ?? 0, issueCount: entry.profileType === "react" ? entry.reactIssues.length : entry.hotspots.length,
+  })).sort((a, b) => b.createdAt - a.createdAt);
+}
+export async function deleteSavedAnalysis(id: string): Promise<boolean> {
+  if (!safeId(id)) return false;
+  await rm(recordPath(id), { force: true });
+  const record = records.get(id); if (record) records.set(id, { ...record, saved: false });
+  return true;
+}
+export async function updateSavedAnalysis(record: AnalysisRecord): Promise<void> {
+  if (record.saved) await saveAnalysis(record);
+}
 
 function baseDir(): string {
   return path.join(tmpdir(), "perf-ai-profiles");
@@ -168,6 +244,7 @@ export function clientHotspots(hotspots: Hotspot[]): Hotspot[] {
       title: fn.title,
       selfTimeMs: fn.selfTimeMs,
       percentOfGroup: fn.percentOfGroup,
+      location: fn.location,
       stack: [],
     })),
   }));

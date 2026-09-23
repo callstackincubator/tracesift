@@ -2,7 +2,24 @@
 
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Button, Heading, ScrollArea, Tabs, Text } from "@rozenite/ui";
+import { Button, Heading, ScrollArea, Tabs } from "@rozenite/ui";
+
+function GuideStep({
+  number,
+  title,
+  children,
+}: {
+  number: number;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <li className="guide-step">
+      <span className="guide-step-number">{number}</span>
+      <div><strong>{title}</strong><p>{children}</p></div>
+    </li>
+  );
+}
 
 export function HowToUseGuide({
   open,
@@ -58,56 +75,45 @@ export function HowToUseGuide({
         aria-labelledby={titleId}
       >
         <div className="how-to-drawer-header">
-          <Heading level={2} id={titleId}>
-            How to use it?
-          </Heading>
+          <div>
+            <span className="guide-kicker">Quick start</span>
+            <Heading level={2} id={titleId}>Analyze your first profile</Heading>
+            <p>From capture to actionable performance insights in a few steps.</p>
+          </div>
           <Button
             ref={closeButtonRef}
             type="button"
             size="sm"
-            variant="outline"
+            variant="ghost"
+            className="guide-close"
+            aria-label="Close guide"
             onClick={onClose}
           >
-            Close
+            ×
           </Button>
-        </div>
-
-        <div className="how-to-intro">
-          <Text render={<p />}>
-            Choose a profile type, upload a capture from the React Native app,
-            then analyze locally.
-          </Text>
-          <Text render={<p />} tone="neutral">
-            Profiles stay on this device. Configure the model with{" "}
-            <code>perf-ai model</code> and restart the server.
-          </Text>
         </div>
 
         <Tabs className="how-to-tabs" defaultValue="cpu">
           <Tabs.List size="sm" aria-label="Profile guides">
-            <Tabs.Tab value="cpu">CPU profile</Tabs.Tab>
-            <Tabs.Tab value="react">React profile</Tabs.Tab>
+            <Tabs.Tab value="cpu"><span className="guide-tab-icon">JS</span> CPU profile</Tabs.Tab>
+            <Tabs.Tab value="react"><span className="guide-tab-icon react">⚛</span> React profile</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel className="how-to-panel" value="cpu">
             <ScrollArea className="how-to-scroll">
               <ol className="how-to-steps">
-                <li>
-                  Record JS execution (Chrome Performance / React Native
-                  DevTools CPU profiler / Hermes Profiler).
-                </li>
-                <li>Upload a CPU or hermes profile.</li>
-                <li>
-                  Drop the file, click <strong>Analyze profile</strong>.
-                </li>
-                <li>
-                Review bottlenecks (slowest first).
-                </li>
-                <li>
-                   Use{" "}
-                  <strong>Generate Prompt</strong> /{" "}
-                  <strong>Copy Prompt</strong> to handoff to an AI assistant.
-                </li>
+                <GuideStep number={1} title="Capture JavaScript execution">
+                  Use Chrome Performance, the React Native DevTools CPU profiler, or Hermes Profiler.
+                </GuideStep>
+                <GuideStep number={2} title="Add the exported profile">
+                  Drop a <code>.cpuprofile</code> or compatible <code>.json</code> file into the upload area.
+                </GuideStep>
+                <GuideStep number={3} title="Run the analysis">
+                  Select <strong>Analyze profile</strong>. The slowest execution paths appear first.
+                </GuideStep>
+                <GuideStep number={4} title="Turn an insight into a fix">
+                  Use <strong>Generate Prompt</strong> to create a focused handoff for your AI assistant.
+                </GuideStep>
               </ol>
             </ScrollArea>
           </Tabs.Panel>
@@ -115,27 +121,24 @@ export function HowToUseGuide({
           <Tabs.Panel className="how-to-panel" value="react">
             <ScrollArea className="how-to-scroll">
               <ol className="how-to-steps">
-                <li>
-                  Record with React DevTools Profiler and export the profiling{" "}
-                  <code>.json</code> file.
-                </li>
-                <li>
-                  Set <strong>Commit budget (ms)</strong> (default 16).
-                </li>
-                <li>Drop the file, click <strong>Analyze profile</strong>.</li>
-                <li>
-                  The UI shows selected over-budget component issues, not a raw
-                  ranking.
-                </li>
-                <li>Empty findings can mean every commit stayed within budget.</li>
-                <li>
-                  Use <strong>Generate Prompt</strong> /{" "}
-                  <strong>Copy Prompt</strong> to handoff to an AI assistant.
-                </li>
+                <GuideStep number={1} title="Record component renders">
+                  Open React DevTools Profiler, record the interaction, and export the profiling <code>.json</code>.
+                </GuideStep>
+                <GuideStep number={2} title="Choose your commit budget">
+                  Keep the 16 ms default for 60 Hz, or use 8.33 ms for a 120 Hz target.
+                </GuideStep>
+                <GuideStep number={3} title="Upload and analyze">
+                  Add the export and select <strong>Analyze profile</strong> to inspect over-budget commits.
+                </GuideStep>
+                <GuideStep number={4} title="Review actionable evidence">
+                  Focus on the selected component issues, then generate a prompt for the issue you want to fix.
+                </GuideStep>
               </ol>
             </ScrollArea>
           </Tabs.Panel>
         </Tabs>
+
+        <div className="guide-privacy"><span>✓</span><p><strong>Private by design</strong>Your profile stays on this device. Raw uploads are never retained.</p></div>
       </div>
     </div>,
     portalRoot,

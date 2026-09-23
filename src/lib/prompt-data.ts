@@ -1,3 +1,4 @@
+import { isReadableSourcePath } from "./source-location.ts";
 import type { Hotspot } from "./analysis";
 import type { Bottleneck } from "./bottlenecks";
 import type { ReactIssue } from "./react-analyzer";
@@ -15,13 +16,9 @@ function sourceFrame(label: string): { name: string; location?: string } {
   const match = /^(.*) \((.*):\d+:\d+\)$/.exec(label);
   if (!match) return { name: label };
   const [, name, location] = match;
-  const readable = !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(location)
-    || /^[a-z]:[\\/]/i.test(location);
   return {
     name,
-    location: readable && /\.(?:[cm]?[jt]sx?|vue|svelte)(?::|$)/i.test(location)
-      ? label.slice(name.length + 2, -1)
-      : undefined,
+    location: isReadableSourcePath(location) ? label.slice(name.length + 2, -1) : undefined,
   };
 }
 
@@ -68,6 +65,9 @@ export function bottleneckPromptData(group: Bottleneck) {
     functions: group.functions.slice(0, MAX_FUNCTIONS).map((fn) => ({
       id: fn.id,
       title: compactText(fn.title),
+      // The frame's own readable source path, when it has one. Absent for
+      // bundle, native, and anonymous frames; never guess one from a URL.
+      sourceLocation: fn.location,
       selfTimeMs: fn.selfTimeMs,
       percentOfGroup: fn.percentOfGroup,
       stack: compactStack(fn.stack),

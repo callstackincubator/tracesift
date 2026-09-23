@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- macOS, Linux, or WSL.
+- macOS, Linux.
 - Node.js 22.19.0 or newer, npm, and Git available on `PATH`.
 - Internet access to clone the repository, install dependencies, and build the app.
 - An OpenAI, Anthropic, or Callstack Apex API key for manual analysis. Automated tests and builds do not require a real key.
@@ -34,17 +34,17 @@ Start the development server:
 npm run dev -- --hostname 127.0.0.1
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Use the npm scripts so the startup preload captures model configuration before the server starts listening.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
 ## Manually test analysis and model selection
 
-1. Check that the web UI displays the model you selected.
+1. Open **Analysis settings**, select a provider and model, enter its API key, and save.
 2. Upload `test-fixtures/sample.cpuprofile` and start analysis. This sends a real request to the selected provider and may incur usage charges.
 3. Check that the analysis completes and displays results. Inspect the server terminal if a request fails.
-4. Stop the server with Ctrl+C, run `node packages/cli/src/cli.js model` to change the model or key, and restart the server.
-5. Confirm the UI shows the new selection and run another analysis.
+4. Change the model or key in **Analysis settings**.
+5. Confirm the new selection applies without restarting and run another analysis.
 
-Model configuration is captured at startup. Changes require a restart, which also clears in-memory analysis results.
+Model configuration is stored in the local Perf AI home and changes apply immediately.
 
 ## Run automated checks
 
@@ -95,13 +95,13 @@ node packages/cli/src/cli.js init
 node packages/cli/src/cli.js start
 ```
 
-Check that `init` clones the pinned commit, installs dependencies, builds the app, and offers model selection. Check that `start` opens the browser and serves the configured model. Press Ctrl+C to stop it.
+Check that `init` clones the pinned commit, installs dependencies, and builds the app. Check that `start` opens the browser and allows model selection from **Analysis settings**. Press Ctrl+C to stop it.
 
 Additional checks:
 
 - Run `init` again after stopping the server: a complete matching installation should be reused.
 - Run `node packages/cli/src/cli.js start --port 3001 --no-open`: open the printed URL manually and verify analysis works.
-- Run `node packages/cli/src/cli.js model` to replace the model or key, then restart and verify the selection.
+- Replace the model or key in **Analysis settings** and verify the selection without restarting.
 - If installation fails, resolve the error shown above the final CLI message and rerun `init`.
 
-Direct `model` and current-checkout npm commands work without release metadata. Direct `init` and `start` require it. After changing the pinned application revision, commit, push, and pack again. For release requirements and storage details, see the [CLI documentation](packages/cli/README.md).
+Current-checkout npm commands work without release metadata. Direct `init` and `start` require it. After changing the pinned application revision, commit, push, and pack again. For release requirements and storage details, see the [CLI documentation](packages/cli/README.md).

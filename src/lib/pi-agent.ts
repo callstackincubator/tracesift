@@ -88,6 +88,14 @@ function isAuthFailure(detail: string): boolean {
   );
 }
 
+function isNonAsciiApiKeyFailure(detail: string): boolean {
+  const text = detail.toLowerCase();
+  return text.includes("bytestring") || (text.includes("character at index") && text.includes("greater than 255"));
+}
+
+const NON_ASCII_API_KEY_MESSAGE =
+  "The saved API key contains non-ASCII characters (often an em dash copied from rich text), so the provider request cannot be sent. Replace it in Analysis settings with a key copied directly from the provider dashboard.";
+
 export interface RunAgentOptions {
   /** Short label used in the logs, e.g. "analyze" or "hotspot-prompt". */
   label: string;
@@ -308,7 +316,10 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       const detail = error instanceof Error ? error.message : String(error);
       log(logPrefix, `session.prompt threw: ${truncate(detail, 800)}`);
       if (isAuthFailure(detail)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Run perf-ai model to replace it, then restart the server.");
+        throw new AgentError(401, "The API key was rejected by the provider. Replace it in Analysis settings.");
+      }
+      if (isNonAsciiApiKeyFailure(detail)) {
+        throw new AgentError(401, NON_ASCII_API_KEY_MESSAGE);
       }
       throw new AgentError(502, `The analysis agent failed: ${detail}`);
     } finally {
@@ -327,7 +338,10 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     }
     if (lastError) {
       if (isAuthFailure(lastError)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Run perf-ai model to replace it, then restart the server.");
+        throw new AgentError(401, "The API key was rejected by the provider. Replace it in Analysis settings.");
+      }
+      if (isNonAsciiApiKeyFailure(lastError)) {
+        throw new AgentError(401, NON_ASCII_API_KEY_MESSAGE);
       }
       throw new AgentError(502, `The analysis agent failed: ${lastError}`);
     }

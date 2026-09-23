@@ -36,7 +36,7 @@ for (const mode of ['configured', 'missing', 'malformed']) {
       const status = await response.json();
       assert.equal(status.configured, mode === 'configured');
       if (mode === 'configured') assert.equal(status.model, 'Apex');
-      if (mode === 'missing') assert.match(status.error, /Run perf-ai model/);
+      if (mode === 'missing') assert.match(status.error, /Analysis settings/);
       if (mode === 'malformed') assert.match(status.error, /Invalid model configuration/);
       assert(!JSON.stringify(status).includes('production-smoke-secret'));
     } finally {

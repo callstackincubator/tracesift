@@ -9,6 +9,8 @@ import {
   normalizeHotspots,
   PROFILE_FILE_NAME,
   putRecord,
+  getAnalysisSettings,
+  saveAnalysis,
   type TokenUsage,
 } from "@/lib/analysis";
 import { summarizeCpuProfile } from "@/lib/js-profile";
@@ -140,9 +142,9 @@ export async function POST(request: Request): Promise<Response> {
   );
 
   if (bottlenecks.length === 0) {
-    log(`no hotspots reached ${MIN_HOTSPOT_TIME_MS} ms — skipping analyzer`);
+    log(`no actionable hotspots reached ${MIN_HOTSPOT_TIME_MS} ms — skipping analyzer`);
     await destroyRecord(id, dir);
-    return json({ error: `No hotspots of at least ${MIN_HOTSPOT_TIME_MS} ms were found in this profile.` }, 422);
+    return json({ error: `No actionable hotspots of at least ${MIN_HOTSPOT_TIME_MS} ms were found in this profile. Work spent entirely inside React and scheduler internals is excluded.` }, 422);
   }
 
   const capture: { report?: unknown } = {};
@@ -222,7 +224,7 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "No meaningful hotspots were found in this profile." }, 502);
   }
 
-  putRecord({
+  const record = {
     id,
     createdAt: Date.now(),
     dir,
@@ -232,8 +234,20 @@ export async function POST(request: Request): Promise<Response> {
     prompts: {},
     usage,
     promptUsage: {},
-  });
+    profileType: "cpu" as const,
+    title: profile.name,
+    saved: false,
+  };
+  putRecord(record);
+  const settings = await getAnalysisSettings();
+  let saved = false;
+  if (settings.autoSave) {
+    try { await saveAnalysis(record); saved = true; }
+    catch (error) { log("could not auto-save analysis:", error instanceof Error ? error.message : error); }
+  }
 
   log(`analysis ${id} complete in ${Math.round((Date.now() - startedAt) / 1000)}s — ${hotspots.length} hotspots (analyzer tokens: ${usage.totalTokens}) — ` + hotspots.map((h) => `${h.title} (${h.combinedTimeMs} ms)`).join(" | "));
-  return json({ analysisId: id, totalMs, hotspots: clientHotspots(hotspots), usage });
+  const response = { analysisId: id, profileType: "cpu", title: profile.name, saved, totalMs, hotspots: clientHotspots(hotspots), usage };
+  log("SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
+  return json(response);
 }

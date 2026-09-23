@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
-import { getHome, providers, readConfig, writeConfig } from './config.js';
+import { getHome, isAsciiApiKey, providers, readConfig, writeConfig } from './config.js';
 import { getCatalog } from './models.js';
 
 export class Cancelled extends Error {}
@@ -47,9 +47,16 @@ export async function selectModel({ home = getHome(), prompt, catalog } = {}) {
       model = matches[Number(await prompt.ask('Model number (Enter searches again): ')) - 1];
     }
     let key = previous?.keys[provider];
+    if (key && !isAsciiApiKey(key)) key = undefined;
     if (key && (await prompt.ask('Reuse saved API key? [Y/n] ')).toLowerCase() === 'n') key = undefined;
-    while (!key) key = await prompt.ask('API key (hidden): ', { secret: true });
+    while (!key) {
+      key = await prompt.ask('API key (hidden): ', { secret: true });
+      if (key && !isAsciiApiKey(key)) {
+        console.log('That key contains non-ASCII characters (often a dash copied from rich text). Paste it again from the provider dashboard.');
+        key = undefined;
+      }
+    }
     await writeConfig({ version: 1, provider, model: model.id, keys: { ...previous?.keys, [provider]: key } }, home);
-    console.log(`Selected ${providers[provider]} / ${model.name}. Restart the server to apply changes; restarting clears analysis results.`);
+    console.log(`Selected ${providers[provider]} / ${model.name}.`);
   } finally { prompt.close(); }
 }

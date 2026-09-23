@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MAX_UPLOAD_BYTES, putRecord } from "./analysis.ts";
+import { MAX_UPLOAD_BYTES, putRecord, getAnalysisSettings, saveAnalysis } from "./analysis.ts";
 import { parseReactProfileOptions, ReactProfileError } from "./react-profile.ts";
 import type { extractReactProfile } from "./react-profile.ts";
 import { requireReactEvidence, withinReactBudget, noReactIssues, ZERO_REACT_USAGE, discardSubBudgetReactIssues, type analyzeReactProfile } from "./react-analyzer.ts";
@@ -39,9 +39,8 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
         : await dependencies.analyze(result, dir, frameBudgetMs);
       if (request.signal.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");
       const report = discardSubBudgetReactIssues(analysis, evidence, frameBudgetMs);
-      const analysisId = report.issues.length > 0 ? randomUUID() : null;
-      if (analysisId) {
-        putRecord({
+      const analysisId = randomUUID();
+      const record = {
           id: analysisId,
           createdAt: Date.now(),
           dir: "",
@@ -51,12 +50,23 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
           prompts: {},
           usage: analysis.usage,
           promptUsage: {},
-        });
+          profileType: "react" as const,
+          title: profile.name,
+          saved: false,
+      };
+      putRecord(record);
+      const settings = await getAnalysisSettings();
+      let saved = false;
+      if (settings.autoSave) {
+        try { await saveAnalysis(record); saved = true; }
+        catch (error) { console.warn("[perf-ai] could not auto-save analysis:", error); }
       }
-      return Response.json({ profileType: "react", analysisId, summary: { ...evidence.summary,
+      const response = { profileType: "react", title: profile.name, saved, analysisId, summary: { ...evidence.summary,
         commitsOverBudget: evidence.commitDurations.filter(ms => ms > frameBudgetMs).length,
         omittedEvidenceCommitCount: evidence.omittedCommitCount,
-      }, ...report, frameBudgetMs, usage: analysis.usage });
+      }, ...report, frameBudgetMs, usage: analysis.usage };
+      console.log("[perf-ai] SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
+      return Response.json(response);
     } catch (error) {
       if (error instanceof ReactProfileError || (error instanceof Error && "status" in error && typeof error.status === "number"
           && error.status >= 400 && error.status <= 599)) {

@@ -1,6 +1,7 @@
-import { getRecord, type TokenUsage } from "@/lib/analysis";
+import { getRecord, getSavedAnalysis, updateSavedAnalysis, type TokenUsage } from "@/lib/analysis";
 import { AgentError, runAgent } from "@/lib/pi-agent";
 import { buildFixPromptUserPrompt, FIX_PROMPT_SYSTEM_PROMPT } from "@/lib/prompts";
+import { tmpdir } from "node:os";
 
 const LOG = "api/hotspot-prompt";
 
@@ -27,7 +28,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!analysisId || !hotspotId) {
     return json({ error: "analysisId and hotspotId are required." }, 400);
   }
-  const record = getRecord(analysisId);
+  const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
   }
@@ -50,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       label: "hotspot-prompt",
       systemPrompt: FIX_PROMPT_SYSTEM_PROMPT,
       prompt: buildFixPromptUserPrompt(hotspot),
-      cwd: record.dir,
+      cwd: record.dir || tmpdir(),
       maxOutputTokens: 2_048,
       builtinTools: [],
       timeoutMessage: "Debug prompt generation timed out. Please try again.",
@@ -79,6 +80,7 @@ export async function POST(request: Request): Promise<Response> {
 
   record.prompts[hotspotId] = prompt;
   record.promptUsage[hotspotId] = usage;
+  await updateSavedAnalysis(record);
   log(`prompt generated in ${Math.round((Date.now() - startedAt) / 1000)}s (${prompt.length} chars, ${usage.totalTokens} tokens)`);
   return json({ prompt, usage });
 }

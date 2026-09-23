@@ -3,8 +3,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { getHome, ensureHome, readConfig } from './config.js';
-import { getCatalog } from './models.js';
+import { getHome, ensureHome } from './config.js';
 import { readRelease, verifyInstallation } from './install.js';
 import { acquireLock, launch } from './process.js';
 
@@ -50,9 +49,6 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
   let stopping = false;
   try {
     await verifyInstallation(home, release);
-    const config = await readConfig(home);
-    if (!config) throw new Error('Run perf-ai model before starting the server.');
-    if (!(await getCatalog()).some(model => model.provider === config.provider && model.id === config.model)) throw new Error('Selected model is unavailable. Run perf-ai model.');
     await assertPortAvailable(port);
     const instance = randomUUID();
     const url = `http://127.0.0.1:${port}`;

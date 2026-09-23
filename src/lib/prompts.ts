@@ -9,7 +9,7 @@ import {
   analysisPromptData,
   debugPromptData,
   debugReactIssuePromptData,
-} from "./prompt-data";
+} from "./prompt-data.ts";
 import type { Bottleneck } from "./bottlenecks";
 import type { Hotspot } from "./analysis";
 import type { ReactIssue } from "./react-analyzer";
@@ -20,13 +20,15 @@ Only the heaviest functions are included in this bounded summary. omittedFunctio
 
 These groups and measurements are ground truth. Each sample belongs to one group only; combinedTimeMs sums function self times without adding overlapping inclusive times. Do not split groups into individual hotspots, merge unrelated groups, invent stacks, or change measurements.
 
+Groups whose entire sampled cost is React reconciler, renderer, or scheduler internals are removed before you see them, because they name no work a product developer can change. Where such frames remain inside a group, treat them as context for the application work beside them, and title and summarize the group by that application work.
+
 Explain every supplied group, including single-function groups. For each, return:
 - Its exact id.
 - A concise title (at most 120 characters) describing the dominant expensive operations, weighted by self time, rather than copying a framework wrapper such as dispatchEvent or batchedUpdates. If the work is mixed, describe the main operations without inventing a common cause.
 - A summary of at most 3 short bullet points explaining the same operations as the title, grounded in the supplied functions and their measured self times. Each bullet is one clause, not a paragraph. Lead with expensive work and include the recorded application caller, event handler (such as _onFocus or _onChange), and readable source path when supplied. These identify where to investigate, even when the caller has little or no self time. Keep framework dispatch wrappers as context rather than the cause. Group totals include omitted work; do not attribute that time to just the listed functions. If the group has only one function, return exactly one bullet describing it — do not split a single function's cost into multiple bullets.
 - supportingFunctionIds containing the exact supplied function IDs supporting the title and summary, including the heaviest function.
 
-A function's self time can aggregate multiple call paths; its stack is representative, not proof that all samples followed that path. Stacks are innermost first: later frames call earlier ones. Use the recorded path to connect expensive leaf operations to named application callers and originating handlers; do not claim they own all aggregated samples. Abbreviated stacks can omit application callers. Report supplied readable source filenames or paths (for example explore.tsx:42:7); omit HTTP and other URL locations and never derive a source filename from a URL. Do not infer user-event frequency, render placement, full-array processing, missing memoization, or one formatter construction per item from sampled stacks alone. Construction self time is not an invocation count.
+A function's self time can aggregate multiple call paths; its stack is representative, not proof that all samples followed that path. Stacks are innermost first: later frames call earlier ones. Use the recorded path to connect expensive leaf operations to named application callers and originating handlers; do not claim they own all aggregated samples. Abbreviated stacks can omit application callers. Report supplied readable source filenames or paths; each function's own path is in its sourceLocation field when one was recorded (for example explore.tsx:42:7), and stacks may carry others. Omit HTTP and other URL locations and never derive a source filename from a URL. Do not infer user-event frequency, render placement, full-array processing, missing memoization, or one formatter construction per item from sampled stacks alone. Construction self time is not an invocation count.
 
 Example: for date formatting through formatDate, localeCompare inside sort, and DateTimeFormat construction, use a title like "Expensive date formatting and locale-aware sorting". If the recorded path is _onFocus → getUserName → sort → formatDate, include getUserName and _onFocus with the formatting cost and any supplied readable source location. Summarize their measured costs and origin in at most three bullets. Do not title it "dispatchEvent" just because that is the grouping caller.
 
@@ -52,7 +54,7 @@ Your job: produce a short diagnostic hand-off describing the issue, measured imp
 - If needed, use a second bullet to explain the expensive operations within that recorded path, such as sorting that reaches date formatting. Do not repeat the same timing or call path.
 
 ## Where this originates
-- Give the supplied readable source filename or path (with line/column when available), the application function, and how it is invoked, in one short sentence. For example, when supported: "In explore-details.tsx, getUserByUserName is reached from an _onFocus handler." If no source path is supplied, give just the function and recorded invocation context. If the function is unnamed, use the closest useful recorded caller, handler, module, or operation. Omit unavailable details instead of adding discovery tasks.
+- Give the supplied readable source filename or path (with line/column when available), the application function, and how it is invoked, in one short sentence. A function's own path is in its sourceLocation field when one was recorded. For example, when supported: "In explore-details.tsx, getUserByUserName is reached from an _onFocus handler." If no source path is supplied, give just the function and recorded invocation context. If the function is unnamed, use the closest useful recorded caller, handler, module, or operation. Omit unavailable details instead of adding discovery tasks.
 
 Rules:
 - This hand-off is diagnostic only. Do not include fixes, optimizations, implementation changes, code examples, expected post-fix behavior, or requests to change code, even if the supplied analysis contains them.

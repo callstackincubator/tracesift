@@ -55,7 +55,7 @@ export async function install({ home = getHome(), release, execute = run } = {})
     try { await rename(app, previous); hadPrevious = true; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     try { await rename(checkout, app); }
     catch (error) { if (hadPrevious) await rename(previous, app); throw error; }
-    console.log('Installed. Run perf-ai start after configuring a model.');
+    console.log('Installed. Run perf-ai start, then choose a model in Analysis settings.');
   } finally {
     if (stage) await rm(stage, { recursive: true, force: true });
     await unlock();

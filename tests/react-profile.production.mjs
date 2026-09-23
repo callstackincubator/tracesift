@@ -34,7 +34,7 @@ test('production React endpoint resolves the patched CLI and reaches the model b
       const result = await response.json();
       assert.equal(response.status, expected, JSON.stringify(result) + logs);
       if (expected === 200) { assert.equal(result.components, undefined); assert.deepEqual(result.issues, []); assert.equal(result.noIssue, true); assert.equal(result.usage.totalTokens, 0); }
-      if (expected === 503) assert.match(result.error, /Run perf-ai model/);
+      if (expected === 503) assert.match(result.error, /Analysis settings/);
     }
   } finally {
     child.kill('SIGTERM');
