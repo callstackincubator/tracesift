@@ -14,7 +14,16 @@ test('packed artifact contains executable and shared exports, runnable outside r
   await mkdir(copy);
   for (const entry of ['src', 'package.json', 'README.md']) await cp(join(source, entry), join(copy, entry), { recursive: true });
   // This is packaging-layout coverage, not a publishable release: real prepack requires clean Git state.
-  await writeFile(join(copy, 'release.json'), JSON.stringify({ repository: 'https://github.com/callstackincubator/tracesift.git', revision: 'a'.repeat(40) }));
+  await writeFile(join(copy, 'release.json'), JSON.stringify({
+    schemaVersion: 1,
+    repository: 'https://github.com/callstackincubator/tracesift',
+    version: '0.1.0',
+    revision: 'a'.repeat(40),
+    tag: 'tracesift-v0.1.0',
+    artifacts: {
+      [`${process.platform}-${process.arch}`]: { url: 'https://github.com/example/app.tar.gz', sha256: 'b'.repeat(64), size: 1 },
+    },
+  }));
   const packed = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--cache', join(temp, 'cache')], { cwd: copy, encoding: 'utf8' }))[0];
   assert(packed.files.some(file => file.path === 'release.json'));
   assert(packed.files.some(file => file.path === 'src/cli.js' && (file.mode & 0o111)));
@@ -23,6 +32,7 @@ test('packed artifact contains executable and shared exports, runnable outside r
   await mkdir(join(modules, '@callstack/tracesift'), { recursive: true });
   execFileSync('tar', ['-xzf', join(copy, packed.filename), '-C', join(modules, '@callstack/tracesift'), '--strip-components=1']);
   await symlink(fileURLToPath(new URL('../../../node_modules/@earendil-works', import.meta.url)), join(modules, '@earendil-works'));
+  await symlink(fileURLToPath(new URL('../../../node_modules/tar', import.meta.url)), join(modules, 'tar'));
   const pkg = JSON.parse(await readFile(join(modules, '@callstack/tracesift/package.json'), 'utf8'));
   assert.deepEqual(Object.keys(pkg.exports).sort(), ['./bootstrap', './config', './models', './runtime']);
   const output = execFileSync(process.execPath, [join(modules, '@callstack/tracesift/src/cli.js'), '--help'], { cwd: temp, encoding: 'utf8' });

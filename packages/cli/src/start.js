@@ -53,7 +53,10 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
     const instance = randomUUID();
     const url = `http://127.0.0.1:${port}`;
     const app = join(home, 'app');
-    proc = launch(process.execPath, ['--import', '@callstack/tracesift/bootstrap', join(app, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '--hostname', '127.0.0.1', '--port', String(port)], { cwd: app, env: { ...process.env, TRACE_SIFT_HOME: home, TRACE_SIFT_INSTANCE: instance } });
+    proc = launch(process.execPath, ['--import', '@callstack/tracesift/bootstrap', join(app, 'server.js')], {
+      cwd: app,
+      env: { ...process.env, HOSTNAME: '127.0.0.1', PORT: String(port), TRACE_SIFT_HOME: home, TRACE_SIFT_INSTANCE: instance },
+    });
     for (const signal of ['SIGINT', 'SIGTERM']) {
       const handler = () => { stopping = true; void proc.stop(signal); };
       handlers.set(signal, handler); process.on(signal, handler);

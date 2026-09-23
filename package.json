@@ -6,10 +6,12 @@
     "postinstall": "patch-package --error-on-fail",
     "dev": "node --import @callstack/tracesift/bootstrap node_modules/next/dist/bin/next dev",
     "build": "next build",
+    "artifact:package": "node scripts/package-standalone.mjs",
     "start": "node --import @callstack/tracesift/bootstrap node_modules/next/dist/bin/next start",
     "lint": "eslint",
     "test": "node --experimental-strip-types --test tests/*.test.mjs packages/cli/test/*.test.js",
-    "test:production": "node --test packages/cli/test/production.smoke.js tests/react-profile.production.mjs"
+    "test:production": "node --test packages/cli/test/production.smoke.js tests/react-profile.production.mjs",
+    "test:release:local": "node scripts/test-local-release.mjs"
   },
   "dependencies": {
     "@callstack/tracesift": "0.1.0",
@@ -31,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
+    "tar": "^7.5.22",
     "typescript": "^5"
   },
   "workspaces": [

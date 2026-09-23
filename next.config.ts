@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   reactCompiler: true,
   transpilePackages: ["@rozenite/ui"],
   // The pi coding agent SDK is a Node-heavy ESM package; keep it out of the
