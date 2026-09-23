@@ -18,7 +18,7 @@ Runs locally with OpenAI, Anthropic, or Callstack Apex. Your credentials stay wi
 npm install -g @callstack/tracesift
 ```
 
-Installs the TraceSift command globally. Requires Node.js 22.19 or newer, npm, and Git on macOS or Linux.
+Installs the TraceSift command globally. Requires Node.js 22.19 or newer and npm on macOS or Linux. The installed command does not need Git or build tools.
 
 <!-- Add installation screenshot here -->
 
@@ -28,7 +28,7 @@ Installs the TraceSift command globally. Requires Node.js 22.19 or newer, npm, a
 tracesift init
 ```
 
-Run this once to download the pinned TraceSift source, install its dependencies, and build the local web app.
+Run this once to download and verify the prebuilt web app for your platform. After updating the CLI, run `tracesift init` again to install its matching app release.
 
 <!-- Add initialization screenshot here -->
 

@@ -7,7 +7,7 @@ try {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { help: { type: 'boolean', short: 'h' }, port: { type: 'string' }, 'no-open': { type: 'boolean' } } });
   const [command, ...extra] = positionals;
   if (values.help || !command) {
-    console.log('Usage:\n  tracesift init\n  tracesift start [--port 3000] [--no-open]\n\nChoose the model and enter its API key in Analysis settings.\nRequires Node.js >=22.19, npm and Git on macOS or Linux (WSL supported).');
+    console.log('Usage:\n  tracesift init\n  tracesift start [--port 3000] [--no-open]\n\nChoose the model and enter its API key in Analysis settings.\nRequires Node.js >=22.19 on x64 or arm64 macOS/Linux (WSL supported).');
   } else {
     if (extra.length || !['init', 'start'].includes(command)) throw new Error('Unknown command. Run tracesift --help.');
     if ((values.port || values['no-open']) && command !== 'start') throw new Error('This option is not supported for this command. Run tracesift --help.');
