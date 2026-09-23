@@ -545,7 +545,7 @@ body { background: var(--background, #151419); }
   z-index: 50;
   min-height: 64px;
   padding-inline: 22px;
-  background: color-mix(in srgb, var(--background) 88%, transparent);
+  background: color-mix(in srgb, var(--background) 38%, transparent);
   border-bottom-color: color-mix(in srgb, var(--border) 76%, transparent);
   backdrop-filter: blur(18px);
 }
