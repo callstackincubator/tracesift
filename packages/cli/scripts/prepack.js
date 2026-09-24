@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { assertReleaseMetadata } from './release-metadata.js';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
 if (git('status', '--porcelain', '--untracked-files=normal')) throw new Error('Release packaging requires a clean, committed checkout.');
@@ -14,9 +15,5 @@ const metadataPath = process.env.TRACESIFT_RELEASE_METADATA;
 if (!metadataPath) throw new Error('Set TRACE_SIFT_RELEASE_METADATA to the generated artifact release metadata before packing.');
 const release = JSON.parse(readFileSync(metadataPath, 'utf8'));
 const revision = git('rev-parse', 'HEAD');
-if (release.schemaVersion !== 1 || release.repository !== 'https://github.com/callstackincubator/tracesift' ||
-    release.version !== cli.version || release.revision !== revision || release.tag !== `tracesift-v${cli.version}` ||
-    !release.artifacts || typeof release.artifacts !== 'object' || !Object.keys(release.artifacts).length) {
-  throw new Error('Generated artifact release metadata does not match this package and commit.');
-}
+assertReleaseMetadata(release, { version: cli.version, revision });
 writeFileSync(new URL('../release.json', import.meta.url), JSON.stringify(release, null, 2) + '\n');

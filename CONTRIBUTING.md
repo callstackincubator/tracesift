@@ -98,3 +98,23 @@ node scripts/package-standalone.mjs
 ```
 
 It writes the current-platform archive and its checksum/size sidecar under `dist/`. For release requirements and storage details, see the [CLI documentation](packages/cli/README.md).
+
+## Prepare and publish a release
+
+Add a Changeset with each user-facing change to the app or CLI:
+
+```sh
+npx changeset
+```
+
+The app and CLI versions move together. The root app is private; only `@callstack/tracesift` is published to npm. Commit the Changeset with the change and merge it into `main`. The release workflow opens or updates a Changesets version PR. Review its version bump, changelog, root dependency on the CLI, and lockfile, then merge that PR to start publication. Do not publish the CLI manually: it must contain the checksums and URLs for the artifacts produced from the same revision.
+
+Before merging the version PR, run the local checkpoint above (`npm run test:release:local -- --keep-open`) and complete a browser analysis. The workflow then builds and smoke-tests native standalone archives for `darwin-arm64`, `darwin-x64`, `linux-arm64`, and `linux-x64`. It creates a draft `tracesift-v<version>` GitHub Release, attaches the archives, inserts their immutable metadata into the CLI package, publishes the package to npm, and makes the GitHub Release public after npm succeeds.
+
+Repository maintainers must configure the following once:
+
+- In npm package settings for `@callstack/tracesift`, add a trusted publisher of type **GitHub Actions** with organization/user `callstackincubator`, repository `tracesift`, and workflow filename `release.yml`. The workflow uses npm OIDC trusted publishing; no `NPM_TOKEN` is required.
+- In GitHub repository Actions settings, allow Actions to create pull requests so Changesets can open the version PR. The release workflow needs `contents: write` and `pull-requests: write` for version PRs, and `contents: write` plus `id-token: write` for publishing. Keep build jobs at `contents: read`.
+- Keep the release workflow on GitHub-hosted runners; npm trusted publishing requires their OIDC identity. The publishing job must use npm 11.5.1 or newer.
+
+If a publish run fails, inspect the failed job and rerun the workflow for the same version. The draft GitHub Release and its assets can be reused; npm publication is skipped if that exact version is already present. If npm succeeds but making the GitHub Release public fails, rerun to finish publication. Avoid creating a second version or tag to recover an interrupted release.
