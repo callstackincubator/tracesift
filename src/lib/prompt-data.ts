@@ -1,5 +1,4 @@
 import { isReadableSourcePath } from "./source-location.ts";
-import type { Hotspot } from "./analysis";
 import type { Bottleneck } from "./bottlenecks";
 import type { ReactIssue } from "./react-analyzer";
 
@@ -52,16 +51,16 @@ function compactStack(stack: string[]): string[] {
 
 /** Separate bounded agent context from the complete measurements retained for the UI. */
 export function bottleneckPromptData(group: Bottleneck) {
+  const groupingCaller = compactText(group.title);
+  const groupStack = compactStack(group.stack);
   const data = {
     id: group.id,
-    groupingCaller: compactText(group.title),
+    groupingCaller,
     combinedTimeMs: group.combinedTimeMs,
     percentOfTotal: group.percentOfTotal,
-    stack: compactStack(group.stack),
-    functionCount: group.functions.length,
+    stack: groupStack.length === 1 && groupStack[0] === groupingCaller ? [] : groupStack,
     omittedFunctionCount: 0,
-    omittedSelfTimeMs: 0,
-    contextTruncated: true,
+    otherSelfTimeMs: 0,
     functions: group.functions.slice(0, MAX_FUNCTIONS).map((fn) => ({
       id: fn.id,
       title: compactText(fn.title),
@@ -71,12 +70,11 @@ export function bottleneckPromptData(group: Bottleneck) {
       selfTimeMs: fn.selfTimeMs,
       percentOfGroup: fn.percentOfGroup,
       stack: compactStack(fn.stack),
-      stackIsRepresentative: true,
     })),
   };
   const updateOmissions = () => {
     data.omittedFunctionCount = group.functions.length - data.functions.length;
-    data.omittedSelfTimeMs = Math.max(0, group.combinedTimeMs - data.functions.reduce((sum, fn) => sum + fn.selfTimeMs, 0));
+    data.otherSelfTimeMs = Math.max(0, group.combinedTimeMs - data.functions.reduce((sum, fn) => sum + fn.selfTimeMs, 0));
   };
   updateOmissions();
   // Measure serialized UTF-8 bytes, including JSON escaping, rather than assuming
@@ -99,32 +97,22 @@ export function compactAnnotation(text: string): string {
   return text.slice(0, 2_000);
 }
 
-/** Carry the recorded caller evidence forward with the existing conclusion. */
-export function debugPromptData(hotspot: Hotspot) {
-  const shortlisted = new Set(hotspot.supportingFunctionIds);
-  const context = bottleneckPromptData({
-    ...hotspot,
-    title: hotspot.groupingCaller,
-    functions: hotspot.functions.filter((fn) => shortlisted.has(fn.id)),
-  });
-  return {
-    summary: compactAnnotation(hotspot.summary.join("\n")),
-    groupingCaller: context.groupingCaller,
-    stack: context.stack,
-    functions: context.functions,
-  };
-}
-
 /** The prompt writer needs the existing React finding, not another profile analysis. */
 export function debugReactIssuePromptData(issue: ReactIssue) {
   return {
     summary: compactAnnotation(issue.summary),
     evidence: compactAnnotation(issue.evidence),
-    component: compactText(issue.component),
     severity: issue.severity,
-    commits: issue.commits.slice(0, MAX_FUNCTIONS).map((commit) => ({
-      commitIndex: commit.commitIndex,
-      durationMs: commit.durationMs,
+    commit: {
+      rootID: issue.commit.rootID,
+      commitIndex: issue.commit.commitIndex,
+      durationMs: issue.commit.durationMs,
+    },
+    components: issue.components.slice(0, 12).map((component) => ({
+      component: compactText(component.component),
+      selfTimeMs: component.selfTimeMs,
+      percentOfCommit: component.percentOfCommit,
+      evidence: compactAnnotation(component.evidence),
     })),
   };
 }

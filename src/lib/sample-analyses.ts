@@ -43,10 +43,14 @@ export const REACT_SAMPLE_ANALYSIS: AnalysisRecord = {
   totalMs: 172.964,
   hotspots: [],
   reactIssues: [{
-    id: "react-issue-1", summary: "HeavyActivityHeatmap mount stalls explore-details first paint by ~125 ms", severity: "high",
-    evidence: "HeavyActivityHeatmap used 124.8 ms self time on its single mount, about 74% of the 169.7 ms commit that opened explore-details.\nThe screen's first paint is blocked for roughly that long on the UI thread.",
-    commits: [{ rootID: 1, commitIndex: 1, timestampMs: 1737.9347079992294, durationMs: 169.74 }],
-    componentId: "1:728", component: "HeavyActivityHeatmap", selfTimeMs: 124.823, percentOfCommit: 73.5,
+    id: "react-commit-1-1", summary: "Expensive render work in HeavyActivityHeatmap", severity: "high",
+    evidence: "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.",
+    commit: { rootID: 1, commitIndex: 1, timestampMs: 1737.9347079992294, durationMs: 169.74 },
+    components: [{
+      componentId: "1:728", component: "HeavyActivityHeatmap", severity: "high",
+      evidence: "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.",
+      selfTimeMs: 124.823, percentOfCommit: 73.5,
+    }],
   }],
   prompts: {}, usage: { input: 12016, output: 403, cacheRead: 8000, cacheWrite: 0, totalTokens: 20419, costUsd: 0 }, promptUsage: {},
 };

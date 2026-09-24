@@ -1,7 +1,6 @@
-import { getRecord, getSavedAnalysis, updateSavedAnalysis, type TokenUsage } from "@/lib/analysis";
-import { AgentError, runAgent } from "@/lib/pi-agent";
-import { buildReactFixPromptUserPrompt, REACT_FIX_PROMPT_SYSTEM_PROMPT } from "@/lib/prompts";
-import { tmpdir } from "node:os";
+import { getRecord, getSavedAnalysis, updateSavedAnalysis } from "@/lib/analysis";
+import { ZERO_REACT_USAGE } from "@/lib/react-analyzer";
+import { buildReactFixPrompt } from "@/lib/prompts";
 
 export const runtime = "nodejs";
 
@@ -44,45 +43,13 @@ export async function POST(request: Request): Promise<Response> {
     log(`analysis=${analysisId} issue=${issueId}: serving cached prompt (${cached.length} chars)`);
     return json({ prompt: cached, usage: record.promptUsage[issueId] });
   }
-  log(`analysis=${analysisId} issue=${issueId} ("${issue.summary}"): generating prompt`);
-
-  let finalText = "";
-  let usage: TokenUsage;
-  try {
-    ({ finalText, usage } = await runAgent({
-      label: "react-issue-prompt",
-      systemPrompt: REACT_FIX_PROMPT_SYSTEM_PROMPT,
-      prompt: buildReactFixPromptUserPrompt(issue),
-      cwd: record.dir || tmpdir(),
-      maxOutputTokens: 2_048,
-      builtinTools: [],
-      timeoutMessage: "Debug prompt generation timed out. Please try again.",
-      timeoutMs: 300_000,
-    }));
-  } catch (error) {
-    log(`agent run failed: ${error instanceof Error ? error.message : error}`);
-    if (error instanceof AgentError) {
-      return json({ error: error.message }, error.status);
-    }
-    console.error("[tracesift] React issue prompt failed", error);
-    return json({ error: "Unexpected server error while generating the prompt." }, 500);
-  }
-
-  const prompt = finalText.trim()
-    .replace(/^\s*```[a-z]*\s*\n?/, "")
-    .replace(/\n?\s*```\s*$/, "")
-    .trim();
-  if (!prompt) {
-    log("agent produced no prompt (final text empty)");
-    return json(
-      { error: "The agent finished without producing a prompt. Try again.", detail: finalText.slice(0, 400) || undefined },
-      502
-    );
-  }
+  log(`analysis=${analysisId} issue=${issueId} ("${issue.summary}"): rendering prompt`);
+  const prompt = buildReactFixPrompt(issue);
+  const usage = { ...ZERO_REACT_USAGE };
 
   record.prompts[issueId] = prompt;
   record.promptUsage[issueId] = usage;
   await updateSavedAnalysis(record);
-  log(`prompt generated in ${Math.round((Date.now() - startedAt) / 1000)}s (${prompt.length} chars, ${usage.totalTokens} tokens)`);
+  log(`prompt rendered in ${Date.now() - startedAt}ms (${prompt.length} chars)`);
   return json({ prompt, usage });
 }

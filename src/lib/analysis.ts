@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Bottleneck } from "./bottlenecks";
-import type { ReactIssue } from "./react-analyzer";
+import { normalizeStoredReactIssues, type ReactIssue } from "./react-analyzer.ts";
 
 export const MAX_SUMMARY_BULLETS = 3;
 const MAX_BULLET_LENGTH = 180;
@@ -40,11 +40,11 @@ export interface AnalysisRecord {
   totalMs: number;
   hotspots: Hotspot[];
   reactIssues: ReactIssue[];
-  /** item id -> generated fix prompt (cached after the second agent run). */
+  /** Item id -> deterministic diagnostic hand-off cached after first rendering. */
   prompts: Record<string, string>;
   /** Token usage of the analyzer agent run. */
   usage: TokenUsage;
-  /** item id -> token usage of the agent run that generated that prompt. */
+  /** Item id -> token usage for hand-off rendering (zero for deterministic prompts). */
   promptUsage: Record<string, TokenUsage>;
   /** Durable history metadata. Raw profile uploads are deliberately never stored here. */
   profileType?: "cpu" | "react";
@@ -105,7 +105,8 @@ export async function getSavedAnalysis(id: string): Promise<AnalysisRecord | und
   try {
     const parsed = JSON.parse(await readFile(recordPath(id), "utf8")) as AnalysisRecord;
     if (!parsed || parsed.id !== id || !Array.isArray(parsed.hotspots) || !Array.isArray(parsed.reactIssues)) throw new Error("invalid saved analysis");
-    const record = { ...parsed, dir: "", saved: true, profileType: parsed.profileType ?? (parsed.reactIssues.length ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
+    const reactIssues = normalizeStoredReactIssues(parsed.reactIssues);
+    const record = { ...parsed, reactIssues, dir: "", saved: true, profileType: parsed.profileType ?? (reactIssues.length ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
     records.set(id, record);
     return record;
   } catch (error) {
@@ -218,8 +219,9 @@ export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottlen
       const validEvidence = Array.isArray(ids) && ids.length > 0 && ids.length <= 8
         && ids.every((id) => typeof id === "string" && functionIds.has(id))
         && ids.includes(group.functions[0]?.id);
-      const title = typeof candidate?.title === "string" ? candidate.title.trim() : "";
-      const annotation = validEvidence && title.length > 0 && title.length <= 120 ? candidate : undefined;
+      const rawTitle = typeof candidate?.title === "string" ? candidate.title.trim() : "";
+      const title = rawTitle.slice(0, 120).trimEnd();
+      const annotation = validEvidence && title.length > 0 ? candidate : undefined;
       const heaviest = group.functions.slice(0, MAX_SUMMARY_BULLETS);
       const fallbackTitle = heaviest.map((fn) => fn.title).join(" / ") || "Sampled CPU work";
       const fallbackSummary = heaviest.map((fn) => `${fn.title} (${Math.round(fn.selfTimeMs)} ms self time)`);

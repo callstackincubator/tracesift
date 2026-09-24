@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { groupBottlenecks } from '../src/lib/bottlenecks.ts';
 import { normalizeHotspots } from '../src/lib/analysis.ts';
-import { analysisPromptData, bottleneckPromptData, debugPromptData, debugReactIssuePromptData, MAX_GROUP_PROMPT_BYTES } from '../src/lib/prompt-data.ts';
+import { buildCpuFixPrompt } from '../src/lib/prompts.ts';
+import { analysisPromptData, bottleneckPromptData, debugReactIssuePromptData, MAX_GROUP_PROMPT_BYTES } from '../src/lib/prompt-data.ts';
 
 function largeGroup(id = 'b1') {
   return {
@@ -23,7 +24,7 @@ test('large profiles retain measured totals but send only a bounded function sum
   assert.equal(data.functions[0].id, 'b1-f0');
   assert.equal(data.combinedTimeMs, 10000);
   assert.equal(data.omittedFunctionCount + data.functions.length, 10000);
-  assert.equal(data.omittedSelfTimeMs + data.functions.reduce((n, fn) => n + fn.selfTimeMs, 0), 10000);
+  assert.equal(data.otherSelfTimeMs + data.functions.reduce((n, fn) => n + fn.selfTimeMs, 0), 10000);
   assert.equal(group.functions.length, 10000);
   assert.equal(group.functions[0].stack.length, 100);
   assert.equal(data.functions[0].stack.at(-1), group.functions[0].stack.at(-1));
@@ -50,48 +51,49 @@ test('prompt separates grouping context from the descriptive title and qualifies
   const data = bottleneckPromptData(group);
   assert.equal(data.groupingCaller, 'dispatchEvent');
   assert.equal(data.title, undefined);
-  assert.ok(data.functions.every(fn => fn.stackIsRepresentative === true));
+  assert.ok(data.functions.every(fn => !Object.hasOwn(fn, 'stackIsRepresentative')));
+  assert.equal(Object.hasOwn(data, 'contextTruncated'), false);
+  assert.equal(Object.hasOwn(data, 'functionCount'), false);
 });
 
-test('debug prompt carries shortlisted functions and their recorded stacks', () => {
+test('CPU hand-off is deterministic and carries measured impact plus representative origin', () => {
   const hotspot = {
-    ...largeGroup(), groupingCaller: 'render', summary: ['Expensive formatting'],
+    ...largeGroup(), title: 'Expensive markdown tokenization', groupingCaller: 'render',
+    summary: ['regexpPrototypeExec used 6400 ms of self time.'],
     supportingFunctionIds: ['b1-f0', 'b1-f7'],
   };
-  const data = debugPromptData(hotspot);
-  assert.equal(data.summary, 'Expensive formatting');
-  assert.equal(data.groupingCaller, 'render');
-  assert.deepEqual(data.functions.map(fn => fn.title), ['function0', 'function7']);
-  assert.ok(data.functions.every(fn => fn.stack.includes('heavy (bundle.js:1:1)')));
-});
-
-test('debug prompt context stays bounded even with oversized annotations and shortlists', () => {
-  const hotspot = {
-    ...largeGroup(), groupingCaller: 'render', summary: ['x'.repeat(100000)],
-    supportingFunctionIds: Array.from({length: 10000}, (_, i) => `b1-f${i}`),
+  hotspot.functions[0] = {
+    ...hotspot.functions[0], title: 'regexpPrototypeExec', location: 'src/markdown.ts:12:4',
+    stack: ['regexpPrototypeExec', 'tokenizeMarkdown', 'buildMessagePreview', 'onMessagePress', 'dispatchEvent'],
   };
-  const data = debugPromptData(hotspot);
-  assert.equal(data.summary.length, 2000);
-  assert.ok(data.functions.length >= 1 && data.functions.length <= 8);
-  assert.ok(Buffer.byteLength(JSON.stringify(data)) <= MAX_GROUP_PROMPT_BYTES + 2100);
+  const prompt = buildCpuFixPrompt(hotspot);
+  assert.match(prompt, /^## Issue and Impact/m);
+  assert.match(prompt, /10000 ms \(100% of the recorded profile\)/);
+  assert.match(prompt, /regexpPrototypeExec used 6400 ms/);
+  assert.match(prompt, /src\/markdown\.ts:12:4/);
+  assert.match(prompt, /representative sampled path includes tokenizeMarkdown → buildMessagePreview → onMessagePress/);
+  assert.doesNotMatch(prompt, /dispatchEvent/);
 });
 
 test('React issue prompt context uses the finding, not a second analysis of the profile', () => {
   const issue = {
-    id: 'react-issue-1', summary: 'Expensive list work', severity: 'high',
+    id: 'react-commit-1-3', summary: 'Expensive list work', severity: 'high',
     evidence: 'Own work in over-budget commits.',
-    componentId: '1:4', component: 'ExpensiveList',
-    commits: Array.from({length: 20}, (_, i) => ({ rootID: 1, commitIndex: i, timestampMs: i * 100, durationMs: 30 })),
+    commit: { rootID: 1, commitIndex: 3, timestampMs: 300, durationMs: 30 },
+    components: [{
+      componentId: '1:4', component: 'ExpensiveList', severity: 'high',
+      evidence: 'ExpensiveList used 24 ms self time.', selfTimeMs: 24, percentOfCommit: 80,
+    }],
   };
   assert.deepEqual(debugReactIssuePromptData(issue), {
     summary: 'Expensive list work', evidence: 'Own work in over-budget commits.',
-    component: 'ExpensiveList', severity: 'high',
-    commits: issue.commits.slice(0, 8).map(commit => ({ commitIndex: commit.commitIndex, durationMs: commit.durationMs })),
+    severity: 'high', commit: { rootID: 1, commitIndex: 3, durationMs: 30 },
+    components: [{ component: 'ExpensiveList', selfTimeMs: 24, percentOfCommit: 80, evidence: 'ExpensiveList used 24 ms self time.' }],
   });
   const oversized = debugReactIssuePromptData({ ...issue, summary: 'x'.repeat(100000), evidence: 'y'.repeat(100000) });
   assert.equal(oversized.summary.length, 2000);
   assert.equal(oversized.evidence.length, 2000);
-  assert.equal(oversized.commits.length, 8);
+  assert.equal(oversized.components.length, 1);
 });
 
 for (const handler of ['_onFocus', '_onChange']) {
@@ -113,15 +115,18 @@ for (const handler of ['_onFocus', '_onChange']) {
     const hotspot = normalizeHotspots([], 100, groups).hotspots[0];
     assert.equal(hotspot.functions.length, 1);
     assert.equal(hotspot.functions[0].title, 'nativeFormat');
-    for (const data of [bottleneckPromptData(groups[0]), debugPromptData(hotspot)]) {
+    for (const data of [bottleneckPromptData(groups[0])]) {
       const stack = data.functions[0].stack;
       assert.ok(stack.includes('getUserName (src/explore.tsx:42:7)'));
       assert.ok(stack.includes(handler));
       assert.ok(stack.indexOf('getUserName (src/explore.tsx:42:7)') < stack.indexOf(handler));
       assert.ok(stack.includes('toLocaleString'));
       assert.doesNotMatch(JSON.stringify(data), /https?:/);
-      assert.equal(data.functions[0].stackIsRepresentative, true);
+      assert.equal(Object.hasOwn(data.functions[0], 'stackIsRepresentative'), false);
     }
+    const prompt = buildCpuFixPrompt(hotspot);
+    assert.match(prompt, new RegExp(handler));
+    assert.match(prompt, /representative sampled path/);
   });
 }
 
