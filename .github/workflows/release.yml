@@ -1,0 +1,257 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  select-mode:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - id: mode
+        uses: changesets/action/select-mode@v2
+
+  version:
+    if: needs.select-mode.outputs.mode == 'version' && needs.preflight.outputs.blocks-version != 'true'
+    needs: [select-mode, preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - uses: changesets/action/version@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: npm run release:version
+          commit-message: Version packages
+          pr-title: Version packages
+
+  preflight:
+    needs: select-mode
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      needs-build: ${{ steps.state.outputs.needs-build }}
+      finalize-only: ${{ steps.state.outputs.finalize-only }}
+      blocks-version: ${{ steps.state.outputs.blocks-version }}
+      version: ${{ steps.state.outputs.version }}
+      tag: ${{ steps.state.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - id: state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ needs.select-mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          tag="tracesift-v${version}"
+          npm_published=false
+          set +e
+          npm_result="$(npm view "@callstack/tracesift@${version}" version --json 2>&1)"
+          npm_status=$?
+          set -e
+          if [ "$npm_status" -eq 0 ]; then
+            npm_published=true
+          elif ! printf '%s' "$npm_result" | grep -Eq 'E404|404 Not Found'; then
+            printf '%s\n' "$npm_result" >&2
+            echo "Could not determine whether @callstack/tracesift@$version is published." >&2
+            exit 1
+          fi
+          release_state=missing
+          release_target=
+          if release_json="$(gh release view "$tag" --json isDraft,targetCommitish 2>/dev/null)"; then
+            release_target="$(node -e "const value=JSON.parse(process.argv[1]); process.stdout.write(value.targetCommitish)" "$release_json")"
+            if [ "$(node -e "const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.isDraft))" "$release_json")" = true ]; then
+              release_state=draft
+            else
+              release_state=published
+            fi
+          fi
+          needs_build=false
+          finalize_only=false
+          blocks_version=false
+          case "$release_state:$npm_published" in
+            published:true) ;;
+            published:false)
+              echo "GitHub release $tag is public but the npm package is missing." >&2
+              exit 1
+              ;;
+            draft:true)
+              finalize_only=true
+              blocks_version=true
+              ;;
+            draft:false)
+              blocks_version=true
+              if [ "$release_target" != "$GITHUB_SHA" ]; then
+                echo "Incomplete draft $tag targets $release_target. Rerun its original workflow instead of releasing $GITHUB_SHA." >&2
+                exit 1
+              fi
+              needs_build=true
+              ;;
+            missing:true)
+              echo "The npm package exists but its GitHub release is missing; refusing to rebuild it from a potentially different revision." >&2
+              exit 1
+              ;;
+            missing:false)
+              if [ "$MODE" != version ]; then
+                needs_build=true
+              fi
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "needs-build=$needs_build" >> "$GITHUB_OUTPUT"
+          echo "finalize-only=$finalize_only" >> "$GITHUB_OUTPUT"
+          echo "blocks-version=$blocks_version" >> "$GITHUB_OUTPUT"
+
+  finalize-existing-release:
+    if: needs.preflight.outputs.finalize-only == 'true'
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the existing draft after npm succeeded
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest
+
+  build-artifacts:
+    if: needs.preflight.outputs.needs-build == 'true'
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run test:release:local
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            dist/tracesift-app-v${{ needs.preflight.outputs.version }}-${{ matrix.target }}.tar.gz
+            dist/tracesift-app-v${{ needs.preflight.outputs.version }}-${{ matrix.target }}.json
+
+  publish:
+    if: needs.preflight.outputs.needs-build == 'true'
+    needs: [preflight, build-artifacts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install npm with trusted-publishing support
+        run: npm install --global npm@11.5.1
+      - run: npm ci
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: runtime-*
+          path: dist
+          merge-multiple: true
+      - name: Verify artifacts and generate CLI metadata
+        run: node packages/cli/scripts/generate-release.js dist packages/cli/release.json
+      - name: Create or update draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if state="$(gh release view "$TAG" --json isDraft,targetCommitish 2>/dev/null)"; then
+            is_draft="$(node -e "const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.isDraft))" "$state")"
+            target="$(node -e "const value=JSON.parse(process.argv[1]); process.stdout.write(value.targetCommitish)" "$state")"
+            if [ "$is_draft" != true ]; then
+              echo "Release $TAG is already public; refusing to replace immutable assets." >&2
+              exit 1
+            fi
+            if [ "$target" != "$GITHUB_SHA" ]; then
+              echo "Draft release $TAG targets $target instead of $GITHUB_SHA." >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "TraceSift ${{ needs.preflight.outputs.version }}" --generate-notes
+          fi
+          gh release upload "$TAG" dist/*.tar.gz dist/*.json --clobber
+      - name: Inspect npm package
+        env:
+          TRACE_SIFT_RELEASE_METADATA: ${{ github.workspace }}/packages/cli/release.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/tracesift-npm-pack"
+          npm pack --workspace @callstack/tracesift --pack-destination "$RUNNER_TEMP/tracesift-npm-pack" --json
+      - name: Publish npm package
+        env:
+          TRACE_SIFT_RELEASE_METADATA: ${{ github.workspace }}/packages/cli/release.json
+        run: npm run release:publish
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest

@@ -44,6 +44,8 @@ Starts TraceSift at `http://127.0.0.1:3000` and opens it in your browser. Press 
 
 See the [CLI documentation](packages/cli/README.md) for storage, troubleshooting, and release details.
 
+Contributors can run `npm run test:release:local` to verify the packaged download and startup flow against a loopback artifact server before any GitHub release. See [Contributing](CONTRIBUTING.md) for the manual browser checkpoint and Changesets release process.
+
 ## Using the web interface
 
 ### 1. Configure Analysis settings

@@ -20,9 +20,10 @@ test('packed artifact contains executable and shared exports, runnable outside r
     version: '0.1.0',
     revision: 'a'.repeat(40),
     tag: 'tracesift-v0.1.0',
-    artifacts: {
-      [`${process.platform}-${process.arch}`]: { url: 'https://github.com/example/app.tar.gz', sha256: 'b'.repeat(64), size: 1 },
-    },
+    artifacts: Object.fromEntries(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'].map(target => [target, {
+      url: `https://github.com/callstackincubator/tracesift/releases/download/tracesift-v0.1.0/tracesift-app-v0.1.0-${target}.tar.gz`,
+      sha256: 'b'.repeat(64), size: 1,
+    }])),
   }));
   const packed = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--cache', join(temp, 'cache')], { cwd: copy, encoding: 'utf8' }))[0];
   assert(packed.files.some(file => file.path === 'release.json'));
