@@ -183,9 +183,9 @@ test('single-function groups get exactly one summary bullet, even from an over-e
   assert.deepEqual(hotspots[0].summary, ['First']);
 });
 
-test('invalid descriptive titles fall back together with their explanations', () => {
+test('invalid descriptive titles fall back while long titles are normalized locally', () => {
   const groups = groupBottlenecks(profile([node(1, 'formatDate')], [1]), 100);
-  for (const title of [undefined, '', '   ', 'x'.repeat(121), 42]) {
+  for (const title of [undefined, '', '   ', 42]) {
     const result = normalizeHotspots([{
       id: groups[0].id, title, summary: 'Unusable explanation',
       supportingFunctionIds: [groups[0].functions[0].id],
@@ -193,6 +193,12 @@ test('invalid descriptive titles fall back together with their explanations', ()
     assert.equal(result.title, 'formatDate');
     assert.doesNotMatch(result.summary.join(' '), /Unusable/);
   }
+  const normalized = normalizeHotspots([{
+    id: groups[0].id, title: 'x'.repeat(240), summary: 'Usable explanation',
+    supportingFunctionIds: [groups[0].functions[0].id],
+  }], 100, groups).hotspots[0];
+  assert.equal(normalized.title, 'x'.repeat(120));
+  assert.deepEqual(normalized.summary, ['Usable explanation']);
 });
 
 test('client hotspots keep card function names and omit stacks', () => {

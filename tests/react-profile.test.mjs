@@ -6,23 +6,26 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { extractReactProfile, parseReactProfileOptions, resolveReactProfilerCli, validateReactProfileResult } from '../src/lib/react-profile.ts';
-import { analyzeReactProfile, reactAnalystPrompt, validateReactIssueReport, discardSubBudgetReactIssues } from '../src/lib/react-analyzer.ts';
+import { analyzeReactProfile, normalizeStoredReactIssues, reactAnalystPrompt, reactIssueRemainingMs, reactIssueSeverity, validateReactIssueReport, discardSubBudgetReactIssues } from '../src/lib/react-analyzer.ts';
 import { parseFrameBudget, validateReactEvidence } from '../src/lib/react-evidence.ts';
 import { createReactAnalysisHandler } from '../src/lib/react-analysis-handler.ts';
 import { destroyRecord, getRecord } from '../src/lib/analysis.ts';
+import { buildReactFixPrompt } from '../src/lib/prompts.ts';
 
 const exec = promisify(execFile);
 const fixture = path.resolve('test-fixtures/react/react-native-v5.synthetic.json');
 const defaults = { limit: 10, rootID: null, componentName: null, minAvgDurationMs: 0 };
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, costUsd: 0 };
+const traceSiftHome = await mkdtemp(path.join(tmpdir(), 'tracesift-react-home-'));
+process.env.TRACE_SIFT_HOME = traceSiftHome;
+test.after(() => rm(traceSiftHome, { recursive: true, force: true }));
 const load = () => extractReactProfile(fixture, defaults);
 const loadEvidence = (file = fixture, options = defaults) => extractReactProfile(file, options, undefined, { analysisEvidence: true });
 const emptyReport = { issues: [], noIssue: true };
 const issueReport = (result) => {
   const commit = result.evidence.commits.find(c => c.durationMs > 16 && c.components.length);
-  return { noIssue: false, reasoning: 'Expensive own work is recorded.', issues: [{
-    componentId: commit.components[0].id, summary: 'Expensive render work', severity: 'medium',
-    evidence: 'Own work contributes to this over-budget commit.',
+  return { noIssue: false, issues: [{
+    componentId: commit.components[0].id,
     commits: [{ rootID: commit.rootID, commitIndex: commit.commitIndex }],
   }] };
 };
@@ -179,16 +182,21 @@ test('mocked analyzer selects issues but cannot change identities or measurement
   report.issues[0].commits[0].durationMs = 9999;
   const analyzed = await analyzeReactProfile(measured, tmpdir(), async options => {
     assert.deepEqual(options.builtinTools, []);
+    assert.deepEqual(options.customTools, []);
+    assert.equal(options.maxOutputTokens, 4096);
     assert.match(options.systemPrompt, /Do not invent/);
     const payload = JSON.parse(options.prompt);
     assert.equal(payload.commitDurations, undefined);
     assert.equal(payload.thresholds.commitDurationMs, 16);
-    await options.customTools[0].execute('tool-id', report);
-    return { finalText: 'Done', usage };
+    assert.equal(payload.slowestComponentsByAverageDuration, undefined);
+    assert.equal(payload.componentsByRenderCount, undefined);
+    assert.equal(payload.componentsByTotalSelfDuration, undefined);
+    assert.ok(payload.commits.every(commit => commit.durationMs > 16));
+    return { finalText: JSON.stringify(report), usage };
   });
   assert.equal(analyzed.issues.length, 1);
-  assert.notEqual(analyzed.issues[0].component, 'Invented name');
-  assert.notEqual(analyzed.issues[0].commits[0].durationMs, 9999);
+  assert.match(analyzed.issues[0].summary, /^Expensive render work in /);
+  assert.match(analyzed.issues[0].evidence, /self time/);
   assert.deepEqual(analyzed.usage, usage);
   const fallback = await analyzeReactProfile(measured, tmpdir(), async () => ({ finalText: '```json\n' + JSON.stringify(emptyReport) + '\n```', usage }));
   assert.equal(fallback.issues.length, 0);
@@ -196,13 +204,11 @@ test('mocked analyzer selects issues but cannot change identities or measurement
   await assert.rejects(analyzeReactProfile(measured, tmpdir(), async () => ({ finalText: '{}', usage })), { status: 502 });
 });
 
-test('no-issue tool reports omit reasoning and discard legacy descriptions', async () => {
+test('one-turn no-issue reports discard legacy reasoning', async () => {
   const measured = await loadEvidence();
   const analyzed = await analyzeReactProfile(measured, tmpdir(), async options => {
-    const tool = options.customTools[0];
-    assert.ok(!tool.parameters.required.includes('reasoning'));
-    await tool.execute('empty-report', emptyReport);
-    return { finalText: '', usage };
+    assert.deepEqual(options.customTools, []);
+    return { finalText: JSON.stringify(emptyReport), usage };
   });
   assert.deepEqual(analyzed, { ...emptyReport, usage });
   const legacy = { ...emptyReport, reasoning: 'A long explanation of why no issues were found.' };
@@ -341,7 +347,7 @@ test('analysis finds a self-expensive descendant outside the raw ranking limit a
   assert.equal(commit.components[0].displayName, 'ExpensiveList');
   const report = issueReport(result);
   const analyzed = await analyzeReactProfile(result, tmpdir(), async () => ({ finalText: JSON.stringify(report), usage }));
-  assert.equal(analyzed.issues[0].component, 'ExpensiveList');
+  assert.equal(analyzed.issues[0].components[0].component, 'ExpensiveList');
   assert.equal(analyzed.issues.length, 1);
   assert.ok(result.evidence.componentsByRenderCount.some(c => c.displayName === 'Context.Provider'));
 });
@@ -371,7 +377,7 @@ test('retains component findings when an unattributed root issue is discarded', 
   const validated = validateReactIssueReport(report, result.evidence, 16);
   assert.equal(validated.issues.length, 1);
   assert.equal(validated.noIssue, false);
-  assert.equal(validated.issues[0].componentId, report.issues[1].componentId);
+  assert.equal(validated.issues[0].components[0].componentId, report.issues[1].componentId);
 });
 
 test('rejects a root fiber even if it occurs in supplied component evidence', async () => {
@@ -422,9 +428,7 @@ test('report validation rejects fabricated, duplicate, mismatched and sub-budget
     r => r.issues[0].commits[0].commitIndex = 999,
     r => r.issues[0].commits.push(r.issues[0].commits[0]),
     r => r.issues[0].commits = [],
-    r => r.issues[0].severity = 'critical',
-    r => r.issues[0].summary = ' ',
-    r => delete r.reasoning,
+    r => r.issues[0].componentId = 42,
     r => r.noIssue = true,
     r => r.issues.push(r.issues[0]),
     r => r.issues[0].componentId = '1:2', // selected commit belongs to root 10
@@ -436,16 +440,70 @@ test('report validation rejects fabricated, duplicate, mismatched and sub-budget
   assert.deepEqual(validateReactIssueReport(emptyReport, result.evidence, 16), emptyReport);
 });
 
-test('issue title and evidence are clipped to a concise developer-facing shape', async () => {
+test('issue title, timing evidence, and severity are derived from measured data', async () => {
   const result = await loadEvidence();
   const raw = issueReport(result);
-  raw.issues[0].summary = `HeavyActivityHeatmap's mount render accounts for most of the over-budget commit (124.8 ms self time inside a 169.7 ms commit), delaying the explore-details screen's first paint.`;
-  raw.issues[0].evidence = `rootID 1 / commitIndex 1 durationMs 169.74 is the only commit over the 16 ms budget and the peak commit. Within it, HeavyActivityHeatmap (id 1:728, key ".2") records selfDurationMs 124.823 of durationMs 151.611. renderCount is 1 with cause "unknown". Next-largest self timings are far smaller.`;
+  raw.issues[0].summary = 'Invented first-paint delay';
+  raw.issues[0].evidence = 'Invented mount evidence';
+  raw.issues[0].severity = 'low';
   const validated = validateReactIssueReport(raw, result.evidence, 16);
-  assert.equal(validated.issues[0].summary.length, 120);
-  assert.ok(validated.issues[0].summary.endsWith('…'));
-  assert.equal(validated.issues[0].evidence.split('\n').length, 2);
-  assert.doesNotMatch(validated.issues[0].evidence, /Next-largest/);
+  assert.match(validated.issues[0].summary, /^Expensive render work in /);
+  assert.match(validated.issues[0].evidence, /^.+ used [\d.]+ ms self time, [\d.]+% of a [\d.]+ ms over-budget React render\.$/);
+  assert.doesNotMatch(validated.issues[0].summary + validated.issues[0].evidence, /first-paint|mount/i);
+  assert.equal(validated.issues[0].severity, reactIssueSeverity(validated.issues[0].components[0].selfTimeMs, validated.issues[0].commit.durationMs, 16));
+  assert.equal(reactIssueSeverity(40, 100, 16), 'high');
+  assert.equal(reactIssueSeverity(16, 100, 16), 'medium');
+  assert.equal(reactIssueSeverity(3, 100, 16), 'low');
+  const prompt = buildReactFixPrompt(validated.issues[0]);
+  assert.match(prompt, /^## Issue and Impact/);
+  assert.match(prompt, /## Where this originates/);
+  assert.match(prompt, /no source path or render trigger was recorded/);
+  assert.doesNotMatch(prompt, /first.?paint|mount/i);
+});
+
+test('component findings from one commit are grouped with exact self times and remaining work', async t => {
+  const data = syntheticProfile([272], ['Parent', 'SiblingA', 'SiblingB']);
+  data.dataForRoots[0].commitData[0].fiberSelfDurations = [[2, 29], [3, 142], [4, 101]];
+  const result = await loadEvidence(await profileFile(t, data));
+  const commit = result.evidence.commits[0];
+  const report = {
+    noIssue: false,
+    issues: ['1:3', '1:4'].map(componentId => ({
+      componentId,
+      commits: [{ rootID: commit.rootID, commitIndex: commit.commitIndex }],
+    })),
+  };
+  const validated = validateReactIssueReport(report, result.evidence, 16);
+  assert.equal(validated.issues.length, 1);
+  assert.equal(validated.issues[0].commit.durationMs, 272);
+  assert.deepEqual(validated.issues[0].components.map(component => [component.component, component.selfTimeMs]), [
+    ['SiblingA', 142], ['SiblingB', 101],
+  ]);
+  assert.equal(reactIssueRemainingMs(validated.issues[0]), 29);
+  assert.match(validated.issues[0].summary, /SiblingA and SiblingB/);
+  const prompt = buildReactFixPrompt(validated.issues[0]);
+  assert.match(prompt, /SiblingA: 142 ms self time/);
+  assert.match(prompt, /SiblingB: 101 ms self time/);
+});
+
+test('legacy saved component findings are upgraded into commit groups', () => {
+  const commit = { rootID: 1, commitIndex: 2, timestampMs: 100, durationMs: 272 };
+  const legacy = ['SiblingA', 'SiblingB'].map((component, index) => ({
+    id: `react-issue-${index + 1}`,
+    summary: `Expensive render work in ${component}`,
+    severity: 'high',
+    evidence: `${component} used measured self time.`,
+    commits: [commit],
+    componentId: `1:${index + 3}`,
+    component,
+    selfTimeMs: index === 0 ? 142 : 101,
+    percentOfCommit: index === 0 ? 52.2 : 37.1,
+  }));
+  const upgraded = normalizeStoredReactIssues(legacy);
+  assert.equal(upgraded.length, 1);
+  assert.equal(upgraded[0].id, 'react-commit-1-2');
+  assert.deepEqual(upgraded[0].components.map(component => component.selfTimeMs), [142, 101]);
+  assert.equal(reactIssueRemainingMs(upgraded[0]), 29);
 });
 
 test('evidence validation rejects corrupt summaries, references and measurements', async () => {
@@ -515,8 +573,8 @@ test('verbose evidence keeps model input bounded and marks omitted detail', asyn
   assert.equal(payload.textTruncated, true);
   assert.equal(payload.commits.length, 50);
   assert.equal(payload.summary.commitCount, 60);
-  assert.equal(payload.componentsByTotalSelfDuration.length, 15);
-  assert.ok(payload.commits[0].omittedUpdaterCount >= 27);
+  assert.equal(payload.componentsByTotalSelfDuration, undefined);
+  assert.ok(payload.commits[0].omittedComponentCount >= 10);
 });
 
 test('recorded change evidence retains causes and field names without inventing absent reasons', async t => {

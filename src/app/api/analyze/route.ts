@@ -1,22 +1,21 @@
 import { readFile } from "node:fs/promises";
-import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import {
   clientHotspots,
   createAnalysisFiles,
   destroyRecord,
   MAX_UPLOAD_BYTES,
-  normalizeHotspots,
   PROFILE_FILE_NAME,
   putRecord,
   getAnalysisSettings,
   saveAnalysis,
+  type Hotspot,
   type TokenUsage,
 } from "@/lib/analysis";
 import { summarizeCpuProfile } from "@/lib/js-profile";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
-import { AgentError, runAgent } from "@/lib/pi-agent";
-import { ANALYST_SYSTEM_PROMPT, analystUserPrompt } from "@/lib/prompts";
+import { CpuAnalysisError, analyzeCpuBottlenecks } from "@/lib/cpu-analyzer";
+import { AgentError } from "@/lib/pi-agent";
+import { analysisPromptData } from "@/lib/prompt-data";
 
 const LOG = "api/analyze";
 
@@ -26,64 +25,6 @@ function log(...parts: unknown[]): void {
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return Response.json(body, { status });
-}
-
-const hotspotReportSchema = Type.Object({
-  totalMs: Type.Optional(Type.Number({ description: "Total profile duration in milliseconds." })),
-  hotspots: Type.Array(
-    Type.Object({
-      id: Type.String(),
-      title: Type.String({ minLength: 1, maxLength: 120, description: "Describe the dominant expensive work, using the supporting functions." }),
-      supportingFunctionIds: Type.Array(Type.String(), { minItems: 1, maxItems: 8, description: "IDs of supplied functions supporting the title and summary; include the heaviest function." }),
-      summary: Type.Array(Type.String({ minLength: 1, maxLength: 180 }), { minItems: 1, maxItems: 3, description: "At most three short bullets describing the expensive work." }),
-    }),
-    { minItems: 1, maxItems: 12 }
-  ),
-});
-
-/**
- * Fallback: some providers silently drop tool support and the model answers
- * with the report as plain text instead. Extract a { hotspots: [...] } JSON
- * object from the final text if the tool was never called.
- */
-function extractReportFromText(text: string): { totalMs?: number; hotspots?: unknown[] } | null {
-  if (!text || !text.includes("hotspots")) return null;
-  const start = text.indexOf("{");
-  for (let i = start; i >= 0; i = text.indexOf("{", i + 1)) {
-    if (i < 0) break;
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let j = i; j < text.length; j++) {
-      const ch = text[j];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') inString = true;
-      else if (ch === "{") depth += 1;
-      else if (ch === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            const parsed = JSON.parse(text.slice(i, j + 1)) as Record<string, unknown>;
-            if (Array.isArray(parsed.hotspots)) {
-              return {
-                totalMs: typeof parsed.totalMs === "number" ? parsed.totalMs : undefined,
-                hotspots: parsed.hotspots,
-              };
-            }
-          } catch {
-            // Not valid JSON — keep scanning.
-          }
-          break;
-        }
-      }
-    }
-  }
-  return null;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -147,81 +88,57 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: `No actionable hotspots of at least ${MIN_HOTSPOT_TIME_MS} ms were found in this profile. Work spent entirely inside React and scheduler internals is excluded.` }, 422);
   }
 
-  const capture: { report?: unknown } = {};
-  const reportTool: ToolDefinition = defineTool({
-    name: "report_hotspots",
-    label: "Report hotspots",
-    description:
-      "Submit the final ranked list of CPU profile hotspots. Call exactly once with the complete report, using the provided group IDs. The root block must not be included.",
-    parameters: hotspotReportSchema,
-    execute: async (_toolCallId, params) => {
-      capture.report = params;
-      log(`report_hotspots called: ${Array.isArray((params as { hotspots?: unknown[] }).hotspots) ? (params as { hotspots: unknown[] }).hotspots.length : 0} hotspots`);
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Hotspot report received. Task complete — reply with a one-line confirmation and stop.",
-          },
-        ],
-        details: { received: true },
-      };
-    },
-  });
-
-  let finalText: string;
+  let hotspots: Hotspot[];
   let usage: TokenUsage;
 
-  const analystPrompt = analystUserPrompt(bottlenecks, totalMs);
-  log(`analyst prompt: ${analystPrompt}`);
+  const suppliedGroups = analysisPromptData(bottlenecks);
+  const inputBreakdown = {
+    profile: {
+      totalDurationMs: totalMs,
+      sampleCount: summary.session.sampleCount,
+      extractedHotspotCount: queriedHotspots.total,
+      actionableBottleneckCount: bottlenecks.length,
+    },
+    selection: {
+      suppliedGroupCount: suppliedGroups.length,
+      omittedGroupCount: Math.max(0, bottlenecks.length - suppliedGroups.length),
+      maximumGroups: 12,
+    },
+    groups: suppliedGroups.map((group) => {
+      const source = bottlenecks.find((candidate) => candidate.id === group.id);
+      return {
+        id: group.id,
+        groupingCaller: group.groupingCaller,
+        combinedTimeMs: group.combinedTimeMs,
+        percentOfTotal: group.percentOfTotal,
+        sourceFunctionCount: source?.functions.length ?? group.functions.length + group.omittedFunctionCount,
+        suppliedFunctionCount: group.functions.length,
+        omittedFunctionCount: group.omittedFunctionCount,
+        otherSelfTimeMs: group.otherSelfTimeMs,
+        groupStackFramesSupplied: group.stack.length,
+        functions: group.functions.map((fn) => ({
+          id: fn.id,
+          title: fn.title,
+          selfTimeMs: fn.selfTimeMs,
+          percentOfGroup: fn.percentOfGroup,
+          sourceLocation: fn.sourceLocation,
+          stackFramesSupplied: fn.stack.length,
+        })),
+        serializedBytes: Buffer.byteLength(JSON.stringify(group), "utf8"),
+      };
+    }),
+  };
 
   try {
-    ({ finalText, usage } = await runAgent({
-      label: "analyze",
-      systemPrompt: ANALYST_SYSTEM_PROMPT,
-      prompt: analystPrompt,
-      cwd: dir,
-      customTools: [reportTool],
-      builtinTools: [],
-      timeoutMs: 480_000,
-    }));
+    ({ hotspots, usage } = await analyzeCpuBottlenecks(bottlenecks, totalMs, dir, inputBreakdown));
   } catch (error) {
     log(`agent run failed: ${error instanceof Error ? error.message : error}`);
     await destroyRecord(id, dir);
-    if (error instanceof AgentError) {
+    if (error instanceof AgentError || error instanceof CpuAnalysisError) {
       return json({ error: error.message }, error.status);
     }
     console.error("[tracesift] analyze failed", error);
     return json({ error: "Unexpected server error while running the analysis agent." }, 500);
-  }
-
-  let report = capture.report as { totalMs?: unknown; hotspots?: unknown } | undefined;
-  if (!report || typeof report !== "object" || !Array.isArray(report.hotspots)) {
-    log("agent did not call report_hotspots — trying to extract the report from the final text");
-    const fallback = extractReportFromText(finalText);
-    if (fallback && Array.isArray(fallback.hotspots) && fallback.hotspots.length > 0) {
-      report = fallback;
-      log(`fallback extraction succeeded: ${fallback.hotspots.length} hotspots`);
-    }
-  }
-
-  if (!report || typeof report !== "object" || !Array.isArray(report.hotspots)) {
-    log("no report found in tool call or final text — giving up");
-    await destroyRecord(id, dir);
-    return json(
-      {
-        error: "The agent finished without submitting a hotspot report. Try again.",
-        detail: finalText.slice(0, 400) || undefined,
-      },
-      502
-    );
-  }
-
-  const { hotspots } = normalizeHotspots(report.hotspots, totalMs, bottlenecks);
-  if (hotspots.length === 0) {
-    log("report had no usable hotspots after normalization");
-    await destroyRecord(id, dir);
-    return json({ error: "No meaningful hotspots were found in this profile." }, 502);
   }
 
   const record = {

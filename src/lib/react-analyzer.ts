@@ -1,26 +1,28 @@
-import { defineTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import type { TokenUsage } from "./analysis";
 import type { RunAgentOptions, RunAgentResult } from "./pi-agent";
 import { ReactProfileError, type ReactProfileResult } from "./react-profile.ts";
 import type { ReactCommitEvidence, ReactEvidence } from "./react-evidence.ts";
 import { REACT_ANALYST_SYSTEM_PROMPT } from "./prompts.ts";
 
+export interface ReactIssueComponent {
+  componentId: string;
+  component: string;
+  severity: "low" | "medium" | "high";
+  evidence: string;
+  selfTimeMs: number;
+  percentOfCommit: number;
+}
 export interface ReactIssue {
   id: string;
   summary: string;
   severity: "low" | "medium" | "high";
   evidence: string;
-  componentId: string;
-  component: string;
-  commits: Pick<ReactCommitEvidence, "rootID" | "commitIndex" | "timestampMs" | "durationMs">[];
-  selfTimeMs?: number;
-  percentOfCommit?: number;
+  commit: Pick<ReactCommitEvidence, "rootID" | "commitIndex" | "timestampMs" | "durationMs">;
+  components: ReactIssueComponent[];
 }
 export interface ReactAnalysis {
   issues: ReactIssue[];
   noIssue: boolean;
-  reasoning?: string;
 }
 export const ZERO_REACT_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 };
 
@@ -41,59 +43,80 @@ export function discardSubBudgetReactIssues(report: ReactAnalysis, evidence: Rea
   return report;
 }
 
+function compactChanges(component: ReactCommitEvidence["components"][number]) {
+  return {
+    ...(component.causes.length === 1 && component.causes[0] === "unknown" ? {} : { causes: component.causes }),
+    ...(component.changedProps.length ? { changedProps: component.changedProps } : {}),
+    ...(component.changedHooks.length ? { changedHooks: component.changedHooks } : {}),
+    ...(component.stateChanged === true ? { stateChanged: true as const } : {}),
+  };
+}
+
 function promptEvidence(result: ReactProfileResult, budget: number) {
   const evidence = requireReactEvidence(result);
-  // The complete duration list is used only by the server, never sent to the model.
-  const { commitDurations, ...bounded } = structuredClone(evidence);
-  const payload = { ...bounded, thresholds: { commitDurationMs: budget },
-    commitsOverBudget: commitDurations.filter(ms => ms > budget).length,
-    textTruncated: false,
+  const commits = evidence.commits.filter(commit => commit.durationMs > budget);
+  const candidateIds = new Set(commits.flatMap(commit => commit.components.map(component => component.id)));
+  const aggregates = new Map<string, ReactEvidence["componentsByTotalSelfDuration"][number]>();
+  for (const rows of [evidence.componentsByTotalSelfDuration, evidence.slowestComponentsByAverageDuration, evidence.componentsByRenderCount]) {
+    for (const component of rows) if (candidateIds.has(component.id) && !aggregates.has(component.id)) aggregates.set(component.id, component);
+  }
+  const compactComponent = (component: ReactCommitEvidence["components"][number]) => {
+    const aggregate = aggregates.get(component.id);
+    return {
+      id: component.id,
+      displayName: component.displayName,
+      durationMs: component.durationMs,
+      selfDurationMs: component.selfDurationMs,
+      ...compactChanges(component),
+      ...(aggregate ? { aggregate: {
+        renderCount: aggregate.renderCount,
+        selfRenderCount: aggregate.selfRenderCount,
+        avgActualDurationMs: aggregate.avgActualDurationMs,
+        maxActualDurationMs: aggregate.maxActualDurationMs,
+        ...(aggregate.avgSelfDurationMs === null ? {} : {
+          avgSelfDurationMs: aggregate.avgSelfDurationMs,
+          maxSelfDurationMs: aggregate.maxSelfDurationMs,
+        }),
+      } } : {}),
+    };
   };
-  // Sub-budget commits can't back an issue anyway (validateReactIssueReport rejects
-  // them); drop them from the supplied set and count them as omitted like the rest.
-  {
-    const kept = payload.commits.filter(commit => commit.durationMs > budget);
-    payload.omittedCommitCount += payload.commits.length - kept.length;
-    payload.commits = kept;
-  }
-  // elementType, key, and metadataMissing are DevTools bookkeeping the analyst
-  // never reasons about; drop them from the aggregate views before sending.
-  for (const rows of [payload.slowestComponentsByAverageDuration, payload.componentsByRenderCount, payload.componentsByTotalSelfDuration]) {
-    for (const component of rows) {
-      delete (component as Partial<typeof component>).elementType;
-      delete (component as Partial<typeof component>).key;
-      delete (component as Partial<typeof component>).metadataMissing;
-    }
-  }
+  const payload = {
+    summary: {
+      rootCount: evidence.summary.rootCount,
+      commitCount: evidence.summary.commitCount,
+      peakCommitDurationMs: evidence.summary.peakCommitDurationMs,
+    },
+    thresholds: { commitDurationMs: budget },
+    commitsOverBudget: evidence.commitDurations.filter(ms => ms > budget).length,
+    omittedCommitCount: evidence.omittedCommitCount + evidence.commits.length - commits.length,
+    textTruncated: false,
+    commits: commits.map(commit => ({
+      rootID: commit.rootID,
+      commitIndex: commit.commitIndex,
+      timestampMs: commit.timestampMs,
+      durationMs: commit.durationMs,
+      ...(commit.omittedComponentCount ? { omittedComponentCount: commit.omittedComponentCount } : {}),
+      components: commit.components.map(compactComponent),
+    })),
+  };
   // Names and change lists are already capped by the extractor. Bound unusually verbose
-  // recordings further without dropping commit identities or their exact timings.
+  // recordings further without dropping commit identities or exact timings.
   if (JSON.stringify(payload).length > 200_000) {
     payload.textTruncated = true;
     for (const commit of payload.commits) {
       for (const component of commit.components) {
-        component.changedProps = component.changedProps.slice(0, 3).map(v => v.slice(0, 40));
-        component.changedHooks = component.changedHooks.slice(0, 3).map(v => v.slice(0, 40));
+        if (component.changedProps) component.changedProps = component.changedProps.slice(0, 3).map(v => v.slice(0, 40));
+        if (component.changedHooks) component.changedHooks = component.changedHooks.slice(0, 3).map(v => v.slice(0, 40));
       }
     }
-    for (const rows of [payload.slowestComponentsByAverageDuration, payload.componentsByRenderCount, payload.componentsByTotalSelfDuration]) {
-      for (const component of rows) {
-        component.changedProps = component.changedProps.slice(0, 3).map(v => v.slice(0, 40));
-        component.changedHooks = component.changedHooks.slice(0, 3).map(v => v.slice(0, 40));
-      }
-    }
-    for (const commit of payload.commits) {
-      const kept = commit.updaters.slice(0, 3);
-      commit.omittedUpdaterCount += commit.updaters.length - kept.length;
-      commit.updaters = kept;
-    }
-    // Keep every selected commit and all three aggregate views. If text is still
-    // large, shed the lowest-self-time rows evenly and account for each omission.
+    // Keep every selected commit. If text is still large, shed the lowest-self-time
+    // candidates evenly and account for each omission.
     while (JSON.stringify(payload).length > 200_000) {
       let removed = false;
       for (const commit of payload.commits) {
         if (commit.components.length > 1) {
           commit.components.pop();
-          commit.omittedComponentCount++;
+          commit.omittedComponentCount = (commit.omittedComponentCount ?? 0) + 1;
           removed = true;
         }
       }
@@ -106,75 +129,171 @@ export function reactAnalystPrompt(result: ReactProfileResult, budget = 16): str
   return JSON.stringify(promptEvidence(result, budget));
 }
 
-const MAX_ISSUE_TITLE = 120;
-const MAX_EVIDENCE_LINE = 180;
-const MAX_EVIDENCE_LINES = 2;
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
-const text = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0 && v.length <= 2000;
-function clipLine(value: string, max: number) {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+function formatMs(value: number): string {
+  return Number(value.toFixed(1)).toString();
 }
-function normalizeIssueTitle(value: string) {
-  return clipLine(value.trim().split(/\n+/)[0]?.trim() ?? "", MAX_ISSUE_TITLE);
+export function reactIssueSeverity(selfTimeMs: number, commitDurationMs: number, budget: number): ReactIssue["severity"] {
+  const share = selfTimeMs / commitDurationMs;
+  if (selfTimeMs >= budget * 2 || share >= 0.5) return "high";
+  if (selfTimeMs >= budget || share >= 0.25) return "medium";
+  return "low";
 }
-function normalizeIssueEvidence(value: string) {
-  const trimmed = value.trim();
-  const lines = trimmed.split(/\n+/).map(line => line.replace(/^[-*•\d.)]+\s+/, "").trim()).filter(Boolean);
-  const parts = lines.length > 1 ? lines : trimmed.split(/(?<=[.!?])\s+/).map(part => part.trim()).filter(Boolean);
-  return parts.slice(0, MAX_EVIDENCE_LINES).map(line => clipLine(line, MAX_EVIDENCE_LINE)).join("\n");
+
+const severityRank: Record<ReactIssue["severity"], number> = { low: 0, medium: 1, high: 2 };
+
+function issueTitle(components: ReactIssueComponent[]): string {
+  const names = components.slice(0, 3).map(component => component.component);
+  const suffix = components.length > names.length ? ` and ${components.length - names.length} more` : "";
+  return `Expensive render work in ${names.join(components.length === 2 ? " and " : ", ")}${suffix}`.slice(0, 120).trimEnd();
+}
+
+function finalizeReactIssues(groups: Map<string, { commit: ReactIssue["commit"]; components: ReactIssueComponent[] }>): ReactIssue[] {
+  return [...groups.values()]
+    .map(({ commit, components }) => {
+      components.sort((a, b) => b.selfTimeMs - a.selfTimeMs || a.component.localeCompare(b.component));
+      const severity = components.reduce<ReactIssue["severity"]>(
+        (highest, component) => severityRank[component.severity] > severityRank[highest] ? component.severity : highest,
+        "low",
+      );
+      const measuredSelfTimeMs = components.reduce((total, component) => total + component.selfTimeMs, 0);
+      const percentOfCommit = commit.durationMs > 0 ? Math.round(measuredSelfTimeMs / commit.durationMs * 1000) / 10 : 0;
+      const evidence = components.length === 1
+        ? components[0].evidence
+        : `${components.length} components used ${formatMs(measuredSelfTimeMs)} ms of measured self time, ${percentOfCommit}% of a ${formatMs(commit.durationMs)} ms over-budget React commit.`;
+      return {
+        id: `react-commit-${commit.rootID}-${commit.commitIndex}`,
+        summary: issueTitle(components),
+        severity,
+        evidence,
+        commit,
+        components,
+      };
+    })
+    .sort((a, b) => b.commit.durationMs - a.commit.durationMs || a.commit.rootID - b.commit.rootID || a.commit.commitIndex - b.commit.commitIndex);
+}
+
+export function reactIssueRemainingMs(issue: ReactIssue): number {
+  return Math.max(0, issue.commit.durationMs - issue.components.reduce((total, component) => total + component.selfTimeMs, 0));
+}
+
+/** Upgrade component-centric saved findings from earlier releases into commit groups. */
+export function normalizeStoredReactIssues(raw: unknown): ReactIssue[] {
+  if (!Array.isArray(raw)) return [];
+  const groups = new Map<string, { commit: ReactIssue["commit"]; components: ReactIssueComponent[] }>();
+  const seen = new Set<string>();
+  const add = (commit: ReactIssue["commit"], component: ReactIssueComponent) => {
+    const key = `${commit.rootID}:${commit.commitIndex}`;
+    const occurrence = `${component.componentId}|${key}`;
+    if (seen.has(occurrence)) return;
+    seen.add(occurrence);
+    const group = groups.get(key);
+    if (group) group.components.push(component);
+    else groups.set(key, { commit, components: [component] });
+  };
+
+  for (const entry of raw) {
+    if (!object(entry)) continue;
+    if (object(entry.commit) && Array.isArray(entry.components)) {
+      const commit = entry.commit;
+      if (typeof commit.rootID !== "number" || typeof commit.commitIndex !== "number"
+        || typeof commit.timestampMs !== "number" || typeof commit.durationMs !== "number") continue;
+      for (const candidate of entry.components) {
+        if (!object(candidate) || typeof candidate.componentId !== "string" || typeof candidate.component !== "string"
+          || typeof candidate.selfTimeMs !== "number" || typeof candidate.percentOfCommit !== "number") continue;
+        const severity = candidate.severity === "high" || candidate.severity === "medium" ? candidate.severity : "low";
+        add(commit as ReactIssue["commit"], {
+          componentId: candidate.componentId,
+          component: candidate.component,
+          severity,
+          evidence: typeof candidate.evidence === "string" ? candidate.evidence : "",
+          selfTimeMs: candidate.selfTimeMs,
+          percentOfCommit: candidate.percentOfCommit,
+        });
+      }
+      continue;
+    }
+
+    // Legacy findings stored one maximum component self time alongside several commits.
+    if (typeof entry.componentId !== "string" || typeof entry.component !== "string"
+      || typeof entry.selfTimeMs !== "number" || !Array.isArray(entry.commits) || entry.commits.length === 0) continue;
+    const commits = entry.commits.filter((candidate): candidate is ReactIssue["commit"] => object(candidate)
+      && typeof candidate.rootID === "number" && typeof candidate.commitIndex === "number"
+      && typeof candidate.timestampMs === "number" && typeof candidate.durationMs === "number" && candidate.durationMs > 0);
+    if (commits.length === 0) continue;
+    const percent = typeof entry.percentOfCommit === "number" ? entry.percentOfCommit : undefined;
+    const commit = percent === undefined ? commits[0] : commits.reduce((closest, candidate) => {
+      const distance = Math.abs(entry.selfTimeMs as number / candidate.durationMs * 100 - percent);
+      const closestDistance = Math.abs(entry.selfTimeMs as number / closest.durationMs * 100 - percent);
+      return distance < closestDistance ? candidate : closest;
+    });
+    const percentOfCommit = percent ?? Math.round(entry.selfTimeMs / commit.durationMs * 1000) / 10;
+    const severity = entry.severity === "high" || entry.severity === "medium" ? entry.severity : "low";
+    add(commit, {
+      componentId: entry.componentId,
+      component: entry.component,
+      severity,
+      evidence: typeof entry.evidence === "string" ? entry.evidence : "",
+      selfTimeMs: entry.selfTimeMs,
+      percentOfCommit,
+    });
+  }
+  return finalizeReactIssues(groups);
 }
 
 /** Model text can select findings, but cannot replace measured identities or timings. */
 export function validateReactIssueReport(raw: unknown, evidence: ReactEvidence, budget: number): ReactAnalysis {
   const fail = (): never => { throw new ReactProfileError(502, "The analyzer returned an invalid React issue report."); };
   if (!object(raw) || !Array.isArray(raw.issues) || raw.issues.length > 12 || typeof raw.noIssue !== "boolean"
-    || raw.noIssue !== (raw.issues.length === 0) || (raw.issues.length > 0 && !text(raw.reasoning))) return fail();
+    || raw.noIssue !== (raw.issues.length === 0)) return fail();
   const commitsByID = new Map(evidence.commits.map(commit => [`${commit.rootID}:${commit.commitIndex}`, commit]));
   const seen = new Set<string>();
-  const issues = raw.issues.flatMap((item, index): ReactIssue[] => {
-    if (!object(item) || !text(item.summary) || !text(item.evidence)
-      || !["low", "medium", "high"].includes(item.severity as string)
-      || (item.componentId !== undefined && typeof item.componentId !== "string")
+  const groups = new Map<string, { commit: ReactIssue["commit"]; components: ReactIssueComponent[] }>();
+  for (const item of raw.issues) {
+    if (!object(item) || (item.componentId !== undefined && typeof item.componentId !== "string")
       || !Array.isArray(item.commits) || !item.commits.length || item.commits.length > 50) return fail();
     const references = new Set();
-    let componentName: string | undefined;
-    let selfTimeMs: number | undefined;
-    let selfTimeCommitDurationMs: number | undefined;
-    const commits = item.commits.map(ref => {
+    let attributedCommitCount = 0;
+    for (const ref of item.commits) {
       if (!object(ref) || !Number.isSafeInteger(ref.rootID) || !Number.isSafeInteger(ref.commitIndex)) return fail();
       const key = `${ref.rootID}:${ref.commitIndex}`;
       const commit = commitsByID.get(key);
       if (!commit || references.has(key) || commit.durationMs <= budget) return fail();
       references.add(key);
-      if (item.componentId !== undefined) {
-        const component = commit.components.find(c => c.id === item.componentId);
-        if (!component || component.fiberID === commit.rootID) return fail();
-        componentName = component.displayName;
-        if (component.selfDurationMs !== null && (selfTimeMs === undefined || component.selfDurationMs > selfTimeMs)) {
-          selfTimeMs = component.selfDurationMs;
-          selfTimeCommitDurationMs = commit.durationMs;
-        }
-      }
-      return { rootID: commit.rootID, commitIndex: commit.commitIndex, timestampMs: commit.timestampMs, durationMs: commit.durationMs };
-    });
+      if (item.componentId === undefined) continue;
+      const component = commit.components.find(c => c.id === item.componentId);
+      if (!component || component.fiberID === commit.rootID) return fail();
+      if (component.selfDurationMs === null || component.selfDurationMs <= 0) continue;
+      const occurrence = `${item.componentId}|${key}`;
+      if (seen.has(occurrence)) return fail();
+      seen.add(occurrence);
+      attributedCommitCount += 1;
+      const percentOfCommit = Math.round((component.selfDurationMs / commit.durationMs) * 1000) / 10;
+      const measuredCommit = {
+        rootID: commit.rootID,
+        commitIndex: commit.commitIndex,
+        timestampMs: commit.timestampMs,
+        durationMs: commit.durationMs,
+      };
+      const issueComponent: ReactIssueComponent = {
+        componentId: item.componentId as string,
+        component: component.displayName,
+        severity: reactIssueSeverity(component.selfDurationMs, commit.durationMs, budget),
+        evidence: `${component.displayName} used ${formatMs(component.selfDurationMs)} ms self time, ${percentOfCommit}% of a ${formatMs(commit.durationMs)} ms over-budget React render.`,
+        selfTimeMs: component.selfDurationMs,
+        percentOfCommit,
+      };
+      const group = groups.get(key);
+      if (group) group.components.push(issueComponent);
+      else groups.set(key, { commit: measuredCommit, components: [issueComponent] });
+    }
     // Older model responses may still report an entire root commit as an issue.
     // Do not count unattributed work as a finding.
-    if (item.componentId === undefined) return [];
-    const summary = normalizeIssueTitle(item.summary);
-    const evidenceText = normalizeIssueEvidence(item.evidence);
-    if (!summary || !evidenceText) return fail();
-    const signature = `${item.componentId}|${[...references].sort().join(",")}`;
-    if (seen.has(signature)) return fail();
-    seen.add(signature);
-    return [{ id: `react-issue-${index + 1}`, summary, severity: item.severity as ReactIssue["severity"],
-      evidence: evidenceText, commits,
-      componentId: item.componentId as string, component: componentName!,
-      selfTimeMs, percentOfCommit: selfTimeMs !== undefined && selfTimeCommitDurationMs
-        ? Math.round((selfTimeMs / selfTimeCommitDurationMs) * 1000) / 10 : undefined,
-    }];
-  });
+    if (item.componentId !== undefined && attributedCommitCount === 0) return fail();
+  }
+  const issues = finalizeReactIssues(groups);
   if (issues.length === 0) return noReactIssues();
-  return { issues, noIssue: false, reasoning: (raw.reasoning as string).trim() };
+  return { issues, noIssue: false };
 }
 
 export async function analyzeReactProfile(
@@ -184,32 +303,49 @@ export async function analyzeReactProfile(
   const evidence = requireReactEvidence(result);
   if (withinReactBudget(evidence, budget)) return { ...noReactIssues(), usage: { ...ZERO_REACT_USAGE } };
   const prompt = reactAnalystPrompt(result, budget);
-  const suppliedEvidence = { ...evidence, commits: (JSON.parse(prompt) as { commits: ReactCommitEvidence[] }).commits };
-  let report: ReactAnalysis | undefined;
-  const reportTool = defineTool({
-    name: "report_react_issues", label: "Report React issues",
-    description: "Submit only evidence-backed issues with a concise title and a 1-2 sentence description, or noIssue true and issues [] without reasoning.",
-    parameters: Type.Object({ noIssue: Type.Boolean(), reasoning: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Required only when issues is nonempty. Omit for zero issues." })),
-      issues: Type.Array(Type.Object({
-        summary: Type.String({ minLength: 1, maxLength: 120, description: "Concise self-explanatory title naming the component and the delay. No profiler IDs." }),
-        severity: Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")]),
-        evidence: Type.String({ minLength: 1, maxLength: 360, description: "At most 2 short sentences citing only the important timings. Omit IDs, keys, negligible siblings, and filler about other work being in budget." }), componentId: Type.String({ minLength: 1 }),
-        commits: Type.Array(Type.Object({ rootID: Type.Integer({ minimum: 0 }), commitIndex: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 50 }),
-      }), { maxItems: 12 }),
-    }),
-    execute: async (_id, params) => {
-      if (report !== undefined) throw new ReactProfileError(502, "The analyzer submitted more than one React report.");
-      report = validateReactIssueReport(params, suppliedEvidence, budget);
-      return { content: [{ type: "text" as const, text: "React report received. Finish without additional explanation." }], details: { received: true } };
+  const suppliedPayload = JSON.parse(prompt) as {
+    thresholds: { commitDurationMs: number };
+    commitsOverBudget: number;
+    textTruncated: boolean;
+    commits: Array<Pick<ReactCommitEvidence, "rootID" | "commitIndex">>;
+    omittedCommitCount: number;
+  };
+  const suppliedCommitIds = new Set(suppliedPayload.commits.map(commit => `${commit.rootID}:${commit.commitIndex}`));
+  const suppliedEvidence = { ...evidence, commits: evidence.commits.filter(commit => suppliedCommitIds.has(`${commit.rootID}:${commit.commitIndex}`)) };
+  const inputBreakdown = {
+    profileEvidence: {
+      rootCount: evidence.summary.rootCount,
+      commitCount: evidence.summary.commitCount,
+      totalCommitRenderDurationMs: evidence.summary.totalCommitRenderDurationMs,
+      peakCommitDurationMs: evidence.summary.peakCommitDurationMs,
+      completeDurationCount: evidence.commitDurations.length,
+      retainedCommitCountBeforeBudgetFilter: evidence.commits.length,
+      omittedCommitCountBeforeBudgetFilter: evidence.omittedCommitCount,
     },
-  });
+    transformations: {
+      commitDurationBudgetMs: suppliedPayload.thresholds.commitDurationMs,
+      completeDurationListSupplied: false,
+      subBudgetRetainedCommitsRemoved: evidence.commits.filter((commit) => commit.durationMs <= budget).length,
+      aggregateViewsMergedIntoCandidates: true,
+      defaultAndRedundantFieldsRemoved: true,
+      textTruncated: suppliedPayload.textTruncated,
+    },
+    suppliedPayload: {
+      commitsOverBudget: suppliedPayload.commitsOverBudget,
+      suppliedCommitCount: suppliedPayload.commits.length,
+      omittedCommitCount: suppliedPayload.omittedCommitCount,
+      commits: suppliedPayload.commits.map((commit) => ({
+        rootID: commit.rootID,
+        commitIndex: commit.commitIndex,
+      })),
+      serializedBytes: Buffer.byteLength(prompt, "utf8"),
+    },
+  };
   const response = await run({ label: "analyze-react", systemPrompt: REACT_ANALYST_SYSTEM_PROMPT,
-    prompt, cwd, builtinTools: [], customTools: [reportTool], timeoutMs: 480_000 });
-  if (report === undefined) {
-    let raw: unknown;
-    try { raw = JSON.parse(response.finalText.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "")); }
-    catch { throw new ReactProfileError(502, "The analyzer finished without a React issue report."); }
-    report = validateReactIssueReport(raw, suppliedEvidence, budget);
-  }
+    prompt, cwd, builtinTools: [], customTools: [], maxOutputTokens: 4_096, timeoutMs: 480_000, inputBreakdown });
+  let raw: unknown;
+  try { raw = JSON.parse(response.finalText.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "")); }
+  catch { throw new ReactProfileError(502, "The analyzer finished without a React issue report."); }
+  const report = validateReactIssueReport(raw, suppliedEvidence, budget);
   return { ...discardSubBudgetReactIssues(report, evidence, budget), usage: response.usage };
 }
