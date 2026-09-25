@@ -381,15 +381,6 @@ button, input { font: inherit; }
   width: 13px;
   height: 13px;
 }
-.token-breakdown {
-  margin: 0;
-  max-width: 100%;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  line-height: 1.4;
-  text-align: right;
-}
 .hotspot-prompt-error {
   margin: 0;
   max-width: 100%;
@@ -1193,6 +1184,7 @@ body { background: var(--background, #151419); }
 .hot-path-row:last-child { border-bottom: 0; }
 .row-location { margin-bottom: 13px; }
 .row-location-label { color: var(--primary); background: var(--accent); border-color: transparent; }
+.row-title { display: block; margin-bottom: 12px; font-size: 14px; }
 .row-figure-line { align-items: flex-end; margin-bottom: 9px; }
 .row-figure { display: flex; align-items: baseline; font-size: 16px; color: var(--primary); opacity: 0.8; }
 .row-share { padding: 3px 7px; background: var(--muted); border-radius: 999px; font-size: 10px; }
@@ -1361,8 +1353,7 @@ body {
 .usage-line,
 .row-location,
 .row-location code,
-.hot-path-footnote,
-.token-breakdown { font-size: 13px; }
+.hot-path-footnote { font-size: 13px; }
 .hotspot-head .hotspot-heading-copy strong { font-size: 16px; }
 .hotspot-time,
 .row-share { font-size: 12px; }

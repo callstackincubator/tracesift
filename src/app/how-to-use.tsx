@@ -106,13 +106,13 @@ export function HowToUseGuide({
                   Use Chrome Performance, the React Native DevTools CPU profiler, or Hermes Profiler.
                 </GuideStep>
                 <GuideStep number={2} title="Add the exported profile">
-                  Drop a <code>.cpuprofile</code> or compatible <code>.json</code> file into the upload area.
+                  Drop a <code>.json</code> file into the upload area.
                 </GuideStep>
                 <GuideStep number={3} title="Run the analysis">
                   Select <strong>Analyze profile</strong>. The slowest execution paths appear first.
                 </GuideStep>
                 <GuideStep number={4} title="Turn an insight into a fix">
-                  Use <strong>Generate Prompt</strong> to create a focused handoff for your AI assistant.
+                  Use <strong>Copy handoff</strong> to copy a focused diagnostic for your AI assistant.
                 </GuideStep>
               </ol>
             </ScrollArea>

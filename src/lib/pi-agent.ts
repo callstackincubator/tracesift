@@ -109,6 +109,8 @@ export interface RunAgentOptions {
   maxOutputTokens?: number;
   timeoutMs?: number;
   timeoutMessage?: string;
+  /** Optional structured account of how an analyzer prompt was assembled. */
+  inputBreakdown?: unknown;
 }
 
 export interface RunAgentResult {
@@ -140,6 +142,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     maxOutputTokens,
     timeoutMs = 480_000,
     timeoutMessage = "The analysis agent timed out. Try a smaller profile, or run it again.",
+    inputBreakdown,
   } = options;
   const logPrefix = `agent:${label}`;
   const startedAt = Date.now();
@@ -155,6 +158,26 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       ...customTools.map((tool) => tool.name),
     ].join(", ")}], cwd=${cwd}, timeout=${Math.round(timeoutMs / 1000)}s, prompt=${prompt.length} chars`
   );
+
+  if (inputBreakdown !== undefined) {
+    const toolDefinitions = customTools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
+    log(logPrefix, "ANALYZER_INPUT_SUMMARY", JSON.stringify({
+      systemPromptChars: systemPrompt.length,
+      systemPromptBytes: Buffer.byteLength(systemPrompt, "utf8"),
+      userPromptChars: prompt.length,
+      userPromptBytes: Buffer.byteLength(prompt, "utf8"),
+      builtinTools,
+      customTools: toolDefinitions.map((tool) => tool.name),
+    }));
+    log(logPrefix, "ANALYZER_INPUT_BREAKDOWN", JSON.stringify(inputBreakdown));
+    log(logPrefix, `ANALYZER_SYSTEM_PROMPT_BEGIN\n${systemPrompt}\nANALYZER_SYSTEM_PROMPT_END`);
+    log(logPrefix, `ANALYZER_USER_PROMPT_BEGIN\n${prompt}\nANALYZER_USER_PROMPT_END`);
+    log(logPrefix, "ANALYZER_TOOL_DEFINITIONS", JSON.stringify(toolDefinitions));
+  }
 
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },

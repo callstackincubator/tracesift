@@ -18,7 +18,7 @@ Runs locally with OpenAI, Anthropic, or Callstack Apex. Your credentials stay wi
 npm install -g @callstack/tracesift
 ```
 
-Installs the TraceSift command globally. Requires Node.js 22.19 or newer, npm, and Git on macOS or Linux.
+Installs the TraceSift command globally. Requires Node.js 22.19 or newer and npm on macOS or Linux. The installed command does not need Git or build tools.
 
 <!-- Add installation screenshot here -->
 
@@ -28,7 +28,7 @@ Installs the TraceSift command globally. Requires Node.js 22.19 or newer, npm, a
 tracesift init
 ```
 
-Run this once to download the pinned TraceSift source, install its dependencies, and build the local web app.
+Run this once to download and verify the prebuilt web app for your platform. After updating the CLI, run `tracesift init` again to install its matching app release.
 
 <!-- Add initialization screenshot here -->
 
@@ -43,6 +43,8 @@ Starts TraceSift at `http://127.0.0.1:3000` and opens it in your browser. Press 
 <!-- Add startup screenshot here -->
 
 See the [CLI documentation](packages/cli/README.md) for storage, troubleshooting, and release details.
+
+Contributors can run `npm run test:release:local` to verify the packaged download and startup flow against a loopback artifact server before any GitHub release. See [Contributing](CONTRIBUTING.md) for the manual browser checkpoint and Changesets release process.
 
 ## Using the web interface
 
@@ -78,13 +80,13 @@ Visualize the results sorted by longest to render. Each card provides a short su
 
 <img src="./assets/react-result.png" alt="React analysis"/>
 
-### 3. Generate a handoff prompt
+### 3. Copy the handoff
 
-When the bottleneck or React issue cards appear, choose the card you want to investigate and select **Generate Prompt**. When generation finishes, select **Copy Prompt** and hand it to your coding agent.
+When the bottleneck or React issue cards appear, choose the card you want to investigate and select **Copy Prompt**.
 
-<!-- Add bottleneck card and handoff prompt screenshot here -->
+<!-- Add bottleneck card and handoff screenshot here -->
 
-<img src="./assets/generate-prompt.gif" alt="Generate Prompt"/>
+<img src="./assets/handoff.gif" alt="handoff"/>
 
 ### 4. Reopen an analysis
 

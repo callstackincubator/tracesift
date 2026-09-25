@@ -32,7 +32,7 @@ interface AnalyzeResponse {
   usage?: TokenUsage;
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
-interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; promptUsage: Record<string, TokenUsage>; usage: TokenUsage; }
+interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; }
 interface ModelProvider { id: string; name: string; keyConfigured: boolean; models: Array<{ id: string; name: string }>; }
 interface ModelSettings {
   configured: boolean;
@@ -63,7 +63,7 @@ interface TokenUsage {
 }
 
 const acceptedFiles: Record<UploadKind, string> = {
-  cpu: ".cpuprofile,.json,application/json",
+  cpu: ".json,application/json",
   reactProfile: ".json,application/json",
 };
 
@@ -103,15 +103,6 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function SparklesIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3 13.6 8.4 19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6Z" />
-      <path d="M19 3v4M21 5h-4M5 16v3M6.5 17.5h-3" />
-    </svg>
-  );
-}
-
 function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" }) {
   const paths = {
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
@@ -131,16 +122,16 @@ function ProfileSnapshot({ type, active }: { type: "cpu" | "react"; active: bool
     ? "2 bottlenecks · 8.13 s total"
     : "1 issue · 16 ms budget · 4 commits · 169.74 ms peak · 1 over budget";
   const usage = isCpu
-    ? "analyzer · 6.1k tokens · 5.3k in · 711 out"
-    : "analyzer · 20k tokens · 12k in · 403 out · 8.0k cached";
+    ? "analyzer · 2.3k tokens · 1.3k in · 975 out"
+    : "analyzer · 2.6k tokens · 1.9k in · 752 out";
   const issueTitle = isCpu
     ? "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus"
-    : "HeavyActivityHeatmap mount stalls explore-details first paint by ~125 ms";
+    : "Expensive render work in HeavyActivityHeatmap";
   const time = isCpu ? "2.05 s" : "125 ms";
   const share = isCpu ? "97% of group" : "74% of commit";
   const detail = isCpu
     ? "Native datePrototypeToLocaleStringHelper costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch."
-    : "HeavyActivityHeatmap used 124.8 ms self time on its single mount, about 74% of the 169.7 ms commit that opened explore-details.";
+    : "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.";
 
   return (
     <article className={`signal-snapshot signal-snapshot-${type}${active ? " is-active" : ""}`} aria-label={`${title} example`}>
@@ -153,7 +144,7 @@ function ProfileSnapshot({ type, active }: { type: "cpu" | "react"; active: bool
         <div className="snapshot-issue-head">
           <span className="snapshot-rank">#1</span>
           <strong>{issueTitle}</strong>
-          <span className="snapshot-budget">{isCpu ? "2.11 s" : "high · 170 ms"}</span>
+          <span className="snapshot-budget">{isCpu ? "2.11 s" : "high · commit 170 ms"}</span>
         </div>
         <div className="snapshot-issue-body">
           <div className="snapshot-time-line">
@@ -188,18 +179,14 @@ function ProfileSnapshotGallery() {
 }
 
 function PromptActionButton({
-  prompt,
   loading,
   copied,
   busy,
-  onGenerate,
   onCopy,
 }: {
-  prompt?: string;
   loading: boolean;
   copied: boolean;
   busy: boolean;
-  onGenerate: () => void;
   onCopy: () => void;
 }) {
   return (
@@ -207,34 +194,26 @@ function PromptActionButton({
       size="sm"
       variant="outline"
       className="prompt-action-button"
-      disabled={loading || (!prompt && busy)}
-      onClick={() => (prompt ? onCopy() : onGenerate())}
+      disabled={loading || busy}
+      onClick={onCopy}
     >
-      {loading ? <RozeniteLoader size={14} label="" /> : prompt ? (copied ? <Check /> : <Copy />) : <SparklesIcon />}
-      {loading ? "Generating…" : prompt ? (copied ? "Copied!" : "Copy Prompt") : "Generate Prompt"}
+      {loading ? <RozeniteLoader size={14} label="" /> : copied ? <Check /> : <Copy />}
+      {loading ? "Copying…" : copied ? "Copied!" : "Copy handoff"}
     </Button>
-  );
-}
-
-function TokenBreakdown({ usage }: { usage?: TokenUsage }) {
-  if (!usage) return null;
-  return (
-    <p className="token-breakdown" title="Tokens consumed by the agent that generated this prompt">
-      {formatTokens(usage.totalTokens)} tokens · {usageBreakdown(usage)}
-    </p>
   );
 }
 
 const MAX_RESULT_CARDS = 3;
 
-function issuePeakMs(issue: ReactIssue): number {
-  return issue.commits.reduce((max, commit) => Math.max(max, commit.durationMs), 0);
+function reactIssueRemainingMs(issue: ReactIssue): number {
+  return Math.max(0, issue.commit.durationMs - issue.components.reduce((total, component) => total + component.selfTimeMs, 0));
 }
 
 /** One "hot path" row: a single function's share of a card's total time. */
 interface HotPathRow {
   /** Recorded `path:line:column`, shown only when the frame named a real source file. */
   location?: string;
+  title?: string;
   ms?: number;
   percentLabel?: string;
   barPercent?: number;
@@ -269,15 +248,18 @@ function hotspotRows(hotspot: Hotspot): HotPathCard {
 }
 
 function reactIssueRows(issue: ReactIssue): HotPathCard {
-  const caption = issue.evidence.trim() || undefined;
-  if (!issue.component && !caption) return { rows: [] };
+  const remainingMs = reactIssueRemainingMs(issue);
   return {
-    rows: [{
-      ms: issue.selfTimeMs,
-      percentLabel: issue.percentOfCommit !== undefined ? `${Math.round(issue.percentOfCommit)}% of commit` : undefined,
-      barPercent: issue.percentOfCommit,
-      caption,
-    }],
+    rows: issue.components.map(component => ({
+      title: component.component,
+      ms: component.selfTimeMs,
+      percentLabel: `${Math.round(component.percentOfCommit)}% of commit`,
+      barPercent: component.percentOfCommit,
+      caption: component.evidence.trim() || undefined,
+    })),
+    footnote: remainingMs >= 1
+      ? `+ ~${formatMs(remainingMs)} other commit work not represented by these findings`
+      : undefined,
   };
 }
 
@@ -287,13 +269,10 @@ function AnalysisResultCard({
   timeLabel,
   rows,
   footnote,
-  prompt,
-  usage,
   loading,
   error,
   copied,
   busy,
-  onGenerate,
   onCopy,
 }: {
   rank: number;
@@ -301,13 +280,10 @@ function AnalysisResultCard({
   timeLabel: string;
   rows: HotPathRow[];
   footnote?: string;
-  prompt?: string;
-  usage?: TokenUsage;
   loading: boolean;
   error?: string;
   copied: boolean;
   busy: boolean;
-  onGenerate: () => void;
   onCopy: () => void;
 }) {
   return (
@@ -329,6 +305,7 @@ function AnalysisResultCard({
                   <code>{row.location}</code>
                 </p>
               ) : null}
+              {row.title ? <strong className="row-title">{row.title}</strong> : null}
               {row.ms !== undefined && (
                 <>
                   <div className="row-figure-line">
@@ -350,14 +327,11 @@ function AnalysisResultCard({
         {error ? <p className="hotspot-prompt-error">{error}</p> : null}
         <div className="hotspot-actions">
           <PromptActionButton
-            prompt={prompt}
             loading={loading}
             copied={copied}
             busy={busy}
-            onGenerate={onGenerate}
             onCopy={onCopy}
           />
-          <TokenBreakdown usage={usage} />
         </div>
       </div>
     </article>
@@ -410,16 +384,18 @@ function UploadPane({
   const inputId = useId();
   const [isDragging, setIsDragging] = useState(false);
 
+  const acceptFile = (candidate?: File) => (candidate && !candidate.name.toLowerCase().endsWith(".json") ? undefined : candidate);
+
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
-    onFile(event.target.files?.[0]);
+    onFile(acceptFile(event.target.files?.[0]));
   };
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     setIsDragging(false);
     if (disabled) return;
-    onFile(event.dataTransfer.files?.[0]);
+    onFile(acceptFile(event.dataTransfer.files?.[0]));
   };
 
   return (
@@ -538,7 +514,6 @@ function InspectorApp() {
   const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
   const [reactSummary, setReactSummary] = useState<ReactSummary | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
-  const [promptUsages, setPromptUsages] = useState<Record<string, TokenUsage>>({});
   const [analyzerUsage, setAnalyzerUsage] = useState<TokenUsage | null>(null);
   const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
   const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
@@ -590,7 +565,6 @@ function InspectorApp() {
         summary?: ReactSummary;
         issues?: ReactIssue[];
         noIssue?: boolean;
-        reasoning?: string;
         frameBudgetMs?: number;
       };
       if (!response.ok) {
@@ -601,7 +575,6 @@ function InspectorApp() {
       }
 
       setPrompts({});
-      setPromptUsages({});
       setAnalyzerUsage(data.usage ?? null);
       setPromptErrors({});
       setCopiedId(null);
@@ -610,7 +583,7 @@ function InspectorApp() {
     setIsSample(false);
 
       if (profileType === "react") {
-        if (!Array.isArray(data.issues) || (data.issues.length > 0 && typeof data.reasoning !== "string") || data.noIssue !== (data.issues.length === 0)) {
+        if (!Array.isArray(data.issues) || data.noIssue !== (data.issues.length === 0)) {
           setError("The server did not return a valid React issue report. Check the dev server logs.");
           setPhase("upload");
           return;
@@ -655,43 +628,7 @@ function InspectorApp() {
     }
   };
 
-  const generatePrompt = async (id: string) => {
-    if (!analysisId || prompts[id] || promptLoadingId) return;
-
-    setPromptErrors((current) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    setCopiedId(null);
-    setPromptLoadingId(id);
-    try {
-      const isReact = analyzedType === "react";
-      const response = await fetch(isReact ? "/api/react-issue-prompt" : "/api/hotspot-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isReact ? { analysisId, issueId: id } : { analysisId, hotspotId: id }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string; prompt?: string; usage?: TokenUsage };
-      if (!response.ok || !data.prompt) {
-        throw new Error(data.error ?? `Prompt generation failed (${response.status}).`);
-      }
-      setPrompts((current) => ({ ...current, [id]: data.prompt as string }));
-      if (data.usage) {
-        const usage = data.usage;
-        setPromptUsages((current) => ({ ...current, [id]: usage }));
-      }
-    } catch (err) {
-      setPromptErrors((current) => ({ ...current, [id]: errorMessageFrom(err) }));
-    } finally {
-      setPromptLoadingId((current) => (current === id ? null : current));
-    }
-  };
-
-  const copyPrompt = async (id: string) => {
-    const text = prompts[id];
-    if (!text) return;
+  const copyText = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -704,8 +641,49 @@ function InspectorApp() {
       document.execCommand("copy");
       document.body.removeChild(textarea);
     }
+  };
+
+  const markHandoffCopied = (id: string) => {
     setCopiedId(id);
     setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
+  };
+
+  const copyHandoff = async (id: string) => {
+    if (!analysisId || promptLoadingId) return;
+    setPromptErrors((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setCopiedId(null);
+    const existing = prompts[id];
+    if (existing) {
+      await copyText(existing);
+      markHandoffCopied(id);
+      return;
+    }
+
+    setPromptLoadingId(id);
+    try {
+      const isReact = analyzedType === "react";
+      const response = await fetch(isReact ? "/api/react-issue-prompt" : "/api/hotspot-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isReact ? { analysisId, issueId: id } : { analysisId, hotspotId: id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; prompt?: string };
+      if (!response.ok || !data.prompt) {
+        throw new Error(data.error ?? `Handoff creation failed (${response.status}).`);
+      }
+      setPrompts((current) => ({ ...current, [id]: data.prompt as string }));
+      await copyText(data.prompt);
+      markHandoffCopied(id);
+    } catch (err) {
+      setPromptErrors((current) => ({ ...current, [id]: errorMessageFrom(err) }));
+    } finally {
+      setPromptLoadingId((current) => (current === id ? null : current));
+    }
   };
 
   const resetToUpload = () => {
@@ -718,7 +696,6 @@ function InspectorApp() {
     setReactSummary(null);
     setReactIssues([]);
     setPrompts({});
-    setPromptUsages({});
     setAnalyzerUsage(null);
     setPromptLoadingId(null);
     setPromptErrors({});
@@ -738,7 +715,7 @@ function InspectorApp() {
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType(analysis.profileType === "react" ? "react" : "javascript");
     setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setReactIssues(analysis.reactIssues ?? []);
-    setPrompts(analysis.prompts ?? {}); setPromptUsages(analysis.promptUsage ?? {}); setAnalyzerUsage(analysis.usage ?? null);
+    setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null);
     setReactSummary(null); setSaved(true); setPhase("results"); setHistoryOpen(false);
     setIsSample(false);
   };
@@ -811,7 +788,7 @@ function InspectorApp() {
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
     setHotspots(analysis.hotspots); setReactIssues([]); setReactSummary(null);
-    setPrompts({}); setPromptUsages({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
+    setPrompts({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
   };
   const loadReactSample = async () => {
     const response = await fetch("/api/samples/react", { cache: "force-cache" });
@@ -819,7 +796,7 @@ function InspectorApp() {
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
     setHotspots([]); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
-    setPrompts({}); setPromptUsages({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
+    setPrompts({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
   };
 
   const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
@@ -970,7 +947,7 @@ function InspectorApp() {
             <div className="profile-options" role="radiogroup" aria-label="Profile type" aria-disabled={analyzing}>
               <button type="button" role="radio" aria-checked={profileType === "javascript"} disabled={analyzing} className={`profile-option${profileType === "javascript" ? " selected" : ""}`} onClick={() => setProfileType("javascript")}>
                 <span className="profile-icon"><ProfileIcon type="javascript" /></span>
-                <span className="option-copy"><strong>JavaScript CPU</strong><small>Find slow functions and heavy execution paths</small><em>.cpuprofile · Chrome JSON</em></span>
+                <span className="option-copy"><strong>JavaScript CPU</strong><small>Find slow functions and heavy execution paths</small><em>.json</em></span>
                 <span className="radio-indicator" />
               </button>
 
@@ -994,7 +971,7 @@ function InspectorApp() {
 
               <div className="upload-grid single">
                 {profileType === "javascript" ? (
-                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a .cpuprofile or Chrome Performance .json here" file={files.cpu} disabled={analyzing} onFile={(file) => updateFile("cpu", file)} />
+                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a Chrome Performance .json here" file={files.cpu} disabled={analyzing} onFile={(file) => updateFile("cpu", file)} />
                 ) : (
                   <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} disabled={analyzing} onFile={(file) => updateFile("reactProfile", file)} />
                 )}
@@ -1063,7 +1040,7 @@ function InspectorApp() {
                 <span className="eyebrow">Analysis results</span>
                 <h1 className="results-title">React issues</h1>
                 <p>
-                  {reactIssues.length} issue{reactIssues.length === 1 ? "" : "s"} · {appliedBudget} ms budget
+                  {reactIssues.length} commit finding{reactIssues.length === 1 ? "" : "s"} · {appliedBudget} ms budget
                   {reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : ""}
                   {reactSummary && reactSummary.omittedEvidenceCommitCount > 0
                     ? ` · ${reactSummary.omittedEvidenceCommitCount} commits omitted from detailed analysis`
@@ -1080,24 +1057,20 @@ function InspectorApp() {
 
             <div className="hotspot-list">
               {reactIssueCards.map((issue, index) => {
-                const peakMs = issuePeakMs(issue);
                 const { rows, footnote } = reactIssueRows(issue);
                 return (
                   <AnalysisResultCard
                     key={issue.id}
                     rank={index + 1}
                     title={issue.summary}
-                    timeLabel={`${issue.severity} · ${formatMs(peakMs)}`}
+                    timeLabel={`${issue.severity} · commit ${formatMs(issue.commit.durationMs)}`}
                     rows={rows}
                     footnote={footnote}
-                    prompt={prompts[issue.id]}
-                    usage={promptUsages[issue.id]}
                     loading={promptLoadingId === issue.id}
                     error={promptErrors[issue.id]}
                     copied={copiedId === issue.id}
                     busy={isSample || promptLoadingId !== null}
-                    onGenerate={() => void generatePrompt(issue.id)}
-                    onCopy={() => void copyPrompt(issue.id)}
+                    onCopy={() => void copyHandoff(issue.id)}
                   />
                 );
               })}
@@ -1135,14 +1108,11 @@ function InspectorApp() {
                   timeLabel={formatMs(hotspot.combinedTimeMs)}
                   rows={rows}
                   footnote={footnote}
-                  prompt={prompts[hotspot.id]}
-                  usage={promptUsages[hotspot.id]}
                   loading={promptLoadingId === hotspot.id}
                   error={promptErrors[hotspot.id]}
                   copied={copiedId === hotspot.id}
                   busy={isSample || promptLoadingId !== null}
-                  onGenerate={() => void generatePrompt(hotspot.id)}
-                  onCopy={() => void copyPrompt(hotspot.id)}
+                  onCopy={() => void copyHandoff(hotspot.id)}
                 />
                 );
               })}

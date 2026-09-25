@@ -3,40 +3,79 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
-import { install, verifyInstallation } from '../src/install.js';
+import { downloadArtifact, install, validateRelease, verifyInstallation } from '../src/install.js';
 import { acquireLock, launch, alive, run } from '../src/process.js';
 import { parsePort, assertPortAvailable, waitForReady, openBrowser } from '../src/start.js';
 
 async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
-const release = { repository: 'https://github.com/callstackincubator/tracesift.git', revision: 'a'.repeat(40) };
-async function fakeInstall(command, args, options) {
-  if (command === 'git' && args[0] === 'clone') await mkdir(args.at(-1), { recursive: true });
-  if (command === 'npm' && args[0] === 'run') {
-    await mkdir(join(options.cwd, '.next'), { recursive: true });
-    await mkdir(join(options.cwd, 'node_modules/next/dist/bin'), { recursive: true });
-    await writeFile(join(options.cwd, '.next/BUILD_ID'), 'test');
-    await writeFile(join(options.cwd, 'node_modules/next/dist/bin/next'), '');
-  }
+const bytes = Buffer.from('fake artifact');
+const target = `${process.platform}-${process.arch}`;
+const release = {
+  schemaVersion: 1, repository: 'https://github.com/callstackincubator/tracesift', version: '0.1.0',
+  revision: 'a'.repeat(40), tag: 'tracesift-v0.1.0', artifacts: {
+    [target]: { url: 'https://github.com/example/artifact.tar.gz', sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length },
+  },
+};
+const fetchArtifact = async () => new Response(bytes);
+async function fakeExtract(_archive, app, metadata = release) {
+  await mkdir(join(app, '.next'), { recursive: true });
+  await mkdir(join(app, '.next/static'), { recursive: true });
+  await mkdir(join(app, 'public'), { recursive: true });
+  await mkdir(join(app, 'node_modules/@callstack/tracesift/src'), { recursive: true });
+  await mkdir(join(app, 'node_modules/@earendil-works/pi-coding-agent'), { recursive: true });
+  await mkdir(join(app, 'node_modules/agent-react-devtools/dist'), { recursive: true });
+  await writeFile(join(app, 'server.js'), '');
+  await writeFile(join(app, '.next/BUILD_ID'), 'test');
+  await writeFile(join(app, 'node_modules/@callstack/tracesift/src/bootstrap.js'), '');
+  await writeFile(join(app, 'node_modules/@callstack/tracesift/src/runtime.js'), '');
+  await writeFile(join(app, 'node_modules/@earendil-works/pi-coding-agent/package.json'), '{}');
+  await writeFile(join(app, 'node_modules/agent-react-devtools/package.json'), '{}');
+  await writeFile(join(app, 'node_modules/agent-react-devtools/dist/profile-offline.js'), '');
+  await writeFile(join(app, 'node_modules/agent-react-devtools/dist/profile-offline-LICENSE.txt'), '');
+  await writeFile(join(app, 'tracesift-artifact.json'), JSON.stringify({
+    schemaVersion: 1, version: metadata.version, revision: metadata.revision,
+    platform: process.platform, arch: process.arch, buildId: 'test',
+  }));
 }
-test('staging install is repeatable and build failures preserve installation and config', async t => {
+test('staging install is repeatable and failures preserve installation and config', async t => {
   const dir = await home(t);
   await writeFile(join(dir, 'config.json'), 'preserved');
-  await install({ home: dir, release, execute: fakeInstall });
+  await install({ home: dir, release, fetchImpl: fetchArtifact, extract: fakeExtract });
   await verifyInstallation(dir, release);
-  await install({ home: dir, release, execute: async () => { assert.fail('already installed'); } });
-  const next = { ...release, revision: 'b'.repeat(40) };
+  await install({ home: dir, release, fetchImpl: async () => { assert.fail('already installed'); } });
+  const next = { ...release, revision: 'b'.repeat(40), artifacts: {
+    [target]: { ...release.artifacts[target], sha256: 'b'.repeat(64) },
+  } };
   await assert.rejects(verifyInstallation(dir, next), /init/);
-  for (const failure of ['clone', 'checkout', 'ci', 'run']) {
-    await assert.rejects(install({ home: dir, release: next, execute: async (command, args, options) => {
-      if (args[0] === failure) throw new Error('simulated failure');
-      await fakeInstall(command, args, options);
-    } }), /simulated failure/);
+  const failures = [
+    { fetchImpl: async () => { throw new Error('simulated failure'); } },
+    { fetchImpl: fetchArtifact, extract: async () => { throw new Error('simulated failure'); } },
+  ];
+  for (const failure of failures) {
+    await assert.rejects(install({ home: dir, release: { ...next, artifacts: { [target]: release.artifacts[target] } }, ...failure }), /simulated failure/);
     await verifyInstallation(dir, release);
     assert.equal(await readFile(join(dir, 'config.json'), 'utf8'), 'preserved');
     assert.deepEqual((await readdir(dir)).sort(), ['app', 'config.json']);
   }
+});
+
+test('release metadata rejects unsafe or unsupported artifact sources', () => {
+  assert.equal(validateRelease(release), release);
+  assert.throws(() => validateRelease({ ...release, repository: 'https://example.com/wrong' }), /Invalid release/);
+  assert.throws(() => validateRelease({ ...release, artifacts: { [target]: { ...release.artifacts[target], url: 'http://example.com/app.tar.gz' } } }), /Invalid release/);
+  assert.doesNotThrow(() => validateRelease({ ...release, artifacts: { [target]: { ...release.artifacts[target], url: 'http://127.0.0.1:1234/app.tar.gz' } } }));
+});
+
+test('artifact download enforces the declared size and SHA-256', async t => {
+  const dir = await home(t);
+  const artifact = release.artifacts[target];
+  await downloadArtifact(artifact, join(dir, 'valid.tar.gz'), fetchArtifact);
+  await assert.rejects(downloadArtifact({ ...artifact, size: artifact.size - 1 }, join(dir, 'large.tar.gz'), fetchArtifact), /larger/);
+  await assert.rejects(downloadArtifact({ ...artifact, sha256: 'c'.repeat(64) }, join(dir, 'wrong.tar.gz'), fetchArtifact), /SHA-256/);
+  assert.deepEqual((await readdir(dir)).sort(), ['valid.tar.gz']);
 });
 
 test('lock excludes parallel operations and recovers stale ownership', async t => {

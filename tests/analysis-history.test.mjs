@@ -45,7 +45,7 @@ test("bundled React sample has stable report metadata and its recorded issue", (
   assert.equal(REACT_SAMPLE_ANALYSIS.id, "sample-react-heavy-activity-heatmap");
   assert.equal(REACT_SAMPLE_ANALYSIS.profileType, "react");
   assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues.length, 1);
-  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues[0].component, "HeavyActivityHeatmap");
+  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues[0].components[0].component, "HeavyActivityHeatmap");
   assert.equal(REACT_SAMPLE_SUMMARY.frameBudgetMs, 16);
 });
 

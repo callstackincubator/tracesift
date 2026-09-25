@@ -3,8 +3,8 @@
 ## Prerequisites
 
 - macOS, Linux.
-- Node.js 22.19.0 or newer, npm, and Git available on `PATH`.
-- Internet access to clone the repository, install dependencies, and build the app.
+- Node.js 22.19.0 or newer, npm, and Git available on `PATH` for development and release packaging. Installed CLI users only need Node.js after installing the package.
+- Internet access for the initial development dependency installation and CLI package installation.
 - An OpenAI, Anthropic, or Callstack Apex API key for manual analysis. Automated tests and builds do not require a real key.
 
 ## Set up the current checkout
@@ -75,32 +75,46 @@ Open the same local URL and repeat the manual analysis steps. Rebuild after chan
 
 ## Test managed CLI installation and startup
 
-`init` installs the source revision embedded in release metadata, rather than copying your working directory. To test a new revision end to end, commit the changes and push that commit to the public repository first. Packaging requires a clean checkout, including no untracked files. Move any previously generated tarballs outside the repository if they appear in `git status --short`.
-
-From that clean checkout, create the package and release metadata:
+Run the local release harness from the repository root:
 
 ```sh
-TRACE_SIFT_PACK_DIR="$(mktemp -d)"
-npm pack --workspace @callstack/tracesift --pack-destination "$TRACE_SIFT_PACK_DIR"
+node scripts/test-local-release.mjs
 ```
 
-This creates a local tarball and the ignored `packages/cli/release.json`; it does not publish to npm. Keeping the tarball outside the repository avoids making the checkout dirty for the next pack.
+It builds the standalone app for your current platform, packages it, serves its archive over a loopback HTTP connection, and packs a temporary CLI with matching local release metadata. The harness installs that package and runs the real `tracesift init` twice in a temporary home, checking that the second run reuses the installation. It then runs `tracesift start --no-open` and checks `/api/model`. No GitHub push or npm publication is involved. The temporary package, server, and home are removed when the test ends.
 
-Use another isolated home to exercise installation:
+For the manual checkpoint, keep the installed app running:
 
 ```sh
-export TRACE_SIFT_HOME="$HOME/.tracesift-cli-test"
-node packages/cli/src/cli.js init
-node packages/cli/src/cli.js start
+node scripts/test-local-release.mjs --keep-open
 ```
 
-Check that `init` clones the pinned commit, installs dependencies, and builds the app. Check that `start` opens the browser and allows model selection from **Analysis settings**. Press Ctrl+C to stop it.
+Open the URL printed by the harness. Configure **Analysis settings**, upload `test-fixtures/sample.cpuprofile`, and complete an analysis. This sends a real provider request and may incur usage charges. Press Ctrl+C to stop and clean up the temporary installation. Run this checkpoint before exercising the GitHub and npm release workflow.
 
-Additional checks:
+The packaging script also supports direct inspection after `npm run build`:
 
-- Run `init` again after stopping the server: a complete matching installation should be reused.
-- Run `node packages/cli/src/cli.js start --port 3001 --no-open`: open the printed URL manually and verify analysis works.
-- Replace the model or key in **Analysis settings** and verify the selection without restarting.
-- If installation fails, resolve the error shown above the final CLI message and rerun `init`.
+```sh
+node scripts/package-standalone.mjs
+```
 
-Current-checkout npm commands work without release metadata. Direct `init` and `start` require it. After changing the pinned application revision, commit, push, and pack again. For release requirements and storage details, see the [CLI documentation](packages/cli/README.md).
+It writes the current-platform archive and its checksum/size sidecar under `dist/`. For release requirements and storage details, see the [CLI documentation](packages/cli/README.md).
+
+## Prepare and publish a release
+
+Add a Changeset with each user-facing change to the app or CLI:
+
+```sh
+npx changeset
+```
+
+The app and CLI versions move together. The root app is private; only `@callstack/tracesift` is published to npm. Commit the Changeset with the change and merge it into `main`. The release workflow opens or updates a Changesets version PR. Review its version bump, changelog, root dependency on the CLI, and lockfile, then merge that PR to start publication. Do not publish the CLI manually: it must contain the checksums and URLs for the artifacts produced from the same revision.
+
+Before merging the version PR, run the local checkpoint above (`npm run test:release:local -- --keep-open`) and complete a browser analysis. The workflow then builds and smoke-tests native standalone archives for `darwin-arm64`, `darwin-x64`, `linux-arm64`, and `linux-x64`. It creates a draft `tracesift-v<version>` GitHub Release, attaches the archives, inserts their immutable metadata into the CLI package, publishes the package to npm, and makes the GitHub Release public after npm succeeds.
+
+Repository maintainers must configure the following once:
+
+- In npm package settings for `@callstack/tracesift`, add a trusted publisher of type **GitHub Actions** with organization/user `callstackincubator`, repository `tracesift`, and workflow filename `release.yml`. The workflow uses npm OIDC trusted publishing; no `NPM_TOKEN` is required.
+- In GitHub repository Actions settings, allow Actions to create pull requests so Changesets can open the version PR. The release workflow needs `contents: write` and `pull-requests: write` for version PRs, and `contents: write` plus `id-token: write` for publishing. Keep build jobs at `contents: read`.
+- Keep the release workflow on GitHub-hosted runners; npm trusted publishing requires their OIDC identity. The publishing job must use npm 11.5.1 or newer.
+
+If a publish run fails, inspect the failed job and rerun the workflow for the same version. The draft GitHub Release and its assets can be reused; npm publication is skipped if that exact version is already present. If npm succeeds but making the GitHub Release public fails, rerun to finish publication. Avoid creating a second version or tag to recover an interrupted release.
