@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   // server bundle and load it with native Node resolution.
   serverExternalPackages: ["@callstack/tracesift", "@earendil-works/pi-coding-agent", "agent-react-devtools"],
   outputFileTracingIncludes: {
+    "/api/model/oauth": [
+      // pi-ai loads provider OAuth implementations from computed module paths,
+      // which Next.js output tracing cannot discover statically.
+      "./node_modules/**/@earendil-works/pi-ai/dist/auth/oauth/**/*.js",
+    ],
     "/api/analyze/react": [
       "./node_modules/agent-react-devtools/dist/**/*.js",
       "./node_modules/agent-react-devtools/dist/profile-offline-LICENSE.txt",

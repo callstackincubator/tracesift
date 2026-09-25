@@ -63,6 +63,8 @@ async function main() {
   await assertDirectory(join(root, '.next/static'));
   await assertDirectory(join(root, 'public'));
   await assertFile(join(source, 'node_modules/@earendil-works/pi-coding-agent/package.json'));
+  await assertFile(join(source, 'node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js'));
+  await assertFile(join(source, 'node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js'));
   await assertFile(join(source, 'node_modules/agent-react-devtools/package.json'));
   await assertFile(join(source, 'node_modules/agent-react-devtools/dist/profile-offline.js'));
   await assertFile(join(source, 'node_modules/agent-react-devtools/dist/profile-offline-LICENSE.txt'));
@@ -86,6 +88,8 @@ async function main() {
       'node_modules/@callstack/tracesift/src/bootstrap.js',
       'node_modules/@callstack/tracesift/src/runtime.js',
       'node_modules/@earendil-works/pi-coding-agent/package.json',
+      'node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js',
+      'node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js',
       'node_modules/agent-react-devtools/dist/profile-offline.js',
     ]) await assertFile(join(stage, file));
 
