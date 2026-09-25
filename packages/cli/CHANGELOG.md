@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.2.2
+
+### Patch Changes
+
+- c185fe8: Use the main TraceSift README on the npm package page and include the MIT license.
+
 ## 0.2.1
 
 ### Patch Changes
