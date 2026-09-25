@@ -783,7 +783,7 @@ function InspectorApp() {
     }
   };
   const loadCpuSample = async () => {
-    const response = await fetch("/api/samples/cpu", { cache: "force-cache" });
+    const response = await fetch("/api/samples/cpu", { cache: "no-store" });
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
@@ -791,7 +791,9 @@ function InspectorApp() {
     setPrompts({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
   };
   const loadReactSample = async () => {
-    const response = await fetch("/api/samples/react", { cache: "force-cache" });
+    // Sample issue schemas can change between app releases. Bypass the browser's
+    // HTTP cache so an older payload cannot be rendered by the current UI.
+    const response = await fetch("/api/samples/react", { cache: "no-store" });
     if (!response.ok) return;
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
