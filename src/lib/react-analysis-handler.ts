@@ -7,6 +7,7 @@ import { parseReactProfileOptions, ReactProfileError } from "./react-profile.ts"
 import type { extractReactProfile } from "./react-profile.ts";
 import { requireReactEvidence, withinReactBudget, noReactIssues, ZERO_REACT_USAGE, discardSubBudgetReactIssues, type analyzeReactProfile } from "./react-analyzer.ts";
 import { parseFrameBudget } from "./react-evidence.ts";
+import { debugLog } from "./debug-log.ts";
 
 interface Dependencies {
   extract: typeof extractReactProfile;
@@ -65,7 +66,7 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
         commitsOverBudget: evidence.commitDurations.filter(ms => ms > frameBudgetMs).length,
         omittedEvidenceCommitCount: evidence.omittedCommitCount,
       }, ...report, frameBudgetMs, usage: analysis.usage };
-      console.log("[tracesift] SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
+      debugLog("api/analyze/react", "SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
       return Response.json(response);
     } catch (error) {
       if (error instanceof ReactProfileError || (error instanceof Error && "status" in error && typeof error.status === "number"

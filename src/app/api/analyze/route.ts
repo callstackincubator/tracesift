@@ -16,11 +16,12 @@ import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { CpuAnalysisError, analyzeCpuBottlenecks } from "@/lib/cpu-analyzer";
 import { AgentError } from "@/lib/pi-agent";
 import { analysisPromptData } from "@/lib/prompt-data";
+import { debugLog } from "@/lib/debug-log";
 
 const LOG = "api/analyze";
 
 function log(...parts: unknown[]): void {
-  console.log(`[tracesift] ${new Date().toISOString()} [${LOG}]`, ...parts);
+  debugLog(LOG, ...parts);
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {
