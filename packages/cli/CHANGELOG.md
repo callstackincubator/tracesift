@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.2.1
+
+### Patch Changes
+
+- 67da2f4: reserve logs only for development builds
+
 ## 0.2.0
 
 ### Minor Changes
