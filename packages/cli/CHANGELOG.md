@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.3.1
+
+### Patch Changes
+
+- 391ff5a: bundle dynamically imported pi files
+
 ## 0.3.0
 
 ### Minor Changes
