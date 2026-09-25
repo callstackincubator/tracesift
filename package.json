@@ -1,6 +1,6 @@
 {
   "name": "tracesift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "postinstall": "patch-package --error-on-fail",
@@ -17,7 +17,7 @@
     "test:release:local": "node scripts/test-local-release.mjs"
   },
   "dependencies": {
-    "@callstack/tracesift": "0.1.0",
+    "@callstack/tracesift": "0.2.0",
     "@earendil-works/pi-coding-agent": "0.84.4",
     "@rozenite/ui": "^2.4.0",
     "agent-react-devtools": "0.4.0",
