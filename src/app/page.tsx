@@ -16,6 +16,7 @@ import {
 
 import { HowToUseGuide } from "@/app/how-to-use";
 import type { Hotspot } from "@/lib/analysis";
+import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
 
 type ProfileType = "javascript" | "react";
@@ -30,20 +31,22 @@ interface AnalyzeResponse {
   totalMs: number;
   hotspots: Hotspot[];
   usage?: TokenUsage;
+  model?: AnalysisModel;
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
-interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; }
-interface ModelProvider { id: string; name: string; keyConfigured: boolean; models: Array<{ id: string; name: string }>; }
+interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
+interface AuthMethod { type: 'api_key' | 'oauth'; label: string; configured: boolean; subscription: boolean; }
+interface ModelProvider { id: string; name: string; authMethods: AuthMethod[]; models: Array<{ id: string; name: string }>; }
 interface ModelSettings {
   configured: boolean;
   providerId?: string;
   modelId?: string;
+  authMode?: 'api_key' | 'oauth';
   provider?: string;
   model?: string;
   error?: string;
   providers: ModelProvider[];
 }
-
 interface ReactSummary {
   peakCommitDurationMs: number | null;
   commitsOverBudget: number;
@@ -60,6 +63,13 @@ interface TokenUsage {
   cacheWrite: number;
   totalTokens: number;
   costUsd: number;
+}
+
+interface AnalysisModel {
+  provider: string;
+  model: string;
+  providerId?: string;
+  modelId?: string;
 }
 
 const acceptedFiles: Record<UploadKind, string> = {
@@ -96,6 +106,18 @@ function usageBreakdown(usage: TokenUsage): string {
   const cost = formatUsd(usage.costUsd);
   if (cost) parts.push(cost);
   return parts.join(" · ");
+}
+
+function ResultModel({ model, usage }: { model: AnalysisModel | null; usage: TokenUsage }) {
+  const provider = model?.provider ?? (usage.totalTokens === 0 ? "Local analysis" : "Provider unavailable");
+  const modelName = model?.model ?? (usage.totalTokens === 0 ? "No model used" : "Model unavailable");
+
+  return (
+    <div className="result-model" title="Provider and model used for this analysis">
+      <span>{provider}</span>
+      <strong>{modelName}</strong>
+    </div>
+  );
 }
 
 function errorMessageFrom(error: unknown): string {
@@ -458,7 +480,11 @@ function InspectorApp() {
   const [modelStatus, setModelStatus] = useState<ModelSettings | null>(null);
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedAuthMode, setSelectedAuthMode] = useState<'api_key' | 'oauth'>('api_key');
   const [apiKey, setApiKey] = useState("");
+  const [oauthAttempt, setOauthAttempt] = useState<OAuthAttempt | null>(null);
+  const oauthPopup = useRef<Window | null>(null);
+  const oauthPopupNavigated = useRef(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelSettingsMessage, setModelSettingsMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   useEffect(() => {
@@ -470,6 +496,7 @@ function InspectorApp() {
         setModelStatus(settings);
         setSelectedProvider(settings.providerId ?? "");
         setSelectedModel(settings.modelId ?? "");
+        setSelectedAuthMode(settings.authMode ?? 'api_key');
       })
       .catch(() => { if (!controller.signal.aborted) setModelStatus({ configured: false, providers: [], error: "Could not load model configuration. Reload the page." }); });
     return () => controller.abort();
@@ -515,6 +542,7 @@ function InspectorApp() {
   const [reactSummary, setReactSummary] = useState<ReactSummary | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [analyzerUsage, setAnalyzerUsage] = useState<TokenUsage | null>(null);
+  const [analysisModel, setAnalysisModel] = useState<AnalysisModel | null>(null);
   const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
   const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -562,6 +590,7 @@ function InspectorApp() {
         totalMs?: number;
         hotspots?: Hotspot[];
         usage?: TokenUsage;
+        model?: AnalysisModel;
         summary?: ReactSummary;
         issues?: ReactIssue[];
         noIssue?: boolean;
@@ -576,6 +605,7 @@ function InspectorApp() {
 
       setPrompts({});
       setAnalyzerUsage(data.usage ?? null);
+      setAnalysisModel(data.model ?? null);
       setPromptErrors({});
       setCopiedId(null);
     setAnalyzedType(profileType);
@@ -609,6 +639,7 @@ function InspectorApp() {
         totalMs: data.totalMs ?? 0,
         hotspots: data.hotspots ?? [],
         usage: data.usage,
+        model: data.model,
       };
       if (!result.analysisId) {
         setError("The server did not return an analysis id. Check the dev server logs.");
@@ -697,6 +728,7 @@ function InspectorApp() {
     setReactIssues([]);
     setPrompts({});
     setAnalyzerUsage(null);
+    setAnalysisModel(null);
     setPromptLoadingId(null);
     setPromptErrors({});
     setCopiedId(null);
@@ -715,7 +747,7 @@ function InspectorApp() {
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType(analysis.profileType === "react" ? "react" : "javascript");
     setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setReactIssues(analysis.reactIssues ?? []);
-    setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null);
+    setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null); setAnalysisModel(analysis.model ?? null);
     setReactSummary(null); setSaved(true); setPhase("results"); setHistoryOpen(false);
     setIsSample(false);
   };
@@ -729,9 +761,61 @@ function InspectorApp() {
   };
   const providerModels = modelStatus?.providers.find(provider => provider.id === selectedProvider)?.models ?? [];
   const selectedProviderSettings = modelStatus?.providers.find(provider => provider.id === selectedProvider);
+  const selectedAuthMethod = selectedProviderSettings?.authMethods.find(method => method.type === selectedAuthMode);
+  const activeAttemptId = oauthAttempt?.status === 'pending' ? oauthAttempt.attemptId : undefined;
+  useEffect(() => {
+    if (!activeAttemptId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { attempt: next, settings } = await pollOAuthAttempt<ModelSettings>(activeAttemptId);
+        if (cancelled) return;
+        if (next.event?.type === 'auth_url' && next.event.url && oauthPopup.current && !oauthPopupNavigated.current) { oauthPopupNavigated.current = true; oauthPopup.current.location.href = next.event.url; }
+        if (next.status === 'complete' && settings) {
+          setModelStatus(settings);
+          oauthPopup.current?.close();
+          setModelSettingsMessage({ tone: 'success', text: 'Subscription connected. Choose a model and save it to use this connection.' });
+        }
+        // Keep the attempt pending until refreshed settings are ready. Changing it
+        // earlier tears down this effect and discards the settings response.
+        setOauthAttempt(next);
+      } catch { if (!cancelled) setModelSettingsMessage({ tone: 'error', text: 'Could not check sign-in status.' }); }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [activeAttemptId]);
+  const oauthAction = async (body: Record<string, string>) => {
+    const response = await fetch('/api/model/oauth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not complete sign-in action.');
+    return data;
+  };
+  const startOAuthLogin = async () => {
+    if (!selectedProvider || oauthAttempt?.status === 'pending') return;
+    setModelSettingsMessage(null);
+    oauthPopupNavigated.current = false;
+    oauthPopup.current = window.open('about:blank', '_blank');
+    try {
+      const attempt = await oauthAction({ action: 'start', provider: selectedProvider, method: 'browser' }) as OAuthAttempt;
+      if (attempt.status !== 'pending') oauthPopup.current?.close();
+      setOauthAttempt(attempt);
+    }
+    catch (error) { oauthPopup.current?.close(); setModelSettingsMessage({ tone: 'error', text: errorMessageFrom(error) }); }
+  };
+  const stopOAuthLogin = async () => {
+    if (!oauthAttempt) return;
+    try { setOauthAttempt(await oauthAction({ action: 'cancel', attemptId: oauthAttempt.attemptId }) as OAuthAttempt); oauthPopup.current?.close(); }
+    catch (error) { setModelSettingsMessage({ tone: 'error', text: errorMessageFrom(error) }); }
+  };
+  const disconnectOAuth = async () => {
+    try { const settings = await oauthAction({ action: 'logout', provider: selectedProvider }) as ModelSettings; setModelStatus(settings); setOauthAttempt(null); setModelSettingsMessage({ tone: 'success', text: 'Subscription disconnected from this device.' }); }
+    catch (error) { setModelSettingsMessage({ tone: 'error', text: errorMessageFrom(error) }); }
+  };
   const updateProvider = (provider: string) => {
     setSelectedProvider(provider);
     setSelectedModel(provider === modelStatus?.providerId ? modelStatus.modelId ?? "" : "");
+    setSelectedAuthMode(provider === modelStatus?.providerId ? modelStatus.authMode ?? 'api_key' : provider === 'openai-codex' ? 'oauth' : 'api_key');
     setApiKey("");
     setModelSettingsMessage(null);
   };
@@ -748,7 +832,7 @@ function InspectorApp() {
       const response = await fetch("/api/model", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: selectedProvider, model: selectedModel, ...(apiKey.trim() ? { apiKey } : {}) }),
+        body: JSON.stringify({ provider: selectedProvider, model: selectedModel, authMode: selectedAuthMode, ...(apiKey.trim() ? { apiKey } : {}) }),
       });
       const data = await response.json() as ModelSettings & { error?: string };
       if (!response.ok) throw new Error(data.error || `Could not save model settings (${response.status}).`);
@@ -756,7 +840,7 @@ function InspectorApp() {
       setSelectedProvider(data.providerId ?? selectedProvider);
       setSelectedModel(data.modelId ?? selectedModel);
       setApiKey("");
-      setModelSettingsMessage({ tone: "success", text: "Model and API key saved on this device." });
+      setModelSettingsMessage({ tone: "success", text: "Model settings saved on this device." });
     } catch (err) {
       setModelSettingsMessage({ tone: "error", text: errorMessageFrom(err) });
     } finally {
@@ -764,18 +848,19 @@ function InspectorApp() {
     }
   };
   const clearModelSettings = async () => {
-    if (modelSaving || !window.confirm("Clear the selected model and all saved provider API keys from this device?")) return;
+    if (modelSaving || !window.confirm("Clear the selected model, all saved API keys, and TraceSift subscription connections from this device?")) return;
     setModelSaving(true);
     setModelSettingsMessage(null);
     try {
-      const response = await fetch("/api/model", { method: "DELETE" });
+      const response = await fetch("/api/model", { method: "DELETE", headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const data = await response.json() as ModelSettings & { error?: string };
       if (!response.ok) throw new Error(data.error || `Could not clear model settings (${response.status}).`);
       setModelStatus(data);
       setSelectedProvider("");
+      setSelectedAuthMode('api_key');
       setSelectedModel("");
       setApiKey("");
-      setModelSettingsMessage({ tone: "success", text: "Saved model configuration cleared." });
+      setModelSettingsMessage({ tone: "success", text: "Saved model settings and credentials cleared." });
     } catch (err) {
       setModelSettingsMessage({ tone: "error", text: errorMessageFrom(err) });
     } finally {
@@ -788,7 +873,7 @@ function InspectorApp() {
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
     setHotspots(analysis.hotspots); setReactIssues([]); setReactSummary(null);
-    setPrompts({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
+    setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
   const loadReactSample = async () => {
     // Sample issue schemas can change between app releases. Bypass the browser's
@@ -798,7 +883,7 @@ function InspectorApp() {
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
     setHotspots([]); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
-    setPrompts({}); setAnalyzerUsage(analysis.usage); setSaved(true); setIsSample(true); setPhase("results");
+    setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
 
   const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
@@ -835,6 +920,48 @@ function InspectorApp() {
                   </select>
                   {selectedProvider && (
                     <>
+                      <label htmlFor="analysis-auth">Authentication</label>
+                      <select id="analysis-auth" value={selectedAuthMode} onChange={event => { setSelectedAuthMode(event.target.value as 'api_key' | 'oauth'); setApiKey(''); setModelSettingsMessage(null); }} disabled={modelSaving}>
+                        {selectedProviderSettings?.authMethods.map(method => <option key={method.type} value={method.type}>{method.label}</option>)}
+                      </select>
+                      {selectedAuthMode === 'oauth' && (
+                        <div className="oauth-panel">
+                          <div className="oauth-intro">
+                            <span className="oauth-icon" aria-hidden="true">
+                              <svg viewBox="0 0 24 24" fill="none"><path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11M7 11h10v9H7z" /></svg>
+                            </span>
+                            <div>
+                              <strong>Subscription sign-in</strong>
+                              <p>Experimental PI OAuth. Access depends on your provider account and plan.</p>
+                            </div>
+                          </div>
+                          {selectedAuthMethod?.configured ? (
+                            <div className="oauth-connected">
+                              <span className="oauth-status-dot" aria-hidden="true" />
+                              <div><strong>Connected</strong><small>Authorized on this device</small></div>
+                              <button type="button" onClick={() => void disconnectOAuth()}>Disconnect</button>
+                            </div>
+                          ) : oauthAttempt?.provider === selectedProvider && oauthAttempt.status === 'pending' ? (
+                            <div className="oauth-pending" role="status">
+                              <RozeniteLoader size={16} label="" />
+                              <div>
+                                <strong>Waiting for browser sign-in</strong>
+                                {oauthAttempt.event?.type === 'auth_url' && oauthAttempt.event.url ? (
+                                  <p>Finish signing in in the browser. <a href={oauthAttempt.event.url} target="_blank" rel="noopener noreferrer">Open sign-in page</a></p>
+                                ) : (
+                                  <p>Preparing the secure sign-in page…</p>
+                                )}
+                              </div>
+                              <button className="oauth-cancel" type="button" onClick={() => void stopOAuthLogin()}>Cancel sign-in</button>
+                            </div>
+                          ) : (
+                            <Button className="oauth-sign-in" type="button" size="sm" onClick={() => void startOAuthLogin()}>
+                              Sign in with browser <HeaderIcon type="arrow" />
+                            </Button>
+                          )}
+                          {oauthAttempt?.provider === selectedProvider && oauthAttempt.status !== 'pending' && oauthAttempt.status !== 'complete' && <p className="oauth-error" role="alert">{oauthAttempt.error}</p>}
+                        </div>
+                      )}
                       <label htmlFor="analysis-model">Model</label>
                       <select id="analysis-model" value={selectedModel} onChange={event => updateModel(event.target.value)} disabled={modelSaving}>
                         <option value="">Select a model</option>
@@ -844,34 +971,36 @@ function InspectorApp() {
                   )}
                   {selectedModel && (
                     <>
+                      {selectedAuthMode === 'api_key' && <>
                       <label htmlFor="analysis-api-key">API key</label>
                       <input
                         id="analysis-api-key"
                         type="password"
                         value={apiKey}
                         autoComplete="new-password"
-                        placeholder={selectedProviderSettings?.keyConfigured ? "Saved key (enter to replace)" : "Enter API key"}
+                        placeholder={selectedAuthMethod?.configured ? "Saved key (enter to replace)" : "Enter API key"}
                         onChange={event => { setApiKey(event.target.value); setModelSettingsMessage(null); }}
                         disabled={modelSaving}
                       />
                       <small className="model-key-help">
-                        {selectedProviderSettings?.keyConfigured ? "A key is already saved for this provider." : "Required to use this provider."} The key stays in the local TraceSift configuration.
+                        {selectedAuthMethod?.configured ? "A key is already saved for this provider." : "Required to use this provider."} The key stays in the local TraceSift configuration.
                       </small>
+                      </>}
                       <Button
                         className="model-save-button"
                         type="button"
                         size="sm"
                         onClick={() => void saveModelSettings()}
-                        disabled={modelSaving || (!selectedProviderSettings?.keyConfigured && !apiKey.trim())}
+                        disabled={modelSaving || (selectedAuthMode === 'api_key' ? !selectedAuthMethod?.configured && !apiKey.trim() : !selectedAuthMethod?.configured)}
                       >
                         {modelSaving ? "Saving…" : "Save model settings"}
                       </Button>
                     </>
                   )}
                   {modelSettingsMessage && <p className={`model-settings-message ${modelSettingsMessage.tone}`} role="status">{modelSettingsMessage.text}</p>}
-                  {(modelStatus?.configured || modelStatus?.providers.some(provider => provider.keyConfigured)) && (
+                  {(modelStatus?.configured || modelStatus?.providers.some(provider => provider.authMethods.some(method => method.configured))) && (
                     <button className="clear-model-button" type="button" disabled={modelSaving} onClick={() => void clearModelSettings()}>
-                      Clear saved model and API keys
+                      Clear model and all credentials
                     </button>
                   )}
                 </div>
@@ -1054,7 +1183,10 @@ function InspectorApp() {
                   </p>
                 )}
               </div>
-              <div className="result-actions">{!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}</div>
+              <div className="result-actions">
+                {analyzerUsage && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
+              </div>
             </div>
 
             <div className="hotspot-list">
@@ -1096,7 +1228,10 @@ function InspectorApp() {
                   </p>
                 )}
               </div>
-              <div className="result-actions">{!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}</div>
+              <div className="result-actions">
+                {analyzerUsage && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
+              </div>
             </div>
 
             <div className="hotspot-list">

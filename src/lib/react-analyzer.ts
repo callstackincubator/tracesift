@@ -1,4 +1,4 @@
-import type { TokenUsage } from "./analysis";
+import type { AnalysisModel, TokenUsage } from "./analysis";
 import type { RunAgentOptions, RunAgentResult } from "./pi-agent";
 import { ReactProfileError, type ReactProfileResult } from "./react-profile.ts";
 import type { ReactCommitEvidence, ReactEvidence } from "./react-evidence.ts";
@@ -299,7 +299,7 @@ export function validateReactIssueReport(raw: unknown, evidence: ReactEvidence, 
 export async function analyzeReactProfile(
   result: ReactProfileResult, cwd: string,
   run: (options: RunAgentOptions) => Promise<RunAgentResult>, budget = 16,
-): Promise<ReactAnalysis & { usage: TokenUsage }> {
+): Promise<ReactAnalysis & { usage: TokenUsage; model?: AnalysisModel }> {
   const evidence = requireReactEvidence(result);
   if (withinReactBudget(evidence, budget)) return { ...noReactIssues(), usage: { ...ZERO_REACT_USAGE } };
   const prompt = reactAnalystPrompt(result, budget);
@@ -347,5 +347,5 @@ export async function analyzeReactProfile(
   try { raw = JSON.parse(response.finalText.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "")); }
   catch { throw new ReactProfileError(502, "The analyzer finished without a React issue report."); }
   const report = validateReactIssueReport(raw, suppliedEvidence, budget);
-  return { ...discardSubBudgetReactIssues(report, evidence, budget), usage: response.usage };
+  return { ...discardSubBudgetReactIssues(report, evidence, budget), usage: response.usage, ...(response.model ? { model: response.model } : {}) };
 }

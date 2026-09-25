@@ -11,6 +11,7 @@
     "./config": "./src/config.js",
     "./models": "./src/models.js",
     "./runtime": "./src/runtime.js",
+    "./oauth": "./src/oauth.js",
     "./bootstrap": "./src/bootstrap.js"
   },
   "files": [
@@ -32,7 +33,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.87.1",
     "tar": "^7.5.22"
   },
   "publishConfig": {

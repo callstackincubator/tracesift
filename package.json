@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@callstack/tracesift": "0.2.2",
-    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.87.1",
     "@rozenite/ui": "^2.4.0",
     "agent-react-devtools": "0.4.0",
     "next": "16.3.4",

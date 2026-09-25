@@ -50,6 +50,7 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
           reactIssues: report.issues,
           prompts: {},
           usage: analysis.usage,
+          model: analysis.model,
           promptUsage: {},
           profileType: "react" as const,
           title: profile.name,
@@ -65,7 +66,7 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       const response = { profileType: "react", title: profile.name, saved, analysisId, summary: { ...evidence.summary,
         commitsOverBudget: evidence.commitDurations.filter(ms => ms > frameBudgetMs).length,
         omittedEvidenceCommitCount: evidence.omittedCommitCount,
-      }, ...report, frameBudgetMs, usage: analysis.usage };
+      }, ...report, frameBudgetMs, usage: analysis.usage, model: analysis.model };
       debugLog("api/analyze/react", "SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
       return Response.json(response);
     } catch (error) {

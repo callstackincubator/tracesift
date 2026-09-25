@@ -12,7 +12,7 @@ const { CPU_SAMPLE_ANALYSIS, REACT_SAMPLE_ANALYSIS, REACT_SAMPLE_SUMMARY } = awa
 const usage = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3, costUsd: 0 };
 const record = {
   id: "history-record-1", createdAt: 10, dir: "/raw-upload-never-persisted", totalMs: 40,
-  hotspots: [], reactIssues: [], prompts: {}, usage, promptUsage: {}, profileType: "cpu", title: "profile.cpuprofile", saved: false,
+  hotspots: [], reactIssues: [], prompts: {}, usage, model: { provider: "OpenAI", model: "GPT test" }, promptUsage: {}, profileType: "cpu", title: "profile.cpuprofile", saved: false,
 };
 
 test("local history defaults to auto-save and persists safe report data", async () => {
@@ -22,6 +22,7 @@ test("local history defaults to auto-save and persists safe report data", async 
   assert.equal(loaded?.dir, "");
   assert.equal(loaded?.title, "profile.cpuprofile");
   assert.equal(loaded?.saved, true);
+  assert.deepEqual(loaded?.model, { provider: "OpenAI", model: "GPT test" });
   assert.deepEqual(await store.listSavedAnalyses(), [{ id: record.id, createdAt: 10, profileType: "cpu", title: "profile.cpuprofile", totalTokens: 3, issueCount: 0 }]);
 });
 

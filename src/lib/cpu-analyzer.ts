@@ -1,4 +1,4 @@
-import { normalizeHotspots, type Hotspot, type TokenUsage } from "./analysis.ts";
+import { normalizeHotspots, type AnalysisModel, type Hotspot, type TokenUsage } from "./analysis.ts";
 import type { Bottleneck } from "./bottlenecks.ts";
 import { runAgent, type RunAgentOptions, type RunAgentResult } from "./pi-agent.ts";
 import { ANALYST_SYSTEM_PROMPT, analystUserPrompt } from "./prompts.ts";
@@ -74,7 +74,7 @@ export async function analyzeCpuBottlenecks(
   cwd: string,
   inputBreakdown?: unknown,
   run: CpuAgentRunner = runAgent,
-): Promise<{ hotspots: Hotspot[]; usage: TokenUsage }> {
+): Promise<{ hotspots: Hotspot[]; usage: TokenUsage; model?: AnalysisModel }> {
   const suppliedGroups = analysisPromptData(groups);
   const response = await run({
     label: "analyze",
@@ -95,5 +95,5 @@ export async function analyzeCpuBottlenecks(
   if (hotspots.length === 0) {
     throw new CpuAnalysisError(502, "No meaningful hotspots were found in this profile.");
   }
-  return { hotspots, usage: response.usage };
+  return { hotspots, usage: response.usage, ...(response.model ? { model: response.model } : {}) };
 }

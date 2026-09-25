@@ -50,9 +50,20 @@ Contributors can run `npm run test:release:local` to verify the packaged downloa
 
 ### 1. Configure Analysis settings
 
-Open **Settings** before your first analysis. Choose a provider and model, enter its API key, and select **Save model settings**; credentials stay in your local TraceSift configuration.
+Open **Settings** before your first analysis. Choose a provider, authentication method, and model, then select **Save model settings**.
+
+- OpenAI and Callstack use API keys;
+- ChatGPT Codex uses Plus/Pro subscription sign-in;
+- Anthropic supports a Claude subscription or API key.
+- Browser sign-in is available.
+- Subscription sign-in uses PI OAuth experimentally.
+- Connecting an account does not select a model automatically.
+- Credentials stay in the local TraceSift home directory.
+- TraceSift never reads PI's own auth file.
 
 Enable **Save analyses automatically** to keep completed reports in local history, or disable it and save individual reports from their results page.
+
+> Clicking on "Save model settings" is required.
 
 <!-- Add Analysis settings screenshot here -->
 

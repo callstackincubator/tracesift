@@ -7,7 +7,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { getConfiguredRuntime } from "@callstack/tracesift/runtime";
-import type { TokenUsage } from "./analysis";
+import type { AnalysisModel, TokenUsage } from "./analysis";
 import { debugLog } from "./debug-log.ts";
 
 /** Error with an HTTP status so route handlers can map failures 1:1. */
@@ -124,6 +124,8 @@ export interface RunAgentResult {
   lastStopReason: string | undefined;
   /** Token usage summed over all assistant messages of the run. */
   usage: TokenUsage;
+  /** Exact provider and model selected for this run. */
+  model?: AnalysisModel;
 }
 
 /**
@@ -310,7 +312,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
                 `outputTokens=${truncate(message.usage, 120)}, text=${text.length} chars`
             );
             if (text) log(logPrefix, `assistant text: ${truncate(text, 600)}`);
-            if (message.errorMessage) log(logPrefix, `assistant error: ${truncate(message.errorMessage, 800)}`);
+            if (message.errorMessage) log(logPrefix, "assistant request failed");
             if (message.stopReason === "error" || message.stopReason === "aborted") {
               lastError = message.errorMessage ?? lastError;
             }
@@ -338,14 +340,14 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     } catch (error) {
       if (abortedByTimeout) throw new AgentError(504, timeoutMessage);
       const detail = error instanceof Error ? error.message : String(error);
-      log(logPrefix, `session.prompt threw: ${truncate(detail, 800)}`);
+      log(logPrefix, "session.prompt failed");
       if (isAuthFailure(detail)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Replace it in Analysis settings.");
+        throw new AgentError(401, "Authentication was rejected by the provider. Reconnect or update credentials in Analysis settings.");
       }
       if (isNonAsciiApiKeyFailure(detail)) {
         throw new AgentError(401, NON_ASCII_API_KEY_MESSAGE);
       }
-      throw new AgentError(502, `The analysis agent failed: ${detail}`);
+      throw new AgentError(502, "The analysis agent failed. Check provider access and try again.");
     } finally {
       clearTimeout(timer);
       unsubscribe();
@@ -362,12 +364,12 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
     }
     if (lastError) {
       if (isAuthFailure(lastError)) {
-        throw new AgentError(401, "The API key was rejected by the provider. Replace it in Analysis settings.");
+        throw new AgentError(401, "Authentication was rejected by the provider. Reconnect or update credentials in Analysis settings.");
       }
       if (isNonAsciiApiKeyFailure(lastError)) {
         throw new AgentError(401, NON_ASCII_API_KEY_MESSAGE);
       }
-      throw new AgentError(502, `The analysis agent failed: ${lastError}`);
+      throw new AgentError(502, "The analysis agent failed. Check provider access and try again.");
     }
     if (lastStopReason === "max_tokens") {
       throw new AgentError(
@@ -376,7 +378,19 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       );
     }
 
-    return { finalText, turns: turnCount, toolCalls, lastStopReason, usage: usageTotals };
+    return {
+      finalText,
+      turns: turnCount,
+      toolCalls,
+      lastStopReason,
+      usage: usageTotals,
+      model: {
+        provider: state.status.provider ?? model.provider,
+        model: state.status.model ?? model.name,
+        providerId: model.provider,
+        modelId: model.id,
+      },
+    };
   } finally {
     session?.dispose();
     releaseSlot();
