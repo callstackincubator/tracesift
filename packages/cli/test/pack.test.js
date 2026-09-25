@@ -10,9 +10,13 @@ test('packed artifact contains executable and shared exports, runnable outside r
   const temp = await mkdtemp(join(tmpdir(), 'tracesift-pack-'));
   t.after(() => rm(temp, { recursive: true, force: true }));
   const source = fileURLToPath(new URL('../', import.meta.url));
+  const repositoryReadme = fileURLToPath(new URL('../../../README.md', import.meta.url));
+  const repositoryLicense = fileURLToPath(new URL('../../../LICENSE', import.meta.url));
   const copy = join(temp, 'source');
   await mkdir(copy);
-  for (const entry of ['src', 'package.json', 'README.md']) await cp(join(source, entry), join(copy, entry), { recursive: true });
+  for (const entry of ['src', 'package.json']) await cp(join(source, entry), join(copy, entry), { recursive: true });
+  await cp(repositoryReadme, join(copy, 'README.md'));
+  await cp(repositoryLicense, join(copy, 'LICENSE'));
   // This is packaging-layout coverage, not a publishable release: real prepack requires clean Git state.
   await writeFile(join(copy, 'release.json'), JSON.stringify({
     schemaVersion: 1,
@@ -27,6 +31,8 @@ test('packed artifact contains executable and shared exports, runnable outside r
   }));
   const packed = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--cache', join(temp, 'cache')], { cwd: copy, encoding: 'utf8' }))[0];
   assert(packed.files.some(file => file.path === 'release.json'));
+  assert(packed.files.some(file => file.path === 'README.md'));
+  assert(packed.files.some(file => file.path === 'LICENSE'));
   assert(packed.files.some(file => file.path === 'src/cli.js' && (file.mode & 0o111)));
   assert(!packed.files.some(file => file.path.startsWith('test/')));
   const modules = join(temp, 'node_modules');
@@ -35,6 +41,9 @@ test('packed artifact contains executable and shared exports, runnable outside r
   await symlink(fileURLToPath(new URL('../../../node_modules/@earendil-works', import.meta.url)), join(modules, '@earendil-works'));
   await symlink(fileURLToPath(new URL('../../../node_modules/tar', import.meta.url)), join(modules, 'tar'));
   const pkg = JSON.parse(await readFile(join(modules, '@callstack/tracesift/package.json'), 'utf8'));
+  assert.equal(await readFile(join(modules, '@callstack/tracesift/README.md'), 'utf8'), await readFile(repositoryReadme, 'utf8'));
+  assert.equal(await readFile(join(modules, '@callstack/tracesift/LICENSE'), 'utf8'), await readFile(repositoryLicense, 'utf8'));
+  assert.equal(pkg.license, 'MIT');
   assert.deepEqual(Object.keys(pkg.exports).sort(), ['./bootstrap', './config', './models', './runtime']);
   const output = execFileSync(process.execPath, [join(modules, '@callstack/tracesift/src/cli.js'), '--help'], { cwd: temp, encoding: 'utf8' });
   assert.match(output, /tracesift init/);

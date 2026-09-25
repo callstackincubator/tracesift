@@ -8,7 +8,7 @@ Each bottleneck includes a button to generate or copy a handoff prompt, so your 
 
 Runs locally with OpenAI, Anthropic, or Callstack Apex. Your credentials stay with you.
 
-<img src="./assets/landing.png" alt="Landing Page"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/landing.png" alt="Landing Page"/>
 
 ## Usage
 
@@ -42,7 +42,7 @@ Starts TraceSift at `http://127.0.0.1:3000` and opens it in your browser. Press 
 
 <!-- Add startup screenshot here -->
 
-See the [CLI documentation](packages/cli/README.md) for storage, troubleshooting, and release details.
+See the [CLI documentation](packages/cli/CLI.md) for storage, troubleshooting, and release details.
 
 Contributors can run `npm run test:release:local` to verify the packaged download and startup flow against a loopback artifact server before any GitHub release. See [Contributing](CONTRIBUTING.md) for the manual browser checkpoint and Changesets release process.
 
@@ -56,13 +56,13 @@ Enable **Save analyses automatically** to keep completed reports in local histor
 
 <!-- Add Analysis settings screenshot here -->
 
-<img src="./assets/settings.png" alt="Analysis Settings"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/settings.png" alt="Analysis Settings"/>
 
 ### 2. Start a new analysis
 
 Select **Get Started**, then choose the profile type that matches the profiler you used, then click on "Analyze Profile".
 
-<img src="./assets/drop-zone.png" alt="Profile Drop Zone"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/drop-zone.png" alt="Profile Drop Zone"/>
 
 #### JavaScript CPU and Hermes profiles
 
@@ -70,7 +70,7 @@ Visualize the results sorted by slowest. Each card provides a short summary of f
 
 <!-- Add CPU/Hermes analysis screenshot here -->
 
-<img src="./assets/cpu-result.png" alt="CPU analysis"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/cpu-result.png" alt="CPU analysis"/>
 
 #### React profiles
 
@@ -78,7 +78,7 @@ Visualize the results sorted by longest to render. Each card provides a short su
 
 <!-- Add React analysis screenshot here -->
 
-<img src="./assets/react-result.png" alt="React analysis"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/react-result.png" alt="React analysis"/>
 
 ### 3. Copy the handoff
 
@@ -86,7 +86,7 @@ When the bottleneck or React issue cards appear, choose the card you want to inv
 
 <!-- Add bottleneck card and handoff screenshot here -->
 
-<img src="./assets/handoff.gif" alt="handoff"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/handoff.gif" alt="handoff"/>
 
 ### 4. Reopen an analysis
 
@@ -94,7 +94,7 @@ Open **Analyses** to browse locally saved reports, including their findings and 
 
 <!-- Add analysis history screenshot here -->
 
-<img src="./assets/analyses.gif" alt="Analysis History"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/analyses.gif" alt="Analysis History"/>
 
 ### 5. Open the guides
 
@@ -102,7 +102,7 @@ Select **Guide** for built-in, step-by-step instructions for capturing and analy
 
 <!-- Add guides screenshot here -->
 
-<img src="./assets/guides.png" alt="How to use"/>
+<img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/guides.png" alt="How to use"/>
 
 ## Development
 

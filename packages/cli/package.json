@@ -2,6 +2,7 @@
   "name": "@callstack/tracesift",
   "version": "0.2.1",
   "description": "Managed local CPU profile analysis with AI",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "tracesift": "src/cli.js"
@@ -15,7 +16,8 @@
   "files": [
     "src",
     "release.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -26,6 +28,7 @@
   ],
   "scripts": {
     "prepack": "node scripts/prepack.js",
+    "postpack": "node scripts/postpack.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
