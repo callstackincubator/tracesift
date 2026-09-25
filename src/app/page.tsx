@@ -773,9 +773,9 @@ function InspectorApp() {
         if (next.event?.type === 'auth_url' && next.event.url && oauthPopup.current && !oauthPopupNavigated.current) { oauthPopupNavigated.current = true; oauthPopup.current.location.href = next.event.url; }
         if (next.status === 'complete' && settings) {
           setModelStatus(settings);
-          oauthPopup.current?.close();
           setModelSettingsMessage({ tone: 'success', text: 'Subscription connected. Choose a model and save it to use this connection.' });
         }
+        if (next.status !== 'pending') oauthPopup.current?.close();
         // Keep the attempt pending until refreshed settings are ready. Changing it
         // earlier tears down this effect and discards the settings response.
         setOauthAttempt(next);
