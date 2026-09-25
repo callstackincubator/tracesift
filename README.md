@@ -80,13 +80,13 @@ Visualize the results sorted by longest to render. Each card provides a short su
 
 <img src="./assets/react-result.png" alt="React analysis"/>
 
-### 3. Generate a handoff prompt
+### 3. Copy the handoff
 
-When the bottleneck or React issue cards appear, choose the card you want to investigate and select **Generate Prompt**. When generation finishes, select **Copy Prompt** and hand it to your coding agent.
+When the bottleneck or React issue cards appear, choose the card you want to investigate and select **Copy Prompt**.
 
-<!-- Add bottleneck card and handoff prompt screenshot here -->
+<!-- Add bottleneck card and handoff screenshot here -->
 
-<img src="./assets/generate-prompt.gif" alt="Generate Prompt"/>
+<img src="./assets/handoff.gif" alt="handoff"/>
 
 ### 4. Reopen an analysis
 
