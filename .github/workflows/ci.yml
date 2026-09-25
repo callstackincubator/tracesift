@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  changesets:
+    name: Changesets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - name: Check affected packages have changesets
+        if: ${{ !startsWith(github.head_ref, 'changeset-release/') }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: npm exec -- changeset status --since="$BASE_SHA"
+      - name: Changesets were consumed by the version PR
+        if: ${{ startsWith(github.head_ref, 'changeset-release/') }}
+        run: echo "Skipping status check for the generated Changesets version PR."
