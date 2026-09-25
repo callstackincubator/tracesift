@@ -11,7 +11,7 @@ if (app.dependencies['@earendil-works/pi-coding-agent'] !== cli.dependencies['@e
   throw new Error('Align the CLI version and agent SDK versions in both workspace manifests before packing.');
 }
 if (app.version !== cli.version) throw new Error('Align the application and CLI versions before packing.');
-const metadataPath = process.env.TRACESIFT_RELEASE_METADATA;
+const metadataPath = process.env.TRACE_SIFT_RELEASE_METADATA;
 if (!metadataPath) throw new Error('Set TRACE_SIFT_RELEASE_METADATA to the generated artifact release metadata before packing.');
 const release = JSON.parse(readFileSync(metadataPath, 'utf8'));
 const revision = git('rev-parse', 'HEAD');
