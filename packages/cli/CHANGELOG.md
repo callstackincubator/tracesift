@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.3.0
+
+### Minor Changes
+
+- 4742119: configure using subscription from existing harnesses
+
 ## 0.2.2
 
 ### Patch Changes
