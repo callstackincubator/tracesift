@@ -112,9 +112,11 @@ try {
   const cliCopy = join(temp, 'cli');
   await mkdir(cliCopy);
   await cp(join(cliSource, 'src'), join(cliCopy, 'src'), { recursive: true });
-  await cp(join(cliSource, 'README.md'), join(cliCopy, 'README.md'));
+  await cp(join(root, 'README.md'), join(cliCopy, 'README.md'));
+  await cp(join(root, 'LICENSE'), join(cliCopy, 'LICENSE'));
   const cliPackage = JSON.parse(await readFile(join(cliSource, 'package.json'), 'utf8'));
   delete cliPackage.scripts?.prepack;
+  delete cliPackage.scripts?.postpack;
   await writeFile(join(cliCopy, 'package.json'), `${JSON.stringify(cliPackage, null, 2)}\n`);
   const release = {
     schemaVersion: 1,

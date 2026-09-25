@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertReleaseMetadata } from './release-metadata.js';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -16,4 +16,6 @@ if (!metadataPath) throw new Error('Set TRACE_SIFT_RELEASE_METADATA to the gener
 const release = JSON.parse(readFileSync(metadataPath, 'utf8'));
 const revision = git('rev-parse', 'HEAD');
 assertReleaseMetadata(release, { version: cli.version, revision });
+copyFileSync(new URL('../../../README.md', import.meta.url), new URL('../README.md', import.meta.url));
+copyFileSync(new URL('../../../LICENSE', import.meta.url), new URL('../LICENSE', import.meta.url));
 writeFileSync(new URL('../release.json', import.meta.url), JSON.stringify(release, null, 2) + '\n');
