@@ -122,8 +122,8 @@ function ProfileSnapshot({ type, active }: { type: "cpu" | "react"; active: bool
     ? "2 bottlenecks · 8.13 s total"
     : "1 issue · 16 ms budget · 4 commits · 169.74 ms peak · 1 over budget";
   const usage = isCpu
-    ? "analyzer · 6.1k tokens · 5.3k in · 711 out"
-    : "analyzer · 20k tokens · 12k in · 403 out · 8.0k cached";
+    ? "analyzer · 2.3k tokens · 1.3k in · 975 out"
+    : "analyzer · 2.6k tokens · 1.9k in · 752 out";
   const issueTitle = isCpu
     ? "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus"
     : "Expensive render work in HeavyActivityHeatmap";
