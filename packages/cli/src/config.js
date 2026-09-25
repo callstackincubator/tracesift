@@ -3,10 +3,11 @@ import { resolve, join } from 'node:path';
 import { mkdir, chmod, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
-/** @typedef {'openai' | 'anthropic' | 'apex'} ProviderId */
-/** @typedef {{version: 1, provider: ProviderId, model: string, keys: Partial<Record<ProviderId, string>>}} ModelConfig */
+/** @typedef {'openai' | 'openai-codex' | 'anthropic' | 'apex'} ProviderId */
+/** @typedef {{version: 2, provider: ProviderId, model: string, authMode: 'api_key' | 'oauth', keys: Partial<Record<'openai' | 'anthropic' | 'apex', string>>}} ModelConfig */
 
-export const providers = Object.freeze({ openai: 'OpenAI', anthropic: 'Anthropic', apex: 'Callstack' });
+export const providers = Object.freeze({ openai: 'OpenAI', 'openai-codex': 'ChatGPT Codex', anthropic: 'Anthropic', apex: 'Callstack' });
+export const keyProviders = Object.freeze(['openai', 'anthropic', 'apex']);
 /** Resolve the managed installation and configuration directory. */
 export function getHome() { return resolve(/* turbopackIgnore: true */ process.env.TRACE_SIFT_HOME || join(homedir(), '.tracesift')); }
 export async function ensureHome(home = getHome()) {
@@ -26,17 +27,23 @@ export function validateConfig(value) {
   if (keyEntries?.some(([, k]) => typeof k === 'string' && k.trim() && !isAsciiApiKey(k))) {
     throw new Error('API keys must be plain ASCII. Copy the key again from the provider dashboard; rich text often turns a hyphen into a dash. Replace it in Analysis settings.');
   }
-  if (!value || value.version !== 1 || !Object.hasOwn(providers, value.provider) || typeof value.model !== 'string' || !value.model.trim() || !keyEntries || keyEntries.some(([p, k]) => !Object.hasOwn(providers, p) || typeof k !== 'string' || !k.trim()) || !value.keys[value.provider]) {
+  const authMode = value?.version === 1 ? 'api_key' : value?.authMode;
+  if (!value || ![1, 2].includes(value.version) || !Object.hasOwn(providers, value.provider) || typeof value.model !== 'string' || !value.model.trim() || !['api_key', 'oauth'].includes(authMode) || !keyEntries || keyEntries.some(([p, k]) => !keyProviders.includes(p) || typeof k !== 'string' || !k.trim()) || (authMode === 'api_key' && !value.keys[value.provider]) || (authMode === 'oauth' && !['openai-codex', 'anthropic'].includes(value.provider))) {
     throw new Error('Invalid model configuration. Replace it in Analysis settings.');
   }
-  return { version: 1, provider: value.provider, model: value.model, keys: { ...value.keys } };
+  return { version: 2, provider: value.provider, model: value.model, authMode, keys: { ...value.keys } };
 }
 /** @returns {Promise<ModelConfig | null>} */
 export async function readConfig(home = getHome()) {
   let raw;
   try { raw = await readFile(join(home, 'config.json'), 'utf8'); }
   catch (error) { if (error.code === 'ENOENT') return null; throw new Error('Cannot read model configuration. Check permissions on config.json.'); }
-  try { return validateConfig(JSON.parse(raw)); }
+  try {
+    const parsed = JSON.parse(raw);
+    const config = validateConfig(parsed);
+    if (parsed.version === 1) await writeConfig(config, home);
+    return config;
+  }
   catch (error) {
     if (error instanceof Error && error.message.includes('plain ASCII')) throw error;
     throw new Error('Invalid model configuration. Replace it in Analysis settings.');

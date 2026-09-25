@@ -32,6 +32,13 @@ export interface TokenUsage {
   costUsd: number;
 }
 
+export interface AnalysisModel {
+  provider: string;
+  model: string;
+  providerId?: string;
+  modelId?: string;
+}
+
 export interface AnalysisRecord {
   id: string;
   createdAt: number;
@@ -44,6 +51,8 @@ export interface AnalysisRecord {
   prompts: Record<string, string>;
   /** Token usage of the analyzer agent run. */
   usage: TokenUsage;
+  /** Provider and model that produced this analysis. Missing when no model ran or for legacy records. */
+  model?: AnalysisModel;
   /** Item id -> token usage for hand-off rendering (zero for deterministic prompts). */
   promptUsage: Record<string, TokenUsage>;
   /** Durable history metadata. Raw profile uploads are deliberately never stored here. */

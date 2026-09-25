@@ -8,6 +8,7 @@ import {
   putRecord,
   getAnalysisSettings,
   saveAnalysis,
+  type AnalysisModel,
   type Hotspot,
   type TokenUsage,
 } from "@/lib/analysis";
@@ -91,6 +92,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let hotspots: Hotspot[];
   let usage: TokenUsage;
+  let model: AnalysisModel | undefined;
 
   const suppliedGroups = analysisPromptData(bottlenecks);
   const inputBreakdown = {
@@ -131,7 +133,7 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   try {
-    ({ hotspots, usage } = await analyzeCpuBottlenecks(bottlenecks, totalMs, dir, inputBreakdown));
+    ({ hotspots, usage, model } = await analyzeCpuBottlenecks(bottlenecks, totalMs, dir, inputBreakdown));
   } catch (error) {
     log(`agent run failed: ${error instanceof Error ? error.message : error}`);
     await destroyRecord(id, dir);
@@ -151,6 +153,7 @@ export async function POST(request: Request): Promise<Response> {
     reactIssues: [],
     prompts: {},
     usage,
+    model,
     promptUsage: {},
     profileType: "cpu" as const,
     title: profile.name,
@@ -165,7 +168,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   log(`analysis ${id} complete in ${Math.round((Date.now() - startedAt) / 1000)}s — ${hotspots.length} hotspots (analyzer tokens: ${usage.totalTokens}) — ` + hotspots.map((h) => `${h.title} (${h.combinedTimeMs} ms)`).join(" | "));
-  const response = { analysisId: id, profileType: "cpu", title: profile.name, saved, totalMs, hotspots: clientHotspots(hotspots), usage };
+  const response = { analysisId: id, profileType: "cpu", title: profile.name, saved, totalMs, hotspots: clientHotspots(hotspots), usage, model };
   log("SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
   return json(response);
 }

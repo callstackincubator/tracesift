@@ -10,6 +10,7 @@
     "./config": "./src/config.js",
     "./models": "./src/models.js",
     "./runtime": "./src/runtime.js",
+    "./oauth": "./src/oauth.js",
     "./bootstrap": "./src/bootstrap.js"
   },
   "files": [

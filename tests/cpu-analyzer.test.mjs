@@ -6,6 +6,7 @@ import { groupBottlenecks } from '../src/lib/bottlenecks.ts';
 import { analyzeCpuBottlenecks, CpuAnalysisError, parseCpuHotspotReport } from '../src/lib/cpu-analyzer.ts';
 
 const usage = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, costUsd: 0 };
+const model = { provider: "Anthropic", model: "Claude test" };
 
 function measuredGroups() {
   const nodes = [
@@ -36,13 +37,14 @@ test('CPU analyzer requests one bounded JSON response with no tools', async () =
         summary: ['tokenizeMarkdown accounts for the measured self time.'],
         supportingFunctionIds: [groups[0].functions[0].id],
       }] }),
-      turns: 1, toolCalls: [], lastStopReason: 'stop', usage,
+      turns: 1, toolCalls: [], lastStopReason: 'stop', usage, model,
     };
   });
   assert.equal(calls, 1);
   assert.equal(result.hotspots[0].title, 'Expensive markdown tokenization');
   assert.equal(result.hotspots[0].combinedTimeMs, 100);
   assert.deepEqual(result.usage, usage);
+  assert.deepEqual(result.model, model);
 });
 
 test('CPU report parser accepts exact and fenced JSON but rejects empty reports', () => {

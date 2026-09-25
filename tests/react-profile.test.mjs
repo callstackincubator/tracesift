@@ -16,6 +16,7 @@ const exec = promisify(execFile);
 const fixture = path.resolve('test-fixtures/react/react-native-v5.synthetic.json');
 const defaults = { limit: 10, rootID: null, componentName: null, minAvgDurationMs: 0 };
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, costUsd: 0 };
+const analysisModel = { provider: 'Anthropic', model: 'Claude test' };
 const traceSiftHome = await mkdtemp(path.join(tmpdir(), 'tracesift-react-home-'));
 process.env.TRACE_SIFT_HOME = traceSiftHome;
 test.after(() => rm(traceSiftHome, { recursive: true, force: true }));
@@ -192,12 +193,13 @@ test('mocked analyzer selects issues but cannot change identities or measurement
     assert.equal(payload.componentsByRenderCount, undefined);
     assert.equal(payload.componentsByTotalSelfDuration, undefined);
     assert.ok(payload.commits.every(commit => commit.durationMs > 16));
-    return { finalText: JSON.stringify(report), usage };
+    return { finalText: JSON.stringify(report), usage, model: analysisModel };
   });
   assert.equal(analyzed.issues.length, 1);
   assert.match(analyzed.issues[0].summary, /^Expensive render work in /);
   assert.match(analyzed.issues[0].evidence, /self time/);
   assert.deepEqual(analyzed.usage, usage);
+  assert.deepEqual(analyzed.model, analysisModel);
   const fallback = await analyzeReactProfile(measured, tmpdir(), async () => ({ finalText: '```json\n' + JSON.stringify(emptyReport) + '\n```', usage }));
   assert.equal(fallback.issues.length, 0);
   assert.equal(fallback.noIssue, true);
@@ -243,7 +245,7 @@ test('HTTP issue reports persist an analysis id for prompt generation and still 
   let seenDir;
   const handler = createReactAnalysisHandler({ extract: extractReactProfile, temporaryRoot: root, analyze: async (result, cwd) => {
     seenDir = cwd;
-    return { ...validateReactIssueReport(issueReport(result), result.evidence, 16), usage };
+    return { ...validateReactIssueReport(issueReport(result), result.evidence, 16), usage, model: analysisModel };
   } });
   const response = await handler(request(await readFile(fixture)));
   assert.equal(response.status, 200);
@@ -253,6 +255,8 @@ test('HTTP issue reports persist an analysis id for prompt generation and still 
   const record = getRecord(body.analysisId);
   assert.equal(record.reactIssues[0].id, body.issues[0].id);
   assert.equal(record.hotspots.length, 0);
+  assert.deepEqual(record.model, analysisModel);
+  assert.deepEqual(body.model, analysisModel);
   t.after(() => destroyRecord(body.analysisId));
   await assert.rejects(access(seenDir), { code: 'ENOENT' });
   assert.deepEqual(await readdir(root), []);

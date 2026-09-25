@@ -35,7 +35,7 @@ test('packed artifact contains executable and shared exports, runnable outside r
   await symlink(fileURLToPath(new URL('../../../node_modules/@earendil-works', import.meta.url)), join(modules, '@earendil-works'));
   await symlink(fileURLToPath(new URL('../../../node_modules/tar', import.meta.url)), join(modules, 'tar'));
   const pkg = JSON.parse(await readFile(join(modules, '@callstack/tracesift/package.json'), 'utf8'));
-  assert.deepEqual(Object.keys(pkg.exports).sort(), ['./bootstrap', './config', './models', './runtime']);
+  assert.deepEqual(Object.keys(pkg.exports).sort(), ['./bootstrap', './config', './models', './oauth', './runtime']);
   const output = execFileSync(process.execPath, [join(modules, '@callstack/tracesift/src/cli.js'), '--help'], { cwd: temp, encoding: 'utf8' });
   assert.match(output, /tracesift init/);
   execFileSync(process.execPath, ['--input-type=module', '-e', "import '@callstack/tracesift/config'; import '@callstack/tracesift/models'; import '@callstack/tracesift/runtime';"], { cwd: temp });

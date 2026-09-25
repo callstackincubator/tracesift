@@ -1,5 +1,6 @@
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { providers } from './config.js';
+import { providers, getHome } from './config.js';
+import { join } from 'node:path';
 export const APEX_PROVIDER_ID = 'apex';
 export const APEX_MODEL_ID = 'callstack/Apex';
 export function registerApexProvider(runtime) {
@@ -9,9 +10,7 @@ export function registerApexProvider(runtime) {
   });
 }
 export async function createModelRuntime() {
-  // Runtime keys live only in the SDK overlay; persistent PI credentials are never loaded.
-  const credentials = { read: async () => undefined, list: async () => [], modify: async (_id, fn) => fn(undefined), delete: async () => {} };
-  const runtime = await ModelRuntime.create({ credentials, modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
+  const runtime = await ModelRuntime.create({ authPath: join(getHome(), 'auth.json'), modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
   registerApexProvider(runtime);
   return runtime;
 }
