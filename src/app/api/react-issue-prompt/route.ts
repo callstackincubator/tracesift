@@ -1,4 +1,5 @@
 import { getRecord, getSavedAnalysis, updateSavedAnalysis } from "@/lib/analysis";
+import { debugLog } from "@/lib/debug-log";
 import { ZERO_REACT_USAGE } from "@/lib/react-analyzer";
 import { buildReactFixPrompt } from "@/lib/prompts";
 
@@ -7,7 +8,7 @@ export const runtime = "nodejs";
 const LOG = "api/react-issue-prompt";
 
 function log(...parts: unknown[]): void {
-  console.log(`[tracesift] ${new Date().toISOString()} [${LOG}]`, ...parts);
+  debugLog(LOG, ...parts);
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {

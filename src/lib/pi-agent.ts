@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { getConfiguredRuntime } from "@callstack/tracesift/runtime";
 import type { TokenUsage } from "./analysis";
+import { debugLog } from "./debug-log.ts";
 
 /** Error with an HTTP status so route handlers can map failures 1:1. */
 export class AgentError extends Error {
@@ -24,9 +25,9 @@ export class AgentError extends Error {
 /* Logging                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Everything the PI agent does is logged here — watch `next dev` output. */
+/** Everything the PI agent does is logged here in development. */
 function log(label: string, ...parts: unknown[]): void {
-  console.log(`[tracesift] ${new Date().toISOString()} [${label}]`, ...parts);
+  debugLog(label, ...parts);
 }
 
 function truncate(value: unknown, max = 400): string {
@@ -129,7 +130,7 @@ export interface RunAgentResult {
  * Spawns a short-lived, tool-enabled PI agent session against the configured model,
  * runs one prompt and resolves with the final assistant text.
  * Structured output is captured by the caller's custom tools.
- * Every turn, tool call and model message is logged to the server console.
+ * In development, every turn, tool call and model message is logged to the server console.
  */
 export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult> {
   const {

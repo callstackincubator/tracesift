@@ -1,11 +1,12 @@
 import { getRecord, getSavedAnalysis, updateSavedAnalysis, type TokenUsage } from "@/lib/analysis";
+import { debugLog } from "@/lib/debug-log";
 import { buildCpuFixPrompt } from "@/lib/prompts";
 
 const LOG = "api/hotspot-prompt";
 const ZERO_CPU_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 };
 
 function log(...parts: unknown[]): void {
-  console.log(`[tracesift] ${new Date().toISOString()} [${LOG}]`, ...parts);
+  debugLog(LOG, ...parts);
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {

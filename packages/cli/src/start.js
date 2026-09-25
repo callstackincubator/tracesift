@@ -63,7 +63,7 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
     }
     await unlock.trackChild(proc.child.pid);
     await waitForReady(proc, url, instance);
-    console.log(`TraceSift is ready at ${url}\nPress Ctrl+C to stop. Restarting clears analysis results.`);
+    console.log(`TraceSift is ready at ${url}\nPress Ctrl+C to stop. Restarting clears analysis results unless saved.`);
     if (open && !stopping) openBrowser(url);
     const result = await proc.done;
     if (!stopping && result.code !== 0) throw new Error(`The web server exited (${result.signal || result.code}).`);
