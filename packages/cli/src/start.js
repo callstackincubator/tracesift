@@ -1,11 +1,29 @@
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { totalmem } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { getHome, ensureHome } from './config.js';
 import { readRelease, verifyInstallation } from './install.js';
 import { acquireLock, launch } from './process.js';
+
+/**
+ * Profiles are parsed whole in memory, so the stock ~4 GB heap is the practical
+ * ceiling on profile size long before the upload limit is. Raising the cap costs
+ * nothing until it is used — V8 grows the heap on demand — but it should still
+ * stay well under physical memory so a runaway parse fails with a JavaScript
+ * out-of-memory error rather than pushing the machine into swap.
+ */
+export function heapLimitMb(total = totalmem()) {
+  const half = Math.round(total / 2 / 1024 / 1024);
+  return Math.min(8192, Math.max(2048, half));
+}
+/** A heap size the user set themselves always wins over ours. */
+export function serverNodeArgs(env = process.env) {
+  if (/--max[-_]old[-_]space[-_]size/.test(env.NODE_OPTIONS ?? '')) return [];
+  return [`--max-old-space-size=${heapLimitMb()}`];
+}
 
 export function parsePort(value = '3000') {
   if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) throw new Error('--port must be an integer between 1 and 65535.');
@@ -53,7 +71,7 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
     const instance = randomUUID();
     const url = `http://127.0.0.1:${port}`;
     const app = join(home, 'app');
-    proc = launch(process.execPath, ['--import', '@callstack/tracesift/bootstrap', join(app, 'server.js')], {
+    proc = launch(process.execPath, [...serverNodeArgs(), '--import', '@callstack/tracesift/bootstrap', join(app, 'server.js')], {
       cwd: app,
       env: { ...process.env, HOSTNAME: '127.0.0.1', PORT: String(port), TRACE_SIFT_HOME: home, TRACE_SIFT_INSTANCE: instance },
     });

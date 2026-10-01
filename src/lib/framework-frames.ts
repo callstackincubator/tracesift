@@ -12,21 +12,40 @@ import type { CdpCallFrame } from "../app/js-profiler/types";
  */
 const internalNames = new Set([
   // Work loop and root scheduling
-  "performWorkOnRoot", "performSyncWorkOnRoot", "performConcurrentWorkOnRoot",
+  "performWorkOnRoot", "performWorkOnRootViaSchedulerTask",
+  "performSyncWorkOnRoot", "performConcurrentWorkOnRoot",
   "renderRootSync", "renderRootConcurrent", "workLoopSync", "workLoopConcurrent",
   "performUnitOfWork", "prepareFreshStack", "completeRoot", "flushSyncCallbacks",
-  "flushSyncWorkOnAllRoots", "flushSyncWorkAcrossRoots_impl", "processRootScheduleInMicrotask",
+  "flushSyncWorkOnAllRoots", "flushSyncWork", "flushSyncWorkAcrossRoots",
+  "flushSyncWorkAcrossRoots_impl", "processRootScheduleInMicrotask",
   "ensureRootIsScheduled", "requestUpdateLane", "markRootUpdated", "throwException",
   // Render phase
   "beginWork", "completeWork", "completeUnitOfWork", "unwindWork", "bubbleProperties",
   "renderWithHooks", "finishRenderingHooks", "finishClassComponent", "appendAllChildren",
+  // beginWork's dispatch arms. These sit between the scheduler and the component,
+  // so leaving them out made them look like the outermost application frame and
+  // every rendered component collapsed into one "updateFunctionComponent" group.
+  "updateFunctionComponent", "updateForwardRef", "updateClassComponent",
+  "updateSimpleMemoComponent", "updateMemoComponent", "updateHostRoot", "updateHostComponent",
+  "updateContextProvider", "updateContextConsumer", "updateSuspenseComponent",
+  "updateOffscreenComponent", "updateLazyComponent", "mountLazyComponent",
+  "mountIndeterminateComponent", "attemptEarlyBailoutIfNoScheduledUpdate",
+  "checkScheduledUpdateOrContext", "bailoutOnAlreadyFinishedWork", "bailoutHooks",
   "reconcileChildren", "reconcileChildrenArray", "reconcileSingleElement",
   "createChildReconciler", "mapRemainingChildren", "updateSlot", "updateFromMap", "placeChild",
   // Commit phase
-  "commitRoot", "commitRootImpl", "commitMutationEffects", "commitMutationEffectsOnFiber",
+  "commitRoot", "commitRootImpl", "commitRootWhenReady", "commitMutationEffects",
+  "commitMutationEffectsOnFiber", "commitBeforeMutationEffects", "commitReconciliationEffects",
   "commitLayoutEffects", "commitLayoutEffectOnFiber", "commitPassiveMountEffects",
   "commitPassiveUnmountEffects", "commitPassiveMountOnFiber", "commitHookEffectListMount",
-  "commitHookEffectListUnmount", "flushPassiveEffects", "flushPassiveEffectsImpl",
+  "commitHookEffectListUnmount", "commitHookLayoutEffects", "commitHookLayoutUnmountEffects",
+  "commitHookPassiveMountEffects", "commitHookPassiveUnmountEffects",
+  "commitPassiveUnmountEffectsInsideOfDeletedTree", "commitOffscreenPassiveMountEffects",
+  "commitCachePassiveMountEffect", "commitDoubleInvokeEffectsInDEV", "commitAttachRef",
+  "commitClassCallbacks", "commitClassSnapshot", "commitHiddenCallbacks",
+  "flushPassiveEffects", "flushPassiveEffectsImpl",
+  // React 19 splits the commit into discrete flush steps driven by flushPendingEffects.
+  "flushPendingEffects", "flushMutationEffects", "flushLayoutEffects", "flushSpawnedWork",
   "safelyCallDestroy", "invokeGuardedCallback", "invokeGuardedCallbackImpl",
   // Hooks and state dispatch
   "mountState", "mountReducer", "updateState", "updateReducer", "updateReducerImpl",

@@ -11,22 +11,31 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
   totalMs: 8128,
   hotspots: [
     {
-      id: "b1", title: "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus", combinedTimeMs: 2111.536, percentOfTotal: 25.98,
+      id: "b1", title: "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus", combinedTimeMs: 2111.536, percentOfTotal: 25.98, occurrences: 1, longestRunMs: 2111.536, minFunctionTimeMs: 20,
       stack: [], frameworkOnly: false, groupingCaller: "dispatchEvent", supportingFunctionIds: ["b1-f2", "b1-f1"],
       functions: [
         { id: "b1-f2", title: "[Native] datePrototypeToLocaleStringHelper", selfTimeMs: 2050.247, percentOfGroup: 97.1, stack: [] },
         { id: "b1-f1", title: "[Native] jsonParse", selfTimeMs: 21.662, percentOfGroup: 1.03, stack: [] },
       ],
+      evidence: {
+        "b1-f2": "Costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch.",
+        "b1-f1": "Costs 21.7 ms inside getUserByUserName on the same focus-triggered path.",
+      },
       summary: ["Native datePrototypeToLocaleStringHelper costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch.", "getUserByUserName also spends 21.7 ms in native jsonParse on the same focus-triggered path."],
     },
     {
-      id: "b3", title: "Intl date formatting in a map plus localeCompare sorting during the _onChange handler", combinedTimeMs: 610.13, percentOfTotal: 7.51,
+      id: "b3", title: "Intl date formatting in a map plus localeCompare sorting during the _onChange handler", combinedTimeMs: 610.13, percentOfTotal: 7.51, occurrences: 1, longestRunMs: 610.13, minFunctionTimeMs: 20,
       stack: [], frameworkOnly: false, groupingCaller: "dispatchEvent", supportingFunctionIds: ["b3-f2", "b3-f8", "b3-f4"],
       functions: [
         { id: "b3-f2", title: "[Native] intlDateTimeFormatFormat", selfTimeMs: 418.992, percentOfGroup: 68.67, stack: [] },
         { id: "b3-f8", title: "[Native] stringPrototypeLocaleCompare", selfTimeMs: 96.039, percentOfGroup: 15.74, stack: [] },
         { id: "b3-f4", title: "[GC Young Gen]", selfTimeMs: 55.248, percentOfGroup: 9.06, stack: [] },
       ],
+      evidence: {
+        "b3-f2": "Costs 419 ms of self time via formatDate inside arrayPrototypeMap, triggered from _onChange.",
+        "b3-f8": "Adds 96 ms inside arrayPrototypeSort's comparator (_temp3) on the same _onChange path.",
+        "b3-f4": "Records 55 ms of young-gen GC under the Intl.DateTimeFormat constructor called by formatDate.",
+      },
       summary: ["Native intlDateTimeFormatFormat costs 419 ms of self time via formatDate inside arrayPrototypeMap, triggered from _onChange.", "stringPrototypeLocaleCompare adds 96 ms inside arrayPrototypeSort's comparator (_temp3) on the same _onChange path.", "55 ms of young-gen GC sits under the Intl.DateTimeFormat constructor called by formatDate, indicating allocation pressure from formatter construction."],
     },
   ],

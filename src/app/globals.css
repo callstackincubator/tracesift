@@ -350,7 +350,7 @@ button, input { font: inherit; }
   color: var(--muted-foreground);
   font-size: 13px;
   line-height: 1.45;
-  overflow-wrap: anywhere;
+  /* overflow-wrap: anywhere; */
   white-space: pre-line;
   margin-top: 20px;
 }
@@ -1231,7 +1231,9 @@ body { background: var(--background, #151419); }
   font-family: var(--font-mono, monospace);
   font-size: 11px;
 }
-.hotspot-heading-copy { display: grid; min-width: 0; }
+.hotspot-heading-copy { display: grid; min-width: 0; gap: 3px; }
+/* The burst count qualifies the headline total; it must not compete with it. */
+.hotspot-subtitle { color: var(--muted-foreground); font-size: 12px; opacity: 0.75; }
 .hotspot-head .hotspot-heading-copy strong { font-size: 15px; line-height: 1.4; }
 .hotspot-time {
   padding: 6px 9px;

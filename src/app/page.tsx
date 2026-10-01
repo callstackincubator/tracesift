@@ -16,6 +16,7 @@ import {
 
 import { HowToUseGuide } from "@/app/how-to-use";
 import type { Hotspot } from "@/lib/analysis";
+import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
 
@@ -244,29 +245,56 @@ interface HotPathRow {
 
 interface HotPathCard {
   rows: HotPathRow[];
-  footnote?: string;
+  footnotes: string[];
+}
+
+/**
+ * A caller sampled in several bursts is one bottleneck, but its total and its
+ * worst single burst answer different questions: how much work it costs overall,
+ * and how much of that lands in one block a user could feel.
+ */
+function occurrenceLabel(hotspot: Hotspot): string | undefined {
+  if (!hotspot.occurrences || hotspot.occurrences < 2) return undefined;
+  return `${hotspot.occurrences} bursts · longest ${formatMs(hotspot.longestRunMs)}`;
 }
 
 function hotspotRows(hotspot: Hotspot): HotPathCard {
+  // The name is measured; only the explanation comes from the agent. Keying the
+  // explanation by function id keeps a row's caption about that row's function.
   const ranked = hotspot.functions
-    .map((fn, index) => ({ fn, detail: hotspot.summary[index] }))
+    .map((fn) => ({ fn, detail: hotspot.evidence?.[fn.id] }))
     .sort((a, b) => b.fn.selfTimeMs - a.fn.selfTimeMs);
   const shown = ranked.slice(0, MAX_RESULT_CARDS);
   const rows: HotPathRow[] = shown.map(({ fn, detail }) => ({
     location: fn.location,
+    title: fn.title,
     ms: fn.selfTimeMs,
     percentLabel: `${Math.round(fn.percentOfGroup)}% of group`,
     barPercent: fn.percentOfGroup,
     caption: detail,
   }));
 
-  const attributedMs = ranked.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
-  const leftoverMs = hotspot.combinedTimeMs - attributedMs;
-  const footnote = leftoverMs >= 1
-    ? `+ ~${formatMs(leftoverMs)} other time not attributed to a named function`
-    : undefined;
+  // Only the top rows are published, so the group's own named total has to come
+  // from the server; subtracting the shown rows alone reported measured functions
+  // as unattributed time.
+  const shownMs = shown.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
+  const namedMs = hotspot.namedTimeMs ?? ranked.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
+  const unlistedCount = (hotspot.namedFunctionCount ?? ranked.length) - shown.length;
+  const unlistedMs = Math.max(0, namedMs - shownMs);
+  const unnamedMs = Math.max(0, hotspot.combinedTimeMs - namedMs);
 
-  return { rows, footnote };
+  const footnotes: string[] = [];
+  if (unlistedCount > 0 && unlistedMs >= 1) {
+    footnotes.push(`+ ~${formatMs(unlistedMs)} across ${unlistedCount} further measured function${unlistedCount === 1 ? "" : "s"}`);
+  }
+  // The naming threshold scales with the profile's sampling interval, so it has
+  // to be read off the group rather than restated as the group-ranking constant.
+  if (unnamedMs >= 1) {
+    const cutoff = hotspot.minFunctionTimeMs ?? MIN_HOTSPOT_TIME_MS;
+    footnotes.push(`+ ~${formatMs(unnamedMs)} spread thinly across functions under ${formatMs(cutoff)} each`);
+  }
+
+  return { rows, footnotes };
 }
 
 function reactIssueRows(issue: ReactIssue): HotPathCard {
@@ -279,18 +307,19 @@ function reactIssueRows(issue: ReactIssue): HotPathCard {
       barPercent: component.percentOfCommit,
       caption: component.evidence.trim() || undefined,
     })),
-    footnote: remainingMs >= 1
-      ? `+ ~${formatMs(remainingMs)} other commit work not represented by these findings`
-      : undefined,
+    footnotes: remainingMs >= 1
+      ? [`+ ~${formatMs(remainingMs)} other commit work not represented by these findings`]
+      : [],
   };
 }
 
 function AnalysisResultCard({
   rank,
   title,
+  subtitle,
   timeLabel,
   rows,
-  footnote,
+  footnotes,
   loading,
   error,
   copied,
@@ -299,9 +328,10 @@ function AnalysisResultCard({
 }: {
   rank: number;
   title: string;
+  subtitle?: string;
   timeLabel: string;
   rows: HotPathRow[];
-  footnote?: string;
+  footnotes: string[];
   loading: boolean;
   error?: string;
   copied: boolean;
@@ -314,6 +344,7 @@ function AnalysisResultCard({
         <span className="hotspot-rank">#{rank}</span>
         <div className="hotspot-heading-copy">
           <strong>{title}</strong>
+          {subtitle ? <span className="hotspot-subtitle">{subtitle}</span> : null}
         </div>
         <span className="hotspot-time">{timeLabel}</span>
       </div>
@@ -342,7 +373,7 @@ function AnalysisResultCard({
               {row.caption ? <p className="row-caption">{row.caption}</p> : null}
             </div>
           ))}
-          {footnote ? <p className="hot-path-footnote">{footnote}</p> : null}
+          {footnotes.map((footnote) => <p className="hot-path-footnote" key={footnote}>{footnote}</p>)}
         </div>
       )}
       <div className="hotspot-footer">
@@ -1191,7 +1222,7 @@ function InspectorApp() {
 
             <div className="hotspot-list">
               {reactIssueCards.map((issue, index) => {
-                const { rows, footnote } = reactIssueRows(issue);
+                const { rows, footnotes } = reactIssueRows(issue);
                 return (
                   <AnalysisResultCard
                     key={issue.id}
@@ -1199,7 +1230,7 @@ function InspectorApp() {
                     title={issue.summary}
                     timeLabel={`${issue.severity} · commit ${formatMs(issue.commit.durationMs)}`}
                     rows={rows}
-                    footnote={footnote}
+                    footnotes={footnotes}
                     loading={promptLoadingId === issue.id}
                     error={promptErrors[issue.id]}
                     copied={copiedId === issue.id}
@@ -1236,15 +1267,16 @@ function InspectorApp() {
 
             <div className="hotspot-list">
               {hotspots.map((hotspot, index) => {
-                const { rows, footnote } = hotspotRows(hotspot);
+                const { rows, footnotes } = hotspotRows(hotspot);
                 return (
                 <AnalysisResultCard
                   key={hotspot.id}
                   rank={index + 1}
                   title={hotspot.title}
                   timeLabel={formatMs(hotspot.combinedTimeMs)}
+                  subtitle={occurrenceLabel(hotspot)}
                   rows={rows}
-                  footnote={footnote}
+                  footnotes={footnotes}
                   loading={promptLoadingId === hotspot.id}
                   error={promptErrors[hotspot.id]}
                   copied={copiedId === hotspot.id}

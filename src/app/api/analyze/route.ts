@@ -3,8 +3,9 @@ import {
   clientHotspots,
   createAnalysisFiles,
   destroyRecord,
-  MAX_UPLOAD_BYTES,
+  maxUploadBytes,
   PROFILE_FILE_NAME,
+  uploadTooLargeMessage,
   putRecord,
   getAnalysisSettings,
   saveAnalysis,
@@ -43,9 +44,9 @@ export async function POST(request: Request): Promise<Response> {
     log("rejected: no profile file in request");
     return json({ error: "A CPU profile file is required." }, 400);
   }
-  if (profile.size > MAX_UPLOAD_BYTES) {
+  if (profile.size > maxUploadBytes()) {
     log(`rejected: profile too large (${profile.size} bytes)`);
-    return json({ error: "The profile file is too large (max 25 MB)." }, 413);
+    return json({ error: uploadTooLargeMessage() }, 413);
   }
 
   log(`request received: profile="${profile.name}" (${profile.size} bytes)`);

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MAX_UPLOAD_BYTES, putRecord, getAnalysisSettings, saveAnalysis } from "./analysis.ts";
+import { maxUploadBytes, uploadTooLargeMessage, putRecord, getAnalysisSettings, saveAnalysis } from "./analysis.ts";
 import { parseReactProfileOptions, ReactProfileError } from "./react-profile.ts";
 import type { extractReactProfile } from "./react-profile.ts";
 import { requireReactEvidence, withinReactBudget, noReactIssues, ZERO_REACT_USAGE, discardSubBudgetReactIssues, type analyzeReactProfile } from "./react-analyzer.ts";
@@ -15,6 +15,12 @@ interface Dependencies {
   temporaryRoot?: string;
 }
 
+/** The profiler re-parses the whole profile, so the budget has to grow with it. */
+function extractionTimeoutMs(bytes: number): number {
+  const perMegabyteMs = 1_000;
+  return Math.min(600_000, 30_000 + Math.ceil(bytes / (1024 * 1024)) * perMegabyteMs);
+}
+
 /** Dependencies keep HTTP/error/cleanup tests independent of a live model. */
 export function createReactAnalysisHandler(dependencies: Dependencies) {
   return async function POST(request: Request): Promise<Response> {
@@ -25,14 +31,20 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       catch { throw new ReactProfileError(400, "Expected a multipart form containing the profile file."); }
       const profile = form.get("profile");
       if (!(profile instanceof File) || !profile.size) throw new ReactProfileError(400, "A React profile file is required.");
-      if (profile.size > MAX_UPLOAD_BYTES) throw new ReactProfileError(413, "The profile file is too large (max 25 MB).");
+      if (profile.size > maxUploadBytes()) throw new ReactProfileError(413, uploadTooLargeMessage());
       const options = parseReactProfileOptions(form);
       const frameBudgetMs = parseFrameBudget(form);
       if (request.signal.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");
       dir = await mkdtemp(path.join(dependencies.temporaryRoot ?? tmpdir(), "tracesift-react-"));
       const file = path.join(dir, "profile.json");
       await writeFile(file, Buffer.from(await profile.arrayBuffer()));
-      const result = await dependencies.extract(file, options, request.signal, { analysisEvidence: true, maxBuffer: 8 * 1024 * 1024 });
+      const result = await dependencies.extract(file, options, request.signal, {
+        analysisEvidence: true,
+        // Evidence is a reduction of the profile, so the upload size is a generous
+        // upper bound; both scale with the input so large profiles are not cut off.
+        maxBuffer: Math.max(8 * 1024 * 1024, profile.size),
+        timeoutMs: extractionTimeoutMs(profile.size),
+      });
       if (request.signal.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");
       const evidence = requireReactEvidence(result);
       const analysis = withinReactBudget(evidence, frameBudgetMs)

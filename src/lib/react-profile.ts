@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { getHeapStatistics } from "node:v8";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { validateReactEvidence, type ReactEvidence } from "./react-evidence.ts";
@@ -124,6 +125,11 @@ export function validateReactProfileResult(raw: unknown, options: ReactProfileOp
   return result;
 }
 
+/** Mirror this process's heap ceiling so the child is sized by the same policy. */
+function inheritedHeapLimitMb(): number {
+  return Math.round(getHeapStatistics().heap_size_limit / 1024 / 1024);
+}
+
 /** Resolve only; importing this package would execute its CLI in the server. */
 export function resolveReactProfilerCli(): string {
   return createRequire(path.join(process.cwd(), "package.json")).resolve("agent-react-devtools");
@@ -134,7 +140,9 @@ export async function extractReactProfile(
   execution: { cliPath?: string; timeoutMs?: number; maxBuffer?: number; analysisEvidence?: boolean } = {},
 ): Promise<ReactProfileResult> {
   if (signal?.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");
-  const args = [execution.cliPath ?? resolveReactProfilerCli(), "profile", "slow", "--file", file, "--json", "--limit", String(options.limit)];
+  // The profiler parses the whole profile too, so it needs the same heap as this
+  // process rather than the stock default a fresh child would otherwise get.
+  const args = [`--max-old-space-size=${inheritedHeapLimitMb()}`, execution.cliPath ?? resolveReactProfilerCli(), "profile", "slow", "--file", file, "--json", "--limit", String(options.limit)];
   if (execution.analysisEvidence) args.push("--analysis-evidence");
   if (options.rootID !== null) args.push("--root-id", String(options.rootID));
   if (options.componentName !== null) args.push(`--component-name=${options.componentName}`);

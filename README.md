@@ -75,6 +75,8 @@ Select **Get Started**, then choose the profile type that matches the profiler y
 
 <img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/drop-zone.png" alt="Profile Drop Zone"/>
 
+Uploads are capped at 512 MB, which is the largest profile Node can still parse in one piece. Set `TRACE_SIFT_MAX_UPLOAD_MB` before starting TraceSift to lower that cap (values above the ceiling are clamped). TraceSift sizes its own heap for large profiles — up to 8 GB, and never more than half of physical memory. Setting `--max-old-space-size` yourself through `NODE_OPTIONS` overrides that.
+
 #### JavaScript CPU and Hermes profiles
 
 Visualize the results sorted by slowest. Each card provides a short summary of from where the issue originates and its impact on the recorded flow.
