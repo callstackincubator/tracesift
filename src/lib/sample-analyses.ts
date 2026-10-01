@@ -1,6 +1,12 @@
 import type { AnalysisRecord } from "./analysis";
 
-/** Bundled reports are static, sanitized UI data — never an uploaded profile. */
+/**
+ * Bundled reports are static, sanitized UI data — never an uploaded profile.
+ * The CPU sample is genuine output: a profile shaped like the scenario it
+ * describes, run through the same task extraction and card selection an upload
+ * goes through, with every frame resolved by the classification rules so no
+ * model was involved in producing it.
+ */
 export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
   id: "sample-cpu-hermes-date-formatting",
   createdAt: 0,
@@ -9,37 +15,448 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
   saved: false,
   dir: "",
   totalMs: 8128,
-  hotspots: [
-    {
-      id: "b1", title: "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus", combinedTimeMs: 2111.536, percentOfTotal: 25.98, occurrences: 1, longestRunMs: 2111.536, minFunctionTimeMs: 20,
-      stack: [], frameworkOnly: false, groupingCaller: "dispatchEvent", supportingFunctionIds: ["b1-f2", "b1-f1"],
-      functions: [
-        { id: "b1-f2", title: "[Native] datePrototypeToLocaleStringHelper", selfTimeMs: 2050.247, percentOfGroup: 97.1, stack: [] },
-        { id: "b1-f1", title: "[Native] jsonParse", selfTimeMs: 21.662, percentOfGroup: 1.03, stack: [] },
-      ],
-      evidence: {
-        "b1-f2": "Costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch.",
-        "b1-f1": "Costs 21.7 ms inside getUserByUserName on the same focus-triggered path.",
+  // Task boundaries the tracer measured, so the durations and start offsets
+  // below are wall clock rather than a sum over scattered calls.
+  taskCards: {
+    "cards": [
+      {
+        "id": "task-0",
+        "taskIndex": 0,
+        "startMs": 1201,
+        "durationMs": 2111,
+        "boundaries": "measured",
+        "headline": "_onFocus — a 2111 ms task 1.20 s into the recording",
+        "percentOfProfile": 25.97,
+        "boundaryFrames": [
+          {
+            "name": "_onFocus",
+            "location": "app/screens/UserList.js:142:1",
+            "nodeId": "0.0",
+            "totalMs": 2111,
+            "selfMs": 0.4,
+            "invocations": 1,
+            "longestCallMs": 2111,
+            "shapeText": "ran once in this task · 2111 ms total"
+          }
+        ],
+        "culprits": [
+          {
+            "name": "datePrototypeToLocaleStringHelper",
+            "frameClass": "native",
+            "selfMs": 1568,
+            "totalMs": 1568,
+            "invocations": 8,
+            "longestCallMs": 196,
+            "shapeText": "ran 8 times in this task · 1.57 s total · longest single call 196 ms",
+            "nodeId": "0.0.0.0.0.0",
+            "reachedVia": [
+              "_onFocus (app/screens/UserList.js:142:1)",
+              "getUserByUserName (app/screens/UserList.js:89:1)",
+              "arrayPrototypeSort (native array.js:1:1)",
+              "_compareUsers (app/screens/UserList.js:95:1)",
+              "datePrototypeToLocaleStringHelper (native date.js:1:1)"
+            ],
+            "hotPath": [
+              "datePrototypeToLocaleStringHelper (native date.js:1:1)"
+            ]
+          },
+          {
+            "name": "jsonParse",
+            "frameClass": "native",
+            "selfMs": 420,
+            "totalMs": 420,
+            "invocations": 1,
+            "longestCallMs": 420,
+            "shapeText": "ran once in this task · 420 ms total",
+            "nodeId": "0.0.0.1",
+            "reachedVia": [
+              "_onFocus (app/screens/UserList.js:142:1)",
+              "getUserByUserName (app/screens/UserList.js:89:1)",
+              "jsonParse (native json.js:1:1)"
+            ],
+            "hotPath": [
+              "jsonParse (native json.js:1:1)"
+            ]
+          },
+          {
+            "name": "getUserByUserName",
+            "location": "app/screens/UserList.js:89:1",
+            "frameClass": "app",
+            "selfMs": 81,
+            "totalMs": 2111,
+            "invocations": 1,
+            "longestCallMs": 2111,
+            "shapeText": "ran once in this task · 2.11 s total",
+            "nodeId": "0.0.0",
+            "reachedVia": [
+              "_onFocus (app/screens/UserList.js:142:1)",
+              "getUserByUserName (app/screens/UserList.js:89:1)"
+            ],
+            "hotPath": [
+              "getUserByUserName (app/screens/UserList.js:89:1)",
+              "arrayPrototypeSort (native array.js:1:1)",
+              "_compareUsers (app/screens/UserList.js:95:1)",
+              "datePrototypeToLocaleStringHelper (native date.js:1:1)"
+            ]
+          }
+        ],
+        "tree": {
+          "id": "0",
+          "name": "(root)",
+          "frameClass": "native",
+          "totalMs": 2111,
+          "selfMs": 0,
+          "invocations": 1,
+          "children": [
+            {
+              "id": "0.0",
+              "name": "_onFocus",
+              "location": "app/screens/UserList.js:142:1",
+              "frameClass": "app",
+              "totalMs": 2111,
+              "selfMs": 0,
+              "invocations": 1,
+              "children": [
+                {
+                  "id": "0.0.0",
+                  "name": "getUserByUserName",
+                  "location": "app/screens/UserList.js:89:1",
+                  "frameClass": "app",
+                  "totalMs": 2111,
+                  "selfMs": 81,
+                  "invocations": 1,
+                  "children": [
+                    {
+                      "id": "0.0.0.0",
+                      "name": "arrayPrototypeSort",
+                      "frameClass": "native",
+                      "totalMs": 1610,
+                      "selfMs": 42,
+                      "invocations": 1,
+                      "children": [
+                        {
+                          "id": "0.0.0.0.0",
+                          "name": "_compareUsers",
+                          "location": "app/screens/UserList.js:95:1",
+                          "frameClass": "app",
+                          "totalMs": 1568,
+                          "selfMs": 0,
+                          "invocations": 8,
+                          "children": [
+                            {
+                              "id": "0.0.0.0.0.0",
+                              "name": "datePrototypeToLocaleStringHelper",
+                              "frameClass": "native",
+                              "totalMs": 1568,
+                              "selfMs": 1568,
+                              "invocations": 8,
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "0.0.0.1",
+                      "name": "jsonParse",
+                      "frameClass": "native",
+                      "totalMs": 420,
+                      "selfMs": 420,
+                      "invocations": 1,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "subtreeFunctionCount": 6,
+        "confidence": "ok",
+        "segments": [
+          {
+            "id": "0.0.0.0.0.0",
+            "title": "datePrototypeToLocaleStringHelper",
+            "headline": "datePrototypeToLocaleStringHelper spent 1568 ms in total time",
+            "totalMs": 1568,
+            "selfMs": 1568,
+            "percentOfProfile": 74.28,
+            "callSites": 1,
+            "nameInherited": false,
+            "selfShape": "body",
+            "frameworkOnly": false,
+            "confidence": "ok",
+            "reachedVia": [
+              "_onFocus (app/screens/UserList.js:142:1)",
+              "getUserByUserName (app/screens/UserList.js:89:1)",
+              "arrayPrototypeSort (native array.js:1:1)",
+              "_compareUsers (app/screens/UserList.js:95:1)",
+              "datePrototypeToLocaleStringHelper (native date.js:1:1)"
+            ],
+            "hotPath": [
+              "datePrototypeToLocaleStringHelper (native date.js:1:1)"
+            ],
+            "highlights": [],
+            "children": [],
+            "repeated": [],
+            "subtreeFunctionCount": 0
+          },
+          {
+            "id": "0.0.0.1",
+            "title": "jsonParse",
+            "headline": "jsonParse spent 420 ms in total time",
+            "totalMs": 420,
+            "selfMs": 420,
+            "percentOfProfile": 19.9,
+            "callSites": 1,
+            "nameInherited": false,
+            "selfShape": "body",
+            "frameworkOnly": false,
+            "confidence": "ok",
+            "reachedVia": [
+              "_onFocus (app/screens/UserList.js:142:1)",
+              "getUserByUserName (app/screens/UserList.js:89:1)",
+              "jsonParse (native json.js:1:1)"
+            ],
+            "hotPath": [
+              "jsonParse (native json.js:1:1)"
+            ],
+            "highlights": [],
+            "children": [],
+            "repeated": [],
+            "subtreeFunctionCount": 0
+          }
+        ]
       },
-      summary: ["Native datePrototypeToLocaleStringHelper costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch.", "getUserByUserName also spends 21.7 ms in native jsonParse on the same focus-triggered path."],
-    },
-    {
-      id: "b3", title: "Intl date formatting in a map plus localeCompare sorting during the _onChange handler", combinedTimeMs: 610.13, percentOfTotal: 7.51, occurrences: 1, longestRunMs: 610.13, minFunctionTimeMs: 20,
-      stack: [], frameworkOnly: false, groupingCaller: "dispatchEvent", supportingFunctionIds: ["b3-f2", "b3-f8", "b3-f4"],
-      functions: [
-        { id: "b3-f2", title: "[Native] intlDateTimeFormatFormat", selfTimeMs: 418.992, percentOfGroup: 68.67, stack: [] },
-        { id: "b3-f8", title: "[Native] stringPrototypeLocaleCompare", selfTimeMs: 96.039, percentOfGroup: 15.74, stack: [] },
-        { id: "b3-f4", title: "[GC Young Gen]", selfTimeMs: 55.248, percentOfGroup: 9.06, stack: [] },
-      ],
-      evidence: {
-        "b3-f2": "Costs 419 ms of self time via formatDate inside arrayPrototypeMap, triggered from _onChange.",
-        "b3-f8": "Adds 96 ms inside arrayPrototypeSort's comparator (_temp3) on the same _onChange path.",
-        "b3-f4": "Records 55 ms of young-gen GC under the Intl.DateTimeFormat constructor called by formatDate.",
-      },
-      summary: ["Native intlDateTimeFormatFormat costs 419 ms of self time via formatDate inside arrayPrototypeMap, triggered from _onChange.", "stringPrototypeLocaleCompare adds 96 ms inside arrayPrototypeSort's comparator (_temp3) on the same _onChange path.", "55 ms of young-gen GC sits under the Intl.DateTimeFormat constructor called by formatDate, indicating allocation pressure from formatter construction."],
-    },
-  ],
-  reactIssues: [], prompts: {}, usage: { input: 5341, output: 711, cacheRead: 0, cacheWrite: 0, totalTokens: 6052, costUsd: 0 }, promptUsage: {},
+      {
+        "id": "task-1",
+        "taskIndex": 1,
+        "startMs": 5001,
+        "durationMs": 655,
+        "boundaries": "measured",
+        "headline": "_onChange — a 655 ms task 5.00 s into the recording",
+        "percentOfProfile": 8.06,
+        "boundaryFrames": [
+          {
+            "name": "_onChange",
+            "location": "app/screens/UserList.js:168:1",
+            "nodeId": "0.0",
+            "totalMs": 655,
+            "selfMs": 0.2,
+            "invocations": 1,
+            "longestCallMs": 655,
+            "shapeText": "ran once in this task · 655 ms total"
+          }
+        ],
+        "culprits": [
+          {
+            "name": "intlDateTimeFormatFormat",
+            "frameClass": "native",
+            "selfMs": 420,
+            "totalMs": 420,
+            "invocations": 12,
+            "longestCallMs": 35,
+            "shapeText": "ran 12 times in this task · 420 ms total · longest single call 35 ms",
+            "nodeId": "0.0.0.0.0",
+            "reachedVia": [
+              "_onChange (app/screens/UserList.js:168:1)",
+              "arrayPrototypeMap (native array.js:1:1)",
+              "formatDate (app/lib/format.js:13:1)",
+              "intlDateTimeFormatFormat (native date.js:1:1)"
+            ],
+            "hotPath": [
+              "intlDateTimeFormatFormat (native date.js:1:1)"
+            ]
+          },
+          {
+            "name": "stringPrototypeLocaleCompare",
+            "frameClass": "native",
+            "selfMs": 75,
+            "totalMs": 75,
+            "invocations": 1,
+            "longestCallMs": 75,
+            "shapeText": "ran once in this task · 75 ms total",
+            "nodeId": "0.0.1.0.0",
+            "reachedVia": [
+              "_onChange (app/screens/UserList.js:168:1)",
+              "arrayPrototypeSort (native array.js:1:1)",
+              "_temp3 (app/screens/UserList.js:174:1)",
+              "stringPrototypeLocaleCompare (native string.js:1:1)"
+            ],
+            "hotPath": [
+              "stringPrototypeLocaleCompare (native string.js:1:1)"
+            ]
+          },
+          {
+            "name": "formatDate",
+            "location": "app/lib/format.js:13:1",
+            "frameClass": "app",
+            "selfMs": 60,
+            "totalMs": 535,
+            "invocations": 1,
+            "longestCallMs": 535,
+            "shapeText": "ran once in this task · 535 ms total",
+            "nodeId": "0.0.0.0",
+            "reachedVia": [
+              "_onChange (app/screens/UserList.js:168:1)",
+              "arrayPrototypeMap (native array.js:1:1)",
+              "formatDate (app/lib/format.js:13:1)"
+            ],
+            "hotPath": [
+              "formatDate (app/lib/format.js:13:1)",
+              "intlDateTimeFormatFormat (native date.js:1:1)"
+            ]
+          },
+          {
+            "name": "intlDateTimeFormatConstructor",
+            "frameClass": "native",
+            "selfMs": 55,
+            "totalMs": 55,
+            "invocations": 1,
+            "longestCallMs": 55,
+            "shapeText": "ran once in this task · 55 ms total",
+            "nodeId": "0.0.0.0.1",
+            "reachedVia": [
+              "_onChange (app/screens/UserList.js:168:1)",
+              "arrayPrototypeMap (native array.js:1:1)",
+              "formatDate (app/lib/format.js:13:1)",
+              "intlDateTimeFormatConstructor (native date.js:1:1)"
+            ],
+            "hotPath": [
+              "intlDateTimeFormatConstructor (native date.js:1:1)"
+            ]
+          },
+          {
+            "name": "_temp3",
+            "location": "app/screens/UserList.js:174:1",
+            "frameClass": "app",
+            "selfMs": 45,
+            "totalMs": 120,
+            "invocations": 1,
+            "longestCallMs": 120,
+            "shapeText": "ran once in this task · 120 ms total",
+            "nodeId": "0.0.1.0",
+            "reachedVia": [
+              "_onChange (app/screens/UserList.js:168:1)",
+              "arrayPrototypeSort (native array.js:1:1)",
+              "_temp3 (app/screens/UserList.js:174:1)"
+            ],
+            "hotPath": [
+              "_temp3 (app/screens/UserList.js:174:1)",
+              "stringPrototypeLocaleCompare (native string.js:1:1)"
+            ]
+          }
+        ],
+        "tree": {
+          "id": "0",
+          "name": "(root)",
+          "frameClass": "native",
+          "totalMs": 655,
+          "selfMs": 0,
+          "invocations": 1,
+          "children": [
+            {
+              "id": "0.0",
+              "name": "_onChange",
+              "location": "app/screens/UserList.js:168:1",
+              "frameClass": "app",
+              "totalMs": 655,
+              "selfMs": 0,
+              "invocations": 1,
+              "children": [
+                {
+                  "id": "0.0.0",
+                  "name": "arrayPrototypeMap",
+                  "frameClass": "native",
+                  "totalMs": 535,
+                  "selfMs": 0,
+                  "invocations": 1,
+                  "children": [
+                    {
+                      "id": "0.0.0.0",
+                      "name": "formatDate",
+                      "location": "app/lib/format.js:13:1",
+                      "frameClass": "app",
+                      "totalMs": 535,
+                      "selfMs": 60,
+                      "invocations": 1,
+                      "children": [
+                        {
+                          "id": "0.0.0.0.0",
+                          "name": "intlDateTimeFormatFormat",
+                          "frameClass": "native",
+                          "totalMs": 420,
+                          "selfMs": 420,
+                          "invocations": 12,
+                          "children": []
+                        },
+                        {
+                          "id": "0.0.0.0.1",
+                          "name": "intlDateTimeFormatConstructor",
+                          "frameClass": "native",
+                          "totalMs": 55,
+                          "selfMs": 55,
+                          "invocations": 1,
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "0.0.1",
+                  "name": "arrayPrototypeSort",
+                  "frameClass": "native",
+                  "totalMs": 120,
+                  "selfMs": 0,
+                  "invocations": 1,
+                  "children": [
+                    {
+                      "id": "0.0.1.0",
+                      "name": "_temp3",
+                      "location": "app/screens/UserList.js:174:1",
+                      "frameClass": "app",
+                      "totalMs": 120,
+                      "selfMs": 45,
+                      "invocations": 1,
+                      "children": [
+                        {
+                          "id": "0.0.1.0.0",
+                          "name": "stringPrototypeLocaleCompare",
+                          "frameClass": "native",
+                          "totalMs": 75,
+                          "selfMs": 75,
+                          "invocations": 1,
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "subtreeFunctionCount": 8,
+        "confidence": "ok"
+      }
+    ],
+    "boundaries": "measured",
+    "noLongTasks": false,
+    "classesDegraded": false,
+    "durationMs": 8128,
+    "taskCount": 2,
+    "omittedTaskCount": 0,
+    "omittedTaskMs": 0
+  },
+  cards: [],
+  hotspots: [],
+  reactIssues: [],
+  prompts: {},
+  // Every frame here resolved from the classification rules, so no model ran
+  // and nothing was spent producing this report.
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 },
+  promptUsage: {},
 };
 
 export const REACT_SAMPLE_ANALYSIS: AnalysisRecord = {

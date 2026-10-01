@@ -6,6 +6,10 @@
 
 /** `location` may be a bare path or a full `path:line:column` label. */
 export function isReadableSourcePath(location: string): boolean {
+  // V8 and Hermes label built-ins `native array.js`, `native date.js` and the
+  // like. Those end in `.js` and carry no scheme, so the tests below would
+  // otherwise accept them as a file a developer could open.
+  if (/^native\s/i.test(location)) return false;
   const readable = !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(location) || /^[a-z]:[\\/]/i.test(location);
   return readable && /\.(?:[cm]?[jt]sx?|vue|svelte)(?::|$)/i.test(location);
 }

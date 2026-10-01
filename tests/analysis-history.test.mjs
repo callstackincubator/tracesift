@@ -38,8 +38,23 @@ test("bundled CPU sample has stable, sanitized UI metadata", () => {
   assert.equal(CPU_SAMPLE_ANALYSIS.profileType, "cpu");
   assert.equal(CPU_SAMPLE_ANALYSIS.title, "Hermes CPU profile sample");
   assert.equal(CPU_SAMPLE_ANALYSIS.dir, "");
-  assert.equal(CPU_SAMPLE_ANALYSIS.hotspots.length, 2);
-  assert.equal(CPU_SAMPLE_ANALYSIS.usage.totalTokens, 6052);
+  assert.equal(CPU_SAMPLE_ANALYSIS.taskCards.cards.length, 2);
+  // Every frame in the sample resolved from the classification rules, so the
+  // bundled report must not imply a model ran to produce it.
+  assert.equal(CPU_SAMPLE_ANALYSIS.usage.totalTokens, 0);
+  assert.equal(CPU_SAMPLE_ANALYSIS.taskCards.classesDegraded, false);
+  for (const card of CPU_SAMPLE_ANALYSIS.taskCards.cards) {
+    assert.equal(card.boundaries, "measured");
+    assert.match(card.headline, / a \d+ ms task .* into the recording$/);
+    assert.ok(card.durationMs > 0 && card.startMs >= 0);
+    // Self time inside a task is a partition of it, so the culprits can never
+    // claim more milliseconds than the task lasted.
+    const self = card.culprits.reduce((sum, culprit) => sum + culprit.selfMs, 0);
+    assert.ok(self <= card.durationMs, `${card.id} culprits claimed ${self} of ${card.durationMs} ms`);
+  }
+  // Tasks are disjoint, which is the property the node-based engine could not provide.
+  const share = CPU_SAMPLE_ANALYSIS.taskCards.cards.reduce((sum, card) => sum + card.percentOfProfile, 0);
+  assert.ok(share <= 100, `sample task shares summed to ${share}`);
 });
 
 test("bundled React sample has stable report metadata and its recorded issue", () => {

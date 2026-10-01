@@ -15,7 +15,12 @@ import {
 } from "@rozenite/ui";
 
 import { HowToUseGuide } from "@/app/how-to-use";
+import { ThemeGate } from "@/app/theme-gate";
 import type { Hotspot } from "@/lib/analysis";
+import type { ProfileCard } from "@/lib/profile-cards";
+import { storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
+import type { TaskCard, TaskCardSet } from "@/lib/task-cards";
+import { formatMs } from "@/lib/format";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
@@ -31,11 +36,14 @@ interface AnalyzeResponse {
   saved?: boolean;
   totalMs: number;
   hotspots: Hotspot[];
+  taskCards?: TaskCardSet;
+  cards?: ProfileCard[];
+  callCountIsExact?: boolean;
   usage?: TokenUsage;
   model?: AnalysisModel;
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
-interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
+interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; taskCards?: TaskCardSet; cards?: ProfileCard[]; callCountIsExact?: boolean; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
 interface AuthMethod { type: 'api_key' | 'oauth'; label: string; configured: boolean; subscription: boolean; }
 interface ModelProvider { id: string; name: string; authMethods: AuthMethod[]; models: Array<{ id: string; name: string }>; }
 interface ModelSettings {
@@ -78,16 +86,6 @@ const acceptedFiles: Record<UploadKind, string> = {
   reactProfile: ".json,application/json",
 };
 
-function formatMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  const seconds = ms / 1000;
-  if (seconds < 10) return `${seconds.toFixed(2)} s`;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes} m ${Math.round(seconds % 60)} s`;
-}
-
 function formatTokens(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens <= 0) return "0";
   if (tokens < 1000) return `${Math.round(tokens)}`;
@@ -126,7 +124,7 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" }) {
+function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" }) {
   const paths = {
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.65 1 .3.27.68.41 1.08.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -134,6 +132,7 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
     close: <path d="m6 6 12 12M18 6 6 18" />,
     arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
     back: <path d="M19 12H5m6 6-6-6 6-6" />,
+    explore: <><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
   };
   return <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]}</svg>;
 }
@@ -239,8 +238,19 @@ interface HotPathRow {
   title?: string;
   ms?: number;
   percentLabel?: string;
+  /** The second of a row's two figures, e.g. self time beside total time. */
+  secondaryLabel?: string;
   barPercent?: number;
   caption?: string;
+  /**
+   * How this row's time was distributed over separate calls. The single most
+   * actionable line on a task card: one 424 ms call is an algorithm to fix and
+   * 54 calls of 8 ms is a call site to stop hitting, and a total alone renders
+   * both identically.
+   */
+  shape?: string;
+  /** Opens Explore on this row's frame inside the task. */
+  onFocus?: () => void;
 }
 
 interface HotPathCard {
@@ -297,6 +307,103 @@ function hotspotRows(hotspot: Hotspot): HotPathCard {
   return { rows, footnotes };
 }
 
+/**
+ * A card's "Main highlights": the heaviest named work inside the parent's
+ * subtree, each with both of its times. Inclusive time is what ranks them —
+ * self time alone cannot say that a 240 ms helper sits under this parent.
+ */
+function cardRows(card: ProfileCard): HotPathCard {
+  const rows: HotPathRow[] = card.highlights.map((highlight) => ({
+    location: highlight.location,
+    title: highlight.name,
+    ms: highlight.totalMs,
+    secondaryLabel: `${formatMs(highlight.selfMs)} self`,
+    percentLabel: card.totalMs > 0 ? `${Math.round((highlight.totalMs / card.totalMs) * 100)}% of parent` : undefined,
+    barPercent: card.totalMs > 0 ? (highlight.totalMs / card.totalMs) * 100 : 0,
+  }));
+
+  const footnotes: string[] = [];
+  footnotes.push(
+    card.selfShape === "longTail"
+      ? `${formatMs(card.selfMs)} is spread across calls too small to list`
+      : `${formatMs(card.selfMs)} in its own body`
+  );
+  if (card.subtreeFunctionCount > card.highlights.length) {
+    footnotes.push(`${card.subtreeFunctionCount} functions ran under this parent in total`);
+  }
+  if (card.confidence === "low") {
+    footnotes.push("few samples landed here — treat these figures as a hint");
+  }
+  return { rows, footnotes };
+}
+
+/**
+ * A task card's rows are its boundary frames — the outermost application frame
+ * on each branch — ranked by inclusive time.
+ *
+ * Ranking by self time instead reported the sliver of each block that is not
+ * covered by its callees, which in application code is almost nothing: a React
+ * component delegates its whole cost downward, so a card about a three-second
+ * task listed a few hundred milliseconds and called the rest too small to list.
+ * Inclusive time is what a flame chart draws as a block's width, so these rows
+ * are the blocks a reader can see, and because no boundary frame is an ancestor
+ * of another they still do not double-count a millisecond.
+ */
+function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string) => void): HotPathCard {
+  const rows: HotPathRow[] = card.boundaryFrames.map((frame) => ({
+    location: frame.location,
+    title: frame.name,
+    ms: frame.totalMs,
+    secondaryLabel: `${formatMs(frame.selfMs)} self`,
+    percentLabel: card.durationMs > 0 ? `${Math.round((frame.totalMs / card.durationMs) * 100)}% of task` : undefined,
+    barPercent: card.durationMs > 0 ? (frame.totalMs / card.durationMs) * 100 : 0,
+    shape: frame.shapeText,
+    onFocus: () => onFocus(frame.nodeId),
+  }));
+
+  const footnotes: string[] = [];
+  const attributed = card.boundaryFrames.reduce((sum, frame) => sum + frame.totalMs, 0);
+  const rest = card.durationMs - attributed;
+  // Naming what the remainder *is* rather than calling it too small to list:
+  // it is the framework and engine work around the application frames above,
+  // plus any application branch below the floor, and a reader who knows that
+  // can judge whether the rows account for the task.
+  if (rest >= 1) {
+    footnotes.push(`${formatMs(rest)} ran outside these frames, in framework and engine code`);
+  }
+  if (card.culprits.length > 0) {
+    const worst = card.culprits
+      .slice(0, 3)
+      .map((culprit) => `${culprit.name} ${formatMs(culprit.selfMs)}`)
+      .join(" · ");
+    footnotes.push(`most time in a function's own body: ${worst}`);
+  }
+  if (card.segments && card.segments.length > 0) {
+    footnotes.push(`this task is long enough to be a phase — ${card.segments.map((segment) => segment.title).join(", ")}`);
+  }
+  if (card.confidence === "low") footnotes.push("few samples landed in this task — treat these figures as a hint");
+  if (card.boundaries === "inferred") {
+    footnotes.push("the profiler recorded no task boundaries, so this block was reconstructed from idle gaps");
+  }
+  if (set.classesDegraded) {
+    footnotes.push("frames inside the bundle were classified without a model, so the feature below may be incomplete");
+  }
+  return { rows, footnotes };
+}
+
+/** The second line of a task card: where the task started, now that the heading names the feature. */
+function taskSubtitle(card: TaskCard): string | undefined {
+  if (card.boundaryFrames.length === 0) return undefined;
+  return `${card.boundaryFrames.length} application ${card.boundaryFrames.length === 1 ? "entry point" : "entry points"} in this task`;
+}
+
+/** The second line of a card: how often this frame ran. */
+function cardSubtitle(card: ProfileCard, callCountIsExact: boolean): string | undefined {
+  const count = callCountIsExact ? card.invocations ?? card.callSites : card.callSites;
+  if (count <= 1) return undefined;
+  return callCountIsExact ? `called ${count} times` : `${count} call sites`;
+}
+
 function reactIssueRows(issue: ReactIssue): HotPathCard {
   const remainingMs = reactIssueRemainingMs(issue);
   return {
@@ -325,6 +432,7 @@ function AnalysisResultCard({
   copied,
   busy,
   onCopy,
+  onExplore,
 }: {
   rank: number;
   title: string;
@@ -337,6 +445,7 @@ function AnalysisResultCard({
   copied: boolean;
   busy: boolean;
   onCopy: () => void;
+  onExplore?: () => void;
 }) {
   return (
     <article className="hotspot-card">
@@ -358,11 +467,16 @@ function AnalysisResultCard({
                   <code>{row.location}</code>
                 </p>
               ) : null}
-              {row.title ? <strong className="row-title">{row.title}</strong> : null}
+              {row.title ? (
+                row.onFocus
+                  ? <button type="button" className="row-title row-title-link" onClick={row.onFocus}>{row.title}</button>
+                  : <strong className="row-title">{row.title}</strong>
+              ) : null}
               {row.ms !== undefined && (
                 <>
                   <div className="row-figure-line">
                     <span className="row-figure">{formatMs(row.ms)}</span>
+                    {row.secondaryLabel ? <span className="row-secondary">{row.secondaryLabel}</span> : null}
                     {row.percentLabel ? <span className="row-share">{row.percentLabel}</span> : null}
                   </div>
                   <div className="row-bar-track" aria-hidden="true">
@@ -370,6 +484,7 @@ function AnalysisResultCard({
                   </div>
                 </>
               )}
+              {row.shape ? <p className="row-shape">{row.shape}</p> : null}
               {row.caption ? <p className="row-caption">{row.caption}</p> : null}
             </div>
           ))}
@@ -379,6 +494,11 @@ function AnalysisResultCard({
       <div className="hotspot-footer">
         {error ? <p className="hotspot-prompt-error">{error}</p> : null}
         <div className="hotspot-actions">
+          {onExplore ? (
+            <Button size="sm" variant="outline" className="prompt-action-button" onClick={onExplore}>
+              <HeaderIcon type="explore" /> Explore
+            </Button>
+          ) : null}
           <PromptActionButton
             loading={loading}
             copied={copied}
@@ -473,29 +593,8 @@ function UploadPane({
   );
 }
 
-const ROZENITE_THEME_KEY = "@rozenite/ui:theme";
-
 export default function Home() {
-  const [themeReady, setThemeReady] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(ROZENITE_THEME_KEY);
-      if (stored !== "light" && stored !== "dark") {
-        localStorage.setItem(ROZENITE_THEME_KEY, "dark");
-      }
-    } catch {
-      // Theme still applies for this session even if storage is unavailable.
-    }
-    const frame = requestAnimationFrame(() => setThemeReady(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  if (!themeReady) {
-    return <div className="dark h-screen bg-background" />;
-  }
-
-  return <InspectorApp />;
+  return <ThemeGate><InspectorApp /></ThemeGate>;
 }
 
 function InspectorApp() {
@@ -567,6 +666,9 @@ function InspectorApp() {
   const [analyzedType, setAnalyzedType] = useState<ProfileType>("javascript");
   const [totalMs, setTotalMs] = useState(0);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [taskCards, setTaskCards] = useState<TaskCardSet | null>(null);
+  const [cards, setCards] = useState<ProfileCard[]>([]);
+  const [callCountIsExact, setCallCountIsExact] = useState(false);
   const [frameBudget, setFrameBudget] = useState("16");
   const [appliedBudget, setAppliedBudget] = useState(16);
   const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
@@ -620,6 +722,9 @@ function InspectorApp() {
         analysisId?: string | null; saved?: boolean;
         totalMs?: number;
         hotspots?: Hotspot[];
+        taskCards?: TaskCardSet;
+        cards?: ProfileCard[];
+        callCountIsExact?: boolean;
         usage?: TokenUsage;
         model?: AnalysisModel;
         summary?: ReactSummary;
@@ -656,6 +761,8 @@ function InspectorApp() {
         }
         setAnalysisId(data.analysisId ?? null);
         setHotspots([]);
+        setTaskCards(null);
+        setCards([]);
         setReactIssues(data.issues);
         setAppliedBudget(data.frameBudgetMs ?? Number(frameBudget));
         setReactSummary(data.summary ?? null);
@@ -669,6 +776,9 @@ function InspectorApp() {
         analysisId: data.analysisId ?? "",
         totalMs: data.totalMs ?? 0,
         hotspots: data.hotspots ?? [],
+        taskCards: data.taskCards,
+        cards: data.cards ?? [],
+        callCountIsExact: data.callCountIsExact === true,
         usage: data.usage,
         model: data.model,
       };
@@ -680,6 +790,9 @@ function InspectorApp() {
       setAnalysisId(result.analysisId);
       setTotalMs(result.totalMs);
       setHotspots(result.hotspots);
+      setTaskCards(result.taskCards ?? null);
+      setCards(result.cards ?? []);
+      setCallCountIsExact(result.callCountIsExact === true);
       setReactSummary(null);
       setPhase("results");
       void refreshHistory();
@@ -708,6 +821,32 @@ function InspectorApp() {
   const markHandoffCopied = (id: string) => {
     setCopiedId(id);
     setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
+  };
+
+  /**
+   * Open one card's subtree in its own tab. The card already carries everything
+   * the view needs, so this is a storage write and a `window.open` — no new
+   * endpoint, and nothing extra kept on the server.
+   */
+  const exploreCard = (card: ProfileCard) => {
+    if (!analysisId) return;
+    const href = storeCardForExplore({
+      analysisId,
+      totalMs,
+      callCountIsExact,
+      card,
+    });
+    window.open(href, "_blank", "noopener");
+  };
+
+  /**
+   * Open one task in its own tab. With a frame id the view opens focused on
+   * that frame; without one it opens on the whole task, which is what a click
+   * on the card header means.
+   */
+  const exploreTask = (card: TaskCard, focusNodeId?: string) => {
+    if (!analysisId) return;
+    window.open(taskExploreHref(analysisId, card.taskIndex, focusNodeId), "_blank", "noopener");
   };
 
   const copyHandoff = async (id: string) => {
@@ -755,6 +894,9 @@ function InspectorApp() {
     setAnalysisId(null);
     setAnalyzedType("javascript");
     setHotspots([]);
+    setTaskCards(null);
+    setCards([]);
+    setCallCountIsExact(false);
     setReactSummary(null);
     setReactIssues([]);
     setPrompts({});
@@ -777,7 +919,8 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType(analysis.profileType === "react" ? "react" : "javascript");
-    setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setReactIssues(analysis.reactIssues ?? []);
+    setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
+    setCallCountIsExact(analysis.callCountIsExact === true); setReactIssues(analysis.reactIssues ?? []);
     setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null); setAnalysisModel(analysis.model ?? null);
     setReactSummary(null); setSaved(true); setPhase("results"); setHistoryOpen(false);
     setIsSample(false);
@@ -903,7 +1046,8 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
-    setHotspots(analysis.hotspots); setReactIssues([]); setReactSummary(null);
+    setHotspots(analysis.hotspots); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
+    setCallCountIsExact(analysis.callCountIsExact === true); setReactIssues([]); setReactSummary(null);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
   const loadReactSample = async () => {
@@ -913,7 +1057,7 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
-    setHotspots([]); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
+    setHotspots([]); setTaskCards(null); setCards([]); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
 
@@ -1243,30 +1387,80 @@ function InspectorApp() {
           </>
         )}
 
-        {phase === "results" && analyzedType === "javascript" && (
+        {phase === "results" && analyzedType === "javascript" && (() => {
+          const taskList = taskCards?.cards ?? [];
+          const findingCount = taskList.length || cards.length || hotspots.length;
+          // A recording of nothing but short work is a real answer, not an
+          // empty one: say so, and show the busiest tasks anyway.
+          const summaryLine = taskCards
+            ? taskCards.noLongTasks
+              ? `No long tasks in this recording; the busiest work was ${findingCount} ${findingCount === 1 ? "task" : "tasks"} of ${formatMs(taskList[0]?.durationMs ?? 0)} and under · ${formatMs(totalMs)} total`
+              : `${findingCount} long ${findingCount === 1 ? "task" : "tasks"} of ${taskCards.taskCount} · ${formatMs(totalMs)} total`
+            : `${findingCount} ${findingCount === 1 ? "finding" : "findings"} · ${formatMs(totalMs)} total`;
+          return (
           <>
             <button className="results-back" type="button" onClick={resetToUpload}><HeaderIcon type="back" /> Back to new analysis</button>
             <div className="results-header">
               <div className="intro">
                 <span className="eyebrow">Analysis results</span>
-                <h1 className="results-title">Bottlenecks, slowest first</h1>
-                <p>
-                  {hotspots.length} bottleneck{hotspots.length === 1 ? "" : "s"} · {formatMs(totalMs)} total
-                </p>
-                {analyzerUsage && (
+                <h1 className="results-title">{taskCards ? "Tasks, longest first" : "Bottlenecks, slowest first"}</h1>
+                <p>{summaryLine}</p>
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
                   </p>
                 )}
               </div>
               <div className="result-actions">
-                {analyzerUsage && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
             </div>
 
             <div className="hotspot-list">
-              {hotspots.map((hotspot, index) => {
+              {taskCards ? taskList.map((card, index) => {
+                const { rows, footnotes } = taskCardRows(card, taskCards, (nodeId) => exploreTask(card, nodeId));
+                return (
+                  <AnalysisResultCard
+                    key={card.id}
+                    rank={index + 1}
+                    title={card.headline}
+                    timeLabel={formatMs(card.durationMs)}
+                    subtitle={taskSubtitle(card)}
+                    rows={rows}
+                    footnotes={footnotes}
+                    loading={promptLoadingId === card.id}
+                    error={promptErrors[card.id]}
+                    copied={copiedId === card.id}
+                    busy={isSample || promptLoadingId !== null}
+                    onCopy={() => void copyHandoff(card.id)}
+                    onExplore={analysisId ? () => exploreTask(card) : undefined}
+                  />
+                );
+              }) : null}
+              {/* The node-descent engine, served under TRACESIFT_CPU_ENGINE=cards. */}
+              {!taskCards && cards.map((card, index) => {
+                const { rows, footnotes } = cardRows(card);
+                return (
+                <AnalysisResultCard
+                  key={card.id}
+                  rank={index + 1}
+                  title={card.headline}
+                  timeLabel={formatMs(card.totalMs)}
+                  subtitle={cardSubtitle(card, callCountIsExact)}
+                  rows={rows}
+                  footnotes={footnotes}
+                  loading={promptLoadingId === card.id}
+                  error={promptErrors[card.id]}
+                  copied={copiedId === card.id}
+                  busy={isSample || promptLoadingId !== null}
+                  onCopy={() => void copyHandoff(card.id)}
+                  onExplore={analysisId ? () => exploreCard(card) : undefined}
+                />
+                );
+              })}
+              {/* Analyses saved before the call-tree engine still hold the old shape. */}
+              {!taskCards && cards.length === 0 && hotspots.map((hotspot, index) => {
                 const { rows, footnotes } = hotspotRows(hotspot);
                 return (
                 <AnalysisResultCard
@@ -1287,7 +1481,8 @@ function InspectorApp() {
               })}
             </div>
           </>
-        )}
+          );
+        })()}
       </section>
       </PluginShell.Body>
     </PluginShell>

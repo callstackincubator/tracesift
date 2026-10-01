@@ -1,3 +1,4 @@
+import { attachMeasuredTasks, type RawTaskInterval } from "./tasks.ts";
 import type { CdpCallFrame, CdpProfile, CdpProfileNode } from "../app/js-profiler/types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,6 +24,7 @@ export function extractFromDurationTrace(events: Record<string, unknown>[]): Cdp
   });
 
   let best: CdpProfile | null = null;
+  let bestTasks: RawTaskInterval[] = [];
   let bestSampledTime = -1;
 
   for (const threadEvents of byThread.values()) {
@@ -37,18 +39,35 @@ export function extractFromDurationTrace(events: Record<string, unknown>[]): Cdp
     let previousTime = startTime;
     let sampledTime = 0;
     let nextNodeId = 1;
+    // A begin event arriving on an empty stack opens a top-level call, which is
+    // this format's equivalent of a task: nothing else was running, and the
+    // whole of it is one uninterrupted block.
+    const tasks: RawTaskInterval[] = [];
+    let taskStart = -1;
+    /**
+     * Sample slots for the intervals between two top-level calls, recorded as
+     * idle rather than dropped. A CDP profile's time deltas are what every
+     * consumer reconstructs sample timestamps from, so a gap left out of them
+     * silently shifts every later sample earlier — enough to put it in the
+     * wrong task — and the time the runtime spent doing nothing would otherwise
+     * be redistributed over the work as if it had been busy throughout. The id
+     * is assigned after the walk so the call nodes keep theirs.
+     */
+    const idleSamples: number[] = [];
 
     for (const { event } of threadEvents) {
       const timestamp = event.ts as number;
       const delta = Math.max(0, timestamp - previousTime);
       const activeNode = stack.at(-1);
-      if (delta > 0 && activeNode) {
-        samples.push(activeNode.id);
+      if (delta > 0) {
+        if (!activeNode) idleSamples.push(samples.length);
+        samples.push(activeNode?.id ?? 0);
         timeDeltas.push(delta);
-        sampledTime += delta;
+        if (activeNode) sampledTime += delta;
       }
 
       if (event.ph === "B") {
+        if (stack.length === 0) taskStart = timestamp;
         const parent = stack.at(-1);
         const node: CdpProfileNode = {
           id: nextNodeId++,
@@ -62,11 +81,23 @@ export function extractFromDurationTrace(events: Record<string, unknown>[]): Cdp
         stack.push(node);
       } else if (stack.length > 0) {
         stack.pop();
+        if (stack.length === 0 && taskStart >= 0 && timestamp > taskStart) {
+          tasks.push({ ts: taskStart, dur: timestamp - taskStart });
+          taskStart = -1;
+        }
       }
       previousTime = timestamp;
     }
 
     if (nodes.length === 0 || samples.length === 0) continue;
+    if (idleSamples.length > 0) {
+      const idleId = nextNodeId++;
+      nodes.push({
+        id: idleId,
+        callFrame: { functionName: "(idle)", scriptId: "", url: "", lineNumber: -1, columnNumber: -1 },
+      });
+      for (const index of idleSamples) samples[index] = idleId;
+    }
     const candidate: CdpProfile = {
       nodes,
       samples,
@@ -76,11 +107,12 @@ export function extractFromDurationTrace(events: Record<string, unknown>[]): Cdp
     };
     if (sampledTime > bestSampledTime) {
       best = candidate;
+      bestTasks = tasks;
       bestSampledTime = sampledTime;
     }
   }
 
-  return best;
+  return best && bestTasks.length > 0 ? attachMeasuredTasks(best, bestTasks) : best;
 }
 
 function callFrameFromDurationEvent(event: Record<string, unknown>): CdpCallFrame {

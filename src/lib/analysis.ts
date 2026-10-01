@@ -5,6 +5,8 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Bottleneck } from "./bottlenecks";
+import type { ProfileCard } from "./profile-cards";
+import type { TaskCardSet } from "./task-cards";
 import { normalizeStoredReactIssues, type ReactIssue } from "./react-analyzer.ts";
 
 export const MAX_SUMMARY_BULLETS = 3;
@@ -85,6 +87,17 @@ export interface AnalysisRecord {
   model?: AnalysisModel;
   /** Item id -> token usage for hand-off rendering (zero for deterministic prompts). */
   promptUsage: Record<string, TokenUsage>;
+  /**
+   * The CPU path's output: one card per task the runtime ran. `cards` and
+   * `hotspots` below are the two engines it replaces, both still reachable
+   * through `TRACESIFT_CPU_ENGINE` so a suspicious profile can be run through
+   * each and compared.
+   */
+  taskCards?: TaskCardSet;
+  /** Deterministic call-tree cards, the engine task cards replace. */
+  cards?: ProfileCard[];
+  /** Whether this profile's call counts are real invocations rather than call sites. */
+  callCountIsExact?: boolean;
   /** Durable history metadata. Raw profile uploads are deliberately never stored here. */
   profileType?: "cpu" | "react";
   title?: string;
@@ -121,7 +134,8 @@ const MAX_RECORDS = 24;
 
 const records = new Map<string, AnalysisRecord>();
 
-function traceSiftHome(): string { return process.env.TRACE_SIFT_HOME || path.join(homedir(), ".tracesift"); }
+/** The one place anything persisted on this device is rooted. */
+export function traceSiftHome(): string { return process.env.TRACE_SIFT_HOME || path.join(homedir(), ".tracesift"); }
 function historyDir(): string { return path.join(traceSiftHome(), "analyses"); }
 function settingsPath(): string { return path.join(traceSiftHome(), "settings.json"); }
 function recordPath(id: string): string { return path.join(historyDir(), `${id}.json`); }
@@ -295,6 +309,18 @@ export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottlen
       };
     }).sort((a, b) => b.combinedTimeMs - a.combinedTimeMs),
   };
+}
+
+/**
+ * What a card needs in the browser.
+ *
+ * Unlike `clientHotspots`, there is nothing to strip: a card's subtree, its
+ * repeated-function rollup and both of its stacks are all bounded when the card
+ * is built, so the published card is the measured one. Trimming the upward
+ * stack here would only hand the drill-down a path missing its entry point.
+ */
+export function clientCards(cards: ProfileCard[]): ProfileCard[] {
+  return cards;
 }
 
 /** Card results keep top function names; stacks stay on the server record for prompt generation. */

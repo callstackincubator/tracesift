@@ -335,6 +335,15 @@ button, input { font: inherit; }
   font-weight: 700;
   line-height: 1;
 }
+/* The second of a row's two figures: self time beside total time. */
+.row-secondary {
+  flex: 1 1 auto;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .row-share {
   flex: 0 0 auto;
   color: var(--muted-foreground);
@@ -345,6 +354,31 @@ button, input { font: inherit; }
 }
 .row-bar-track { height: 4px; background: var(--muted); overflow: hidden; border-radius: 999px; }
 .row-bar-fill { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
+/* A culprit's name doubles as the way into Explore focused on that frame. */
+.row-title-link {
+  align-self: flex-start;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  text-underline-offset: 3px;
+}
+.row-title-link:hover { color: var(--primary); }
+/* How a row's time split across separate calls: counts, total, worst single call. */
+.row-shape {
+  margin: 7px 0 0;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .row-caption {
   margin: 7px 0 0;
   color: var(--muted-foreground);
@@ -1250,8 +1284,11 @@ body { background: var(--background, #151419); }
 .row-location { margin-bottom: 13px; }
 .row-location-label { color: var(--primary); background: var(--accent); border-color: transparent; }
 .row-title { display: block; margin-bottom: 12px; font-size: 14px; }
+.row-title-link { margin-bottom: 12px; font-size: 14px; }
+.row-shape { margin-top: 10px; font-size: 12px; }
 .row-figure-line { align-items: flex-end; margin-bottom: 9px; }
 .row-figure { display: flex; align-items: baseline; font-size: 16px; color: var(--primary); opacity: 0.8; }
+.row-secondary { font-size: 13px; }
 .row-share { padding: 3px 7px; background: var(--muted); border-radius: 999px; font-size: 10px; }
 .row-bar-track { height: 6px; background: color-mix(in srgb, var(--muted) 88%, var(--background)); }
 .row-bar-fill { background: color-mix(in srgb, var(--foreground) 45%, var(--background)); }
@@ -1429,3 +1466,183 @@ body {
 .guide-step strong { font-size: 15px; }
 .guide-privacy p { font-size: 12px; line-height: 1.5; }
 .guide-privacy strong { font-size: 13px; }
+
+
+/* ---------------------------------------------------------------------------
+   Card drill-down (/explore)
+   One card's subtree, in its own tab: a flame graph for where the time is, a
+   call tree for what called what, and a table of the work that repeated.
+   --------------------------------------------------------------------------- */
+
+.explore-page {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.explore-header { display: flex; flex-direction: column; gap: 8px; }
+.explore-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+.explore-location {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.explore-figures strong { font-size: 18px; color: var(--primary); }
+.explore-figures span { opacity: 0.5; }
+.explore-caveat { font-size: 12px; color: var(--muted-foreground); }
+.explore-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.explore-path-label { text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.explore-path-frame + .explore-path-frame::before { content: "→ "; opacity: 0.5; }
+.explore-caveat { font-style: italic; }
+
+.explore-tabs { width: 100%; }
+.explore-panel {
+  padding-top: 16px;
+  min-height: 320px;
+}
+
+.explore-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.explore-tree .explore-tree { padding-left: 16px; border-left: 1px solid var(--border); margin-left: 6px; }
+.explore-tree summary { cursor: pointer; list-style-position: outside; }
+.explore-tree summary::marker { color: var(--muted-foreground); }
+.explore-tree-leaf { list-style: none; padding-left: 15px; }
+.explore-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name figures" "bar bar" "location location";
+  gap: 4px 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.explore-tree-row:hover { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.explore-tree-name {
+  grid-area: name;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.explore-tree-figures { grid-area: figures; display: flex; align-items: baseline; gap: 10px; }
+.explore-tree-row .row-bar-track { grid-area: bar; }
+.explore-tree-location {
+  grid-area: location;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.explore-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.explore-table th, .explore-table td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.explore-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-foreground); }
+.explore-table thead button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.explore-table thead button.is-sorted { color: var(--primary); }
+.explore-table tbody th {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.explore-table tbody th code { font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
+.explore-table td { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
+/* Every frame name in Explore is a way to refocus the view on that frame. */
+.explore-tree-focus {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.explore-tree-focus:hover { color: var(--primary); }
+.explore-tree-focus em { color: var(--muted-foreground); font-style: normal; }
+/* The ancestors of the focused frame, folded away until they are asked for. */
+.explore-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.explore-breadcrumb summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.explore-breadcrumb ol {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 0 0 4px;
+  border-left: 1px solid var(--border);
+}
+.explore-breadcrumb li { display: flex; gap: 8px; padding: 3px 0 3px 10px; }
+.explore-breadcrumb li em { color: var(--muted-foreground); font-style: normal; font-variant-numeric: tabular-nums; }
+.explore-siblings {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.explore-caller { display: block; font-size: 12px; }
+.explore-caller em { color: var(--muted-foreground); font-style: normal; }
+
+.explore-footer { display: flex; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .explore-tree-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "figures" "bar" "location"; }
+  .explore-table { font-size: 12px; }
+}

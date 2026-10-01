@@ -1,11 +1,31 @@
 import { groupBottlenecks, type Bottleneck } from "./bottlenecks";
+import { buildCallTree } from "./call-tree";
+import { selectCards, type CardSelection } from "./profile-cards";
 import { extractFromDurationTrace } from "./hermes-duration-profile";
+import { attachMeasuredTasks, extractTasks, runTaskIntervals, threadKey, type TaskSet } from "./tasks";
 import { normalizeProfile } from "@/app/js-profiler/normalize";
 import { queryHotspots, querySummary } from "@/app/js-profiler/query";
 import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "@/app/js-profiler/types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Hermes duration traces carry one node per invocation, so merging them yields
+ * a real call count. A V8 sampling profile's nodes are path-unique and can
+ * never answer how often a function ran. The distinction has to survive
+ * parsing, because only the parser knows which shape arrived.
+ */
+const DURATION_TRACE = Symbol.for("tracesift.durationTrace");
+
+function markDurationTrace(profile: CdpProfile): CdpProfile {
+  Object.defineProperty(profile, DURATION_TRACE, { value: true, enumerable: false });
+  return profile;
+}
+
+export function recordsInvocations(profile: CdpProfile): boolean {
+  return (profile as unknown as Record<symbol, unknown>)[DURATION_TRACE] === true;
 }
 
 /**
@@ -86,15 +106,25 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
     const key = profileKey(event);
     let acc = profiles.get(key);
     if (!acc) {
-      acc = { startTime: 0, nodes: new Map(), samples: [], timeDeltas: [] };
+      acc = { threadKey: threadKey(event), startTime: 0, firstTs: 0, nodes: new Map(), samples: [], timeDeltas: [] };
       profiles.set(key, acc);
     }
 
+    // `Profile` is emitted on the thread being profiled; its `ProfileChunk`s
+    // are emitted on the sampler thread. Only the former names the thread whose
+    // `RunTask` events bound this profile's work.
+    if (name === "Profile") acc.threadKey = threadKey(event);
+
     const data = isRecord(event.args) && isRecord(event.args.data) ? event.args.data : {};
+    // A recorded start time always wins over the timestamp of whichever event
+    // happened to arrive first: the chunks can precede the `Profile` that
+    // carries it, and taking the chunk's `ts` instead shifts every
+    // reconstructed sample timestamp later by the difference.
     if (typeof data.startTime === "number" && acc.startTime === 0) {
       acc.startTime = data.startTime;
-    } else if (acc.startTime === 0 && typeof event.ts === "number") {
-      acc.startTime = event.ts;
+    }
+    if (acc.firstTs === 0 && typeof event.ts === "number") {
+      acc.firstTs = event.ts;
     }
 
     const cpuProfile = isRecord(data.cpuProfile) ? data.cpuProfile : name === "CpuProfile" ? data : null;
@@ -131,7 +161,7 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
   if (!assembled) {
     const durationProfile = extractFromDurationTrace(events);
     if (durationProfile) {
-      return durationProfile;
+      return markDurationTrace(durationProfile);
     }
     throw new Error(
       "This trace does not contain supported CPU profile data (expected V8 Profile/ProfileChunk events or Hermes B/E duration events)."
@@ -139,20 +169,30 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
   }
 
   const timeDeltas = assembled.timeDeltas;
-  const startTime = assembled.startTime;
+  const startTime = assembled.startTime || assembled.firstTs;
   const endTime = startTime + timeDeltas.reduce((sum, delta) => sum + delta, 0);
 
-  return {
+  const profile: CdpProfile = {
     nodes: [...assembled.nodes.values()],
     samples: assembled.samples,
     timeDeltas,
     startTime,
     endTime,
   };
+  // Only the profiled thread's tasks. A trace carries `RunTask` for every
+  // thread it recorded, and the browser's other threads ran their own tasks
+  // against a clock these samples know nothing about.
+  const tasks = runTaskIntervals(events).get(assembled.threadKey);
+  return tasks && tasks.length > 0 ? attachMeasuredTasks(profile, tasks) : profile;
 }
 
 interface TraceProfileAcc {
+  /** `pid:tid` of the thread this profile was recorded on, which is what `RunTask` is keyed by. */
+  threadKey: string;
+  /** The tracer's own start time, or 0 until one is seen. */
   startTime: number;
+  /** Timestamp of this profile's first event, used only when the tracer recorded no start time. */
+  firstTs: number;
   nodes: Map<number, CdpProfileNode>;
   samples: number[];
   timeDeltas: number[];
@@ -171,11 +211,15 @@ function getTraceEvents(raw: unknown): Record<string, unknown>[] | null {
   return null;
 }
 
+/**
+ * A profile is identified by its process and its id, deliberately not by the
+ * thread. Chrome emits the `Profile` event on the thread being profiled and
+ * every `ProfileChunk` for it on the sampler thread, so keying by thread splits
+ * one profile in two: the half holding the nodes loses the recorded start time,
+ * and the half naming the profiled thread is dropped for having no nodes.
+ */
 function profileKey(event: Record<string, unknown>): string {
-  const id = event.id ?? "";
-  const pid = event.pid ?? "";
-  const tid = event.tid ?? "";
-  return `${pid}:${tid}:${id}`;
+  return `${event.pid ?? ""}:${event.id ?? ""}`;
 }
 
 function normalizeNode(node: Record<string, unknown>): CdpProfileNode {
@@ -216,9 +260,30 @@ export function summarizeCpuProfile(
   raw: unknown,
   sessionId: string,
   name: string
-): { summary: JsProfileSummary; hotspots: JsHotspotsResult; bottlenecks: Bottleneck[] } {
+): {
+  summary: JsProfileSummary;
+  hotspots: JsHotspotsResult;
+  /**
+   * The parsed profile itself. Task cards need a second, task-scoped pass over
+   * it, and re-parsing an upload that runs to hundreds of megabytes to get it
+   * back is not an option.
+   */
+  profile: CdpProfile;
+  /** The recording cut into tasks, which is the unit a card is built on. */
+  tasks: TaskSet;
+  cards: CardSelection;
+  /**
+   * The engine cards replace, behind a call rather than a value: it is a second
+   * full pass over the profile, and nothing runs it unless `TRACESIFT_CPU_ENGINE`
+   * asks for a comparison.
+   */
+  legacyBottlenecks: () => Bottleneck[];
+} {
   const now = Date.now();
-  const session = normalizeProfile(coerceCdpProfile(raw), {
+  // Parsed once: this runs over the whole upload, and the profiles this tool
+  // exists for are hundreds of megabytes.
+  const profile = coerceCdpProfile(raw);
+  const session = normalizeProfile(profile, {
     sessionId,
     name,
     // Used only as fallback metadata when the profile duration is unavailable.
@@ -226,10 +291,14 @@ export function summarizeCpuProfile(
     stoppedAt: now,
     samplingIntervalUs: undefined,
   });
+  const durationMs = session.durationMs;
 
   return {
     summary: querySummary(session),
-    bottlenecks: groupBottlenecks(coerceCdpProfile(raw), session.durationMs),
+    profile,
+    tasks: extractTasks(profile),
+    legacyBottlenecks: () => groupBottlenecks(profile, durationMs),
+    cards: selectCards(buildCallTree(profile, durationMs, { callCountIsExact: recordsInvocations(profile) })),
     hotspots: queryHotspots(session, {
       limit: 20,
       offset: 0,

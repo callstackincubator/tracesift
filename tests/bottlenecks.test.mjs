@@ -334,13 +334,16 @@ test('React internals are recognized by dev-build names and renderer module path
 
 test('hot functions carry a readable source location and omit bundle and native frames', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1], ''), node(1, 'render', [2, 3, 4]),
+    node(0, '(root)', [1], ''), node(1, 'render', [2, 3, 4, 5]),
     { ...node(2, 'formatDate', [], 'src/explore.tsx'), callFrame: { functionName: 'formatDate', scriptId: '1', url: 'src/explore.tsx', lineNumber: 41, columnNumber: 6 } },
     node(3, 'parseJSON', [], 'http://localhost:8081/index.bundle'),
     node(4, 'nativeSort', [], '(native)'),
-  ], [2, 2, 3, 3, 4, 4]), 180);
+    node(5, 'toLocaleString', [], 'native date.js'),
+  ], [2, 2, 3, 3, 4, 4, 5, 5]), 240);
   const located = Object.fromEntries(groups[0].functions.map(fn => [fn.title, fn.location]));
-  assert.deepEqual(located, { formatDate: 'src/explore.tsx:42:7', parseJSON: undefined, nativeSort: undefined });
-  const published = clientHotspots(normalizeHotspots([], 180, groups).hotspots)[0];
+  // `native date.js` ends in .js and carries no scheme, so it has to be
+  // rejected by name rather than by shape.
+  assert.deepEqual(located, { formatDate: 'src/explore.tsx:42:7', parseJSON: undefined, nativeSort: undefined, toLocaleString: undefined });
+  const published = clientHotspots(normalizeHotspots([], 240, groups).hotspots)[0];
   assert.equal(published.functions.find(fn => fn.title === 'formatDate').location, 'src/explore.tsx:42:7');
 });
