@@ -147,3 +147,35 @@ test('an inferred boundary is marked approximate in the prompt too', () => {
   assert.match(inferredPrompt, /reconstructed from the gaps between sample runs, so its edges are approximate/);
   assert.ok(!inferredPrompt.includes('recorded this boundary itself'));
 });
+
+/**
+ * Thirty frames, each burning 20 ms of its own time inside one 600 ms task, so
+ * every one of them clears the culprit floor on self time alone.
+ */
+const manyNodes = [
+  node(0, '(root)', [1], ''),
+  node(1, 'renderScreen', Array.from({ length: 30 }, (_, index) => index + 2), 'src/screen.tsx', 3),
+  ...Array.from({ length: 30 }, (_, index) => node(index + 2, `step${index}`, [], 'src/steps.ts', index)),
+];
+const manySamples = Array.from({ length: 600 }, (_, index) => 2 + Math.floor(index / 20));
+const manyRaw = attachMeasuredTasks(
+  { nodes: manyNodes, samples: manySamples, timeDeltas: manySamples.map(() => 1000), startTime: 0, endTime: 600_000 },
+  [{ ts: 1000, dur: 600_000 }],
+);
+const manyCard = selectTaskCards(manyRaw, 600, extractTasks(manyRaw), ruleClassTable()).cards[0];
+
+test('the table holds every frame over the floor where the old cap would have cut it', () => {
+  // 30 frames at 20 ms self, plus the frame that called them: past the cap of
+  // 24 this list used to carry, and well under the one it carries now.
+  assert.equal(manyCard.culprits.filter((culprit) => culprit.selfMs >= 15).length, 30);
+  assert.equal(manyCard.culprits.length, 31);
+});
+
+test('the hand-off lists a readable head of that table and accounts for the rest', () => {
+  const prompt = buildTaskPrompt(manyCard, 600);
+  const listed = prompt.split('\n').filter((line) => /^- `step\d+`/.test(line));
+  assert.ok(listed.length <= 24, `the prompt listed ${listed.length} culprits`);
+  // Whatever the list leaves out is still accounted for, so the prompt never
+  // drops a millisecond of the task on the floor.
+  assert.match(prompt, /ms of the task is spread across frames smaller than the ones listed above\./);
+});

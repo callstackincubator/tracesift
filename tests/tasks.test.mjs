@@ -34,6 +34,24 @@ test('measured boundaries are taken from the tracer, and samples land in the rig
   assert.deepEqual(tasks.map((task) => [task.firstSample, task.endSample]), [[0, 3], [3, 6]]);
 });
 
+test('a negative time delta does not push every later task off the clock', () => {
+  // V8's sampler clock steps backwards now and then: a real 13 s Chrome trace
+  // carries 535 negative deltas summing to -69 ms. Clamping each to zero left
+  // the reconstructed clock ahead of the real one by their total for the rest
+  // of the recording, so a later task's window was cut around 64 ms early — it
+  // took the tail of the task before it and lost its own.
+  const deltas = [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000];
+  deltas[2] = -1000; // sample 2 lands back on sample 1's timestamp
+  deltas[3] = 2000; // and the clock makes it up on the next one
+  const raw = attachMeasuredTasks(
+    { ...profile(nodes, [1, 2, 3, 1, 2, 3, 1, 2]), timeDeltas: deltas },
+    // Samples sit at 2000, 3000, 3000, 4000, 5000, 6000, 7000, 8000 µs.
+    [{ ts: 2000, dur: 3000 }, { ts: 5000, dur: 4000 }],
+  );
+  const { tasks } = extractTasks(raw);
+  assert.deepEqual(tasks.map((task) => [task.firstSample, task.endSample]), [[0, 4], [4, 8]]);
+});
+
 test('a measured task that caught no sample is dropped rather than reported empty', () => {
   const raw = attachMeasuredTasks(profile(nodes, [1, 2]), [
     { ts: 2000, dur: 2000 },

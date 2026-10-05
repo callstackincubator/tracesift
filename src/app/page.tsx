@@ -19,7 +19,7 @@ import { ThemeGate } from "@/app/theme-gate";
 import type { Hotspot } from "@/lib/analysis";
 import type { ProfileCard } from "@/lib/profile-cards";
 import { storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
-import type { TaskCard, TaskCardSet } from "@/lib/task-cards";
+import { CULPRIT_MIN_MS, HEADLINE_FRAMES, MAX_CULPRITS, type TaskCard, type TaskCardSet } from "@/lib/task-cards";
 import { formatMs } from "@/lib/format";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
@@ -249,6 +249,12 @@ interface HotPathRow {
    * both identically.
    */
   shape?: string;
+  /**
+   * The named callers that reached this row's frame, outermost first. A
+   * function name alone rarely says what to do about it; the frames that called
+   * it place it in a feature and usually in a loop.
+   */
+  callers?: string;
   /** Opens Explore on this row's frame inside the task. */
   onFocus?: () => void;
 }
@@ -337,46 +343,64 @@ function cardRows(card: ProfileCard): HotPathCard {
   return { rows, footnotes };
 }
 
+/** A card's worth of culprits. The rest of the list lives in Explore. */
+const CARD_CULPRIT_ROWS = 8;
+
 /**
- * A task card's rows are its boundary frames — the outermost application frame
- * on each branch — ranked by inclusive time.
+ * A task card's rows are its culprits — the functions whose own bodies burned
+ * the time — each under the callers that reached it.
  *
- * Ranking by self time instead reported the sliver of each block that is not
- * covered by its callees, which in application code is almost nothing: a React
- * component delegates its whole cost downward, so a card about a three-second
- * task listed a few hundred milliseconds and called the rest too small to list.
- * Inclusive time is what a flame chart draws as a block's width, so these rows
- * are the blocks a reader can see, and because no boundary frame is an ancestor
- * of another they still do not double-count a millisecond.
+ * The rows used to be the boundary frames, and those are the wrong end of the
+ * stack to put a bar against. A boundary frame is the *outermost* drawable
+ * frame on its branch, so on a React profile it is a component that delegates
+ * everything downward: on a real 3.2 s task six of its eight rows read `0 ms
+ * self`, their bars measured how long the frame sat on the stack rather than
+ * what it cost, and two cards over the same screen listed the same five names.
+ * Which feature ran is worth saying once, so it is the heading and the subtitle
+ * now. The rows answer the question after it, which is what to go and change.
+ *
+ * Self time is also a true partition of the task, so unlike the inclusive
+ * figures these rows replace, the numbers add up and no millisecond is claimed
+ * twice.
  */
 function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string) => void): HotPathCard {
-  const rows: HotPathRow[] = card.boundaryFrames.map((frame) => ({
-    location: frame.location,
-    title: frame.name,
-    ms: frame.totalMs,
-    secondaryLabel: `${formatMs(frame.selfMs)} self`,
-    percentLabel: card.durationMs > 0 ? `${Math.round((frame.totalMs / card.durationMs) * 100)}% of task` : undefined,
-    barPercent: card.durationMs > 0 ? (frame.totalMs / card.durationMs) * 100 : 0,
-    shape: frame.shapeText,
-    onFocus: () => onFocus(frame.nodeId),
+  // A card is read at a glance, so it takes the head of the list; the whole of
+  // it is one click away in Explore's Culprits tab.
+  const shown = card.culprits.slice(0, CARD_CULPRIT_ROWS);
+  const rows: HotPathRow[] = shown.map((culprit) => ({
+    location: culprit.location,
+    title: culprit.name,
+    ms: culprit.selfMs,
+    // Only when the two differ. A leaf burns all of its own time, so printing
+    // `1.57 s` beside `1.57 s with callees` says the same thing twice and
+    // invites the reader to look for a distinction that is not there.
+    secondaryLabel: culprit.totalMs - culprit.selfMs >= 1 ? `${formatMs(culprit.totalMs)} with callees` : undefined,
+    percentLabel: card.durationMs > 0 ? `${Math.round((culprit.selfMs / card.durationMs) * 100)}% of task` : undefined,
+    barPercent: card.durationMs > 0 ? (culprit.selfMs / card.durationMs) * 100 : 0,
+    shape: culprit.shapeText,
+    callers: culprit.callers.length > 0 ? culprit.callers.join(" › ") : undefined,
+    onFocus: () => onFocus(culprit.nodeId),
   }));
 
   const footnotes: string[] = [];
-  const attributed = card.boundaryFrames.reduce((sum, frame) => sum + frame.totalMs, 0);
-  const rest = card.durationMs - attributed;
-  // Naming what the remainder *is* rather than calling it too small to list:
-  // it is the framework and engine work around the application frames above,
-  // plus any application branch below the floor, and a reader who knows that
-  // can judge whether the rows account for the task.
+  const named = shown.reduce((sum, culprit) => sum + culprit.selfMs, 0);
+  const rest = card.durationMs - named;
+  const more = card.culprits.length - shown.length;
   if (rest >= 1) {
-    footnotes.push(`${formatMs(rest)} ran outside these frames, in framework and engine code`);
-  }
-  if (card.culprits.length > 0) {
-    const worst = card.culprits
-      .slice(0, 3)
-      .map((culprit) => `${culprit.name} ${formatMs(culprit.selfMs)}`)
-      .join(" · ");
-    footnotes.push(`most time in a function's own body: ${worst}`);
+    // How the remainder is shaped, not just how big it is. A list this short
+    // covering a quarter of a three-second task reads as a short measurement
+    // unless the card says the cost really is spread that thin — which is
+    // itself the finding, and the opposite of a task with one hot function.
+    // The claim only holds while nothing above the floor was cut.
+    if (more === 0 && card.culprits.length < MAX_CULPRITS) {
+      footnotes.push(`${formatMs(rest)} ran in functions that each burned under ${CULPRIT_MIN_MS} ms of their own and under ${CULPRIT_MIN_MS} ms including their callees — the cost here is spread rather than concentrated`);
+    } else {
+      // Where the rest went is a click away rather than a dead end, so the
+      // footnote says how much of it Explore can actually name.
+      footnotes.push(more > 0
+        ? `${formatMs(rest)} ran in functions smaller than the ones above — Explore names the next ${more}`
+        : `${formatMs(rest)} ran in functions smaller than the ones above`);
+    }
   }
   if (card.segments && card.segments.length > 0) {
     footnotes.push(`this task is long enough to be a phase — ${card.segments.map((segment) => segment.title).join(", ")}`);
@@ -386,15 +410,51 @@ function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string
     footnotes.push("the profiler recorded no task boundaries, so this block was reconstructed from idle gaps");
   }
   if (set.classesDegraded) {
-    footnotes.push("frames inside the bundle were classified without a model, so the feature below may be incomplete");
+    footnotes.push("frames inside the bundle were classified without a model, so your own code and your dependencies are not told apart below");
   }
+  // A task whose cost is spread so thin that nothing clears the floor would
+  // otherwise render as a card with no rows at all, and the renderer drops the
+  // footnotes with them. The boundary frames are weaker rows, and weaker rows
+  // beat an empty card.
+  if (rows.length === 0) return { rows: boundaryFrameRows(card, onFocus), footnotes };
   return { rows, footnotes };
 }
 
-/** The second line of a task card: where the task started, now that the heading names the feature. */
+function boundaryFrameRows(card: TaskCard, onFocus: (nodeId: string) => void): HotPathRow[] {
+  return card.boundaryFrames.map((frame) => ({
+    location: frame.location,
+    title: frame.name,
+    ms: frame.totalMs,
+    secondaryLabel: `${formatMs(frame.selfMs)} self`,
+    percentLabel: card.durationMs > 0 ? `${Math.round((frame.totalMs / card.durationMs) * 100)}% of task` : undefined,
+    barPercent: card.durationMs > 0 ? (frame.totalMs / card.durationMs) * 100 : 0,
+    shape: frame.shapeText,
+    onFocus: () => onFocus(frame.nodeId),
+  }));
+}
+
+/** Boundary frames named in the subtitle, before the line gets too long to scan. */
+const SUBTITLE_FRAMES = 4;
+
+/**
+ * The second line of a card: the rest of your frames this task ran inside.
+ *
+ * This is where the boundary frames went when the rows became culprits. They
+ * are a real answer to "which feature is this" and a poor answer to "what do I
+ * change", so naming them reads once and gets out of the way. It replaces
+ * `8 entry points into your code in this task`, which counted the rows beneath
+ * it and said nothing else.
+ *
+ * It starts after the ones the heading already named, so a task entered through
+ * a single frame has no subtitle at all rather than a line echoing its title.
+ */
 function taskSubtitle(card: TaskCard): string | undefined {
-  if (card.boundaryFrames.length === 0) return undefined;
-  return `${card.boundaryFrames.length} application ${card.boundaryFrames.length === 1 ? "entry point" : "entry points"} in this task`;
+  const rest = card.boundaryFrames.slice(HEADLINE_FRAMES);
+  if (rest.length === 0) return undefined;
+  const shown = rest.slice(0, SUBTITLE_FRAMES);
+  const named = shown.map((frame) => `${frame.name} ${formatMs(frame.totalMs)}`).join(" · ");
+  const hidden = rest.length - shown.length;
+  return hidden > 0 ? `also ${named} · +${hidden} more` : `also ${named}`;
 }
 
 /** The second line of a card: how often this frame ran. */
@@ -471,6 +531,12 @@ function AnalysisResultCard({
                 row.onFocus
                   ? <button type="button" className="row-title row-title-link" onClick={row.onFocus}>{row.title}</button>
                   : <strong className="row-title">{row.title}</strong>
+              ) : null}
+              {row.callers ? (
+                <p className="row-callers" title={row.callers}>
+                  <span className="row-callers-label">via</span>
+                  {row.callers}
+                </p>
               ) : null}
               {row.ms !== undefined && (
                 <>

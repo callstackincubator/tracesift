@@ -5,10 +5,12 @@ import { Button, EmptyState, FlameGraph, PluginHeader, PluginShell, Tabs, Text }
 import type { FlameGraphNode } from "@rozenite/ui";
 
 import { ThemeGate } from "@/app/theme-gate";
+import { useStretchZoom, ZoomControls } from "./stretch-zoom";
 import { fetchTaskHandoff, readCardHandoff, type CardHandoff, type TaskHandoff } from "@/lib/card-handoff";
 import { formatMs } from "@/lib/format";
 import type { CardChildNode, RepeatedFunction } from "@/lib/profile-cards";
-import type { TaskTreeNode } from "@/lib/task-cards";
+import { focusedTree, type TaskTreeNode } from "@/lib/task-cards";
+import type { TaskTimeline, TimelineBox } from "@/lib/task-timeline";
 
 /** The captured subtree, in the shape the flame graph reads. */
 function toFlameNode(name: string, totalMs: number, selfMs: number, children: CardChildNode[], path: string): FlameGraphNode {
@@ -44,8 +46,15 @@ function callLabel(count: number, exact: boolean): string {
  * The same subtree as the flame graph, but openable row by row: a flame graph
  * answers "where is the time", a tree answers "what called what", and the two
  * questions come up at different moments.
+ *
+ * A closed row renders no children at all. A collapsed `<details>` still mounts
+ * everything inside it, and a real stack runs hundreds of frames deep (936 in
+ * the trace fixture), so mounting the whole tree at once nested the DOM deeply
+ * enough to overflow the JS stack in React's commit traversal before a single
+ * row appeared. Rows now mount as they are opened.
  */
 function TreeRow({ node, cardTotalMs, exact, depth }: { node: CardChildNode; cardTotalMs: number; exact: boolean; depth: number }) {
+  const [open, setOpen] = useState(depth === 0);
   const share = cardTotalMs > 0 ? (node.totalMs / cardTotalMs) * 100 : 0;
   const count = exact ? node.invocations ?? node.callSites : node.callSites;
   const row = (
@@ -68,20 +77,26 @@ function TreeRow({ node, cardTotalMs, exact, depth }: { node: CardChildNode; car
   if (node.children.length === 0) return <li className="explore-tree-leaf" style={{ "--depth": depth } as React.CSSProperties}>{row}</li>;
   return (
     <li style={{ "--depth": depth } as React.CSSProperties}>
-      <details open={depth === 0}>
+      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary>{row}</summary>
-        <ul className="explore-tree">
-          {node.children.map((child, index) => (
-            <TreeRow key={`${child.name}-${index}`} node={child} cardTotalMs={cardTotalMs} exact={exact} depth={depth + 1} />
-          ))}
-        </ul>
+        {open ? (
+          <ul className="explore-tree">
+            {node.children.map((child, index) => (
+              <TreeRow key={`${child.name}-${index}`} node={child} cardTotalMs={cardTotalMs} exact={exact} depth={depth + 1} />
+            ))}
+          </ul>
+        ) : null}
       </details>
     </li>
   );
 }
 
-/** The task tree's own row. Clicking a name refocuses the view on that frame. */
+/**
+ * The task tree's own row. Clicking a name refocuses the view on that frame.
+ * Children mount only while the row is open — see `TreeRow` for why.
+ */
 function TaskTreeRow({ node, taskMs, depth, onFocus }: { node: TaskTreeNode; taskMs: number; depth: number; onFocus: (id: string) => void }) {
+  const [open, setOpen] = useState(depth < 2);
   const share = taskMs > 0 ? (node.totalMs / taskMs) * 100 : 0;
   const row = (
     <div className="explore-tree-row">
@@ -102,13 +117,15 @@ function TaskTreeRow({ node, taskMs, depth, onFocus }: { node: TaskTreeNode; tas
   if (node.children.length === 0) return <li className="explore-tree-leaf" style={{ "--depth": depth } as React.CSSProperties}>{row}</li>;
   return (
     <li style={{ "--depth": depth } as React.CSSProperties}>
-      <details open={depth < 2}>
+      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary>{row}</summary>
-        <ul className="explore-tree">
-          {node.children.map((child) => (
-            <TaskTreeRow key={child.id} node={child} taskMs={taskMs} depth={depth + 1} onFocus={onFocus} />
-          ))}
-        </ul>
+        {open ? (
+          <ul className="explore-tree">
+            {node.children.map((child) => (
+              <TaskTreeRow key={child.id} node={child} taskMs={taskMs} depth={depth + 1} onFocus={onFocus} />
+            ))}
+          </ul>
+        ) : null}
       </details>
     </li>
   );
@@ -163,6 +180,150 @@ function RepeatedTable({ rows, exact }: { rows: RepeatedFunction[]; exact: boole
         ))}
       </tbody>
     </table>
+  );
+}
+
+
+const ROW_HEIGHT = 22;
+
+/** Round tick spacing: a ruler labelled 322.7 ms apart is a ruler nobody reads. */
+function tickStepMs(visibleMs: number): number {
+  const rough = visibleMs / 10;
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(rough, 0.001)));
+  for (const step of [1, 2, 5, 10]) {
+    if (rough <= step * magnitude) return step * magnitude;
+  }
+  return 10 * magnitude;
+}
+
+/**
+ * The task against the clock, which is the view a reader arrives with after
+ * seeing the block in Chrome's Performance panel.
+ *
+ * Positions are percentages of the task's duration, so the chart fits its
+ * container at zoom 1 with nothing measured, and zooming is one width on the
+ * scrolling element. The framework and the engine have been collapsed away
+ * upstream, so a frame that really sat twelve deep under the reconciler is
+ * drawn on the first row — and the stretches where nothing but framework or
+ * engine code was on the stack are left as gaps rather than filled in, because
+ * they were not idle and the chart must not imply they were.
+ */
+function TaskTimelineChart({
+  timeline,
+  focusId,
+  onFocus,
+}: {
+  timeline: TaskTimeline;
+  focusId: string;
+  onFocus: (nodeId: string) => void;
+}) {
+  const { zoom, viewport, canvas, readout, jumpTo } = useStretchZoom();
+  const { durationMs } = timeline;
+
+  const ticks = useMemo(() => {
+    const step = tickStepMs(durationMs / zoom);
+    const out: number[] = [];
+    for (let at = 0; at <= durationMs; at += step) out.push(at);
+    return out;
+  }, [durationMs, zoom]);
+
+  if (timeline.boxes.length === 0) {
+    return (
+      <EmptyState
+        title="Nothing to draw in this task"
+        description="Every frame the profiler recorded in this block was React or engine code, so there is nothing left once they are collapsed. The call tree still holds all of it."
+      />
+    );
+  }
+
+  const uncoveredMs = Math.max(0, durationMs - timeline.coveredMs);
+  const percent = (value: number) => `${(value / durationMs) * 100}%`;
+
+  return (
+    <div className="timeline">
+      <div className="timeline-controls">
+        <ZoomControls zoom={zoom} jumpTo={jumpTo} readout={readout} />
+        <span className="timeline-legend">
+          {formatMs(timeline.coveredMs)} of {formatMs(durationMs)} under your code or a dependency
+          {uncoveredMs > 0.5 ? ` · ${formatMs(uncoveredMs)} in React or engine code` : ""}
+          {timeline.omittedBoxCount > 0
+            ? ` · ${timeline.omittedBoxCount} calls too short to draw`
+            : ""}
+        </span>
+      </div>
+
+      <div className="timeline-scroll" ref={viewport}>
+        <div className="timeline-canvas" ref={canvas} style={{ width: `${zoom * 100}%` }}>
+          <div className="timeline-ruler">
+            {ticks.map((at) => (
+              <span key={at} className="timeline-tick" style={{ left: percent(at) }}>
+                {formatMs(at)}
+              </span>
+            ))}
+          </div>
+          <div className="timeline-rows" style={{ height: `${timeline.rows * ROW_HEIGHT}px` }}>
+            {timeline.boxes.map((box, index) => (
+              <TimelineBoxView
+                key={`${box.nodeId}-${index}`}
+                box={box}
+                percent={percent}
+                selected={box.nodeId === focusId}
+                onFocus={onFocus}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      <Text className="explore-caveat">
+        Zoom stretches the chart and scrolls it sideways, so a short call widens where it sits rather than being
+        re-drawn on its own; &#8984;/Ctrl with the scroll wheel zooms about the pointer.
+        React and engine frames are collapsed away, so a box&rsquo;s row is its depth on this chart rather than its
+        real stack depth. A box is one call, at the moment it ran, drawn at sample resolution — two calls closer
+        together than one sample merge, and one shorter than a sample may not appear. Its span is wall clock, so it
+        covers the framework work the call delegated to and any collection pause that fell inside it; the card&rsquo;s
+        longest-call figure counts neither, which is why a box can read slightly wider.
+      </Text>
+    </div>
+  );
+}
+
+/**
+ * How long the call took, and where it sat.
+ *
+ * Only the outermost box names its start. An offset is read against the start
+ * of the task, and on a nested box that invites the reader to subtract it from
+ * the parent's — which is wrong, because the two are measured from the same
+ * origin rather than from each other, so `278 ms from 550 ms` under `678 ms
+ * from 394 ms` reads as a call that began 550 ms into its parent. The duration
+ * is the figure a nested box is there to give.
+ */
+function timingLine(box: TimelineBox): string {
+  const own = `${formatMs(box.selfMs)} of its own`;
+  if (box.depth > 0) return `${formatMs(box.durationMs)}, ${own}`;
+  return `${formatMs(box.durationMs)} from ${formatMs(box.startMs)}, ${own}`;
+}
+
+function TimelineBoxView({
+  box,
+  percent,
+  selected,
+  onFocus,
+}: {
+  box: TimelineBox;
+  percent: (value: number) => string;
+  selected: boolean;
+  onFocus: (nodeId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={selected ? "timeline-box is-selected" : "timeline-box"}
+      style={{ left: percent(box.startMs), width: percent(box.durationMs), top: `${box.depth * ROW_HEIGHT}px` }}
+      title={`${box.name}\n${timingLine(box)}${box.location ? `\n${box.location}` : ""}`}
+      onClick={() => onFocus(box.nodeId)}
+    >
+      <span>{box.name}</span>
+    </button>
   );
 }
 
@@ -286,6 +447,173 @@ function Explorer() {
   );
 }
 
+/**
+ * The library's own floors, both of which the zoom has to divide: a frame
+ * narrower than the first is not drawn at all, and one narrower than the second
+ * is drawn without its name. Both are shares of the canvas rather than of what
+ * the reader sees, and at 64× the canvas is sixty-four screens wide — so a box
+ * filling the window outright is 1.6% of it, and the unscaled floor would leave
+ * it blank with its name only in the tooltip.
+ */
+const DEFAULT_MIN_FRAME_WIDTH = 0.08;
+const DEFAULT_MIN_LABEL_WIDTH = 3;
+
+type TreeMode = "full" | "focused";
+
+/**
+ * The two cuts of the same subtree, as a pair of buttons. Shared by the flame
+ * graph and the call tree so the one toggle reads the same wherever it appears.
+ */
+function TreeModeToggle({ label, mode, onChange }: { label: string; mode: TreeMode; onChange: (mode: TreeMode) => void }) {
+  return (
+    <div className="timeline-controls">
+      <span className="explore-path-label">{label}</span>
+      {([["full", "Everything"], ["focused", "Your code only"]] as const).map(([value, text]) => (
+        <button
+          key={value}
+          type="button"
+          className={value === mode ? "timeline-zoom is-current" : "timeline-zoom"}
+          aria-pressed={value === mode}
+          onClick={() => onChange(value)}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The focused subtree as a flame graph, with the framework and the engine
+ * either drawn or collapsed away.
+ *
+ * Collapsed is the default here, unlike the call tree. A flame graph is read by
+ * eye rather than row by row, and on a React profile the recorded stack spends
+ * its first dozen rows on `performWorkOnRoot`, `beginWork` and
+ * `commitPassiveMountOnFiber` — boxes that carry the full width of the task and
+ * name nothing a reader can change. Collapsing them puts the product frames at
+ * the top of the graph where the eye lands. `Everything` is one click away for
+ * the times the reconciler is the thing being read.
+ */
+function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
+  const [mode, setMode] = useState<TreeMode>("focused");
+  const flame = useMemo(() => taskFlameNode(mode === "focused" ? focusedTree(focus) : focus), [mode, focus]);
+  const [drill, setDrill] = useState<{ key: string; name: string } | null>(null);
+  const { zoom, viewport, canvas, readout, jumpTo, scrollToStart } = useStretchZoom();
+
+  // Both the mode toggle and a new focus change which frames exist, so a key
+  // taken from the old graph names nothing in the new one and would silently
+  // drop the view back to the root. Reset during render rather than in an
+  // effect: a frame of the new graph drilled into a stale key would flash.
+  const graphKey = `${mode}:${focus.id}`;
+  const [drawnKey, setDrawnKey] = useState(graphKey);
+  if (drawnKey !== graphKey) {
+    setDrawnKey(graphKey);
+    setDrill(null);
+  }
+
+  return (
+    <>
+      <div className="flame-controls">
+        <TreeModeToggle label="frames" mode={mode} onChange={setMode} />
+        <div className="timeline-controls">
+          <ZoomControls zoom={zoom} jumpTo={jumpTo} readout={readout} />
+        </div>
+      </div>
+
+      {drill ? (
+        <p className="explore-path">
+          <span className="explore-path-label">zoomed into</span>
+          <span className="explore-path-frame">{drill.name}</span>
+          <button type="button" className="explore-tree-focus" onClick={() => setDrill(null)}>Show the whole subtree</button>
+        </p>
+      ) : null}
+
+      <div className="flame-viewport" ref={viewport}>
+        <div className="flame-scale" ref={canvas} style={{ width: `${zoom * 100}%` }}>
+          {/* Keyed by mode so the graph remounts rather than animating one tree's
+              boxes into the other's, which share neither ids nor widths. */}
+          <FlameGraph
+            key={graphKey}
+            className="overflow-visible"
+            data={flame}
+            formatValue={formatMs}
+            rowHeight={24}
+            focusedKey={drill?.key}
+            onFocusedKeyChange={(key, node) => {
+              setDrill(key && node ? { key, name: node.name } : null);
+              // The subtree clicked into is re-laid out across the whole
+              // canvas, so wherever the view was scrolled to names nothing any
+              // more. Its start is the one place worth being.
+              scrollToStart();
+            }}
+            // The library hides frames narrower than a share of its own box,
+            // and draws one narrower than another share without its name. That
+            // box is now `zoom` times wider than what the reader sees, so the
+            // unscaled floors would keep hiding exactly the frames, and the
+            // names, that zooming in exists to reveal.
+            minFrameWidth={DEFAULT_MIN_FRAME_WIDTH / zoom}
+            minLabelWidth={DEFAULT_MIN_LABEL_WIDTH / zoom}
+          />
+        </div>
+      </div>
+
+      <Text className="explore-caveat">
+        Click a frame to zoom into its subtree, Escape to come back out. The zoom stretches the whole graph instead,
+        so thin frames widen in place and the view scrolls sideways; &#8984;/Ctrl with the scroll wheel zooms about
+        the pointer.
+        {mode === "focused" ? (
+          <>
+            {" "}React and engine frames are collapsed away, the same cut the Timeline draws by, so a box&rsquo;s row
+            is its depth here rather than its real stack depth. The time a dropped frame burned in its own body is
+            charged to the nearest frame above it that was kept.
+          </>
+        ) : null}
+      </Text>
+    </>
+  );
+}
+
+/**
+ * The focused subtree, either as it was recorded or with the framework and the
+ * engine collapsed away.
+ *
+ * Both are worth having. The full tree is the only view that can answer how a
+ * frame was reached when the answer runs through the reconciler, and it is the
+ * one to hold against a debugger. It is also, on a React profile, mostly rows
+ * nobody can act on: a reader opening a task to find their own code scrolls
+ * past `performWorkOnRoot`, `beginWork` and ten more frames before the first
+ * name they recognise. The focused tree is the timeline's cut applied to the
+ * rows — same frames kept, same frames dropped — so the two views line up.
+ *
+ * Full stays the default: this tab is the one view that still holds everything
+ * the profiler recorded, and a reader who wanted the collapsed picture has had
+ * it on the Timeline tab since arriving.
+ */
+function TaskCallTree({ focus, taskMs, onFocus }: { focus: TaskTreeNode; taskMs: number; onFocus: (id: string) => void }) {
+  const [mode, setMode] = useState<TreeMode>("full");
+  const tree = useMemo(() => (mode === "focused" ? focusedTree(focus) : focus), [mode, focus]);
+
+  return (
+    <>
+      <TreeModeToggle label="tree" mode={mode} onChange={setMode} />
+      <ul className="explore-tree">
+        {/* Keyed by mode so the two trees do not share open/closed state: a row
+            open at depth 4 in one is a different frame at that depth in the other. */}
+        <TaskTreeRow key={mode} node={tree} taskMs={taskMs} depth={0} onFocus={onFocus} />
+      </ul>
+      {mode === "focused" ? (
+        <Text className="explore-caveat">
+          React and engine frames are collapsed away, the same cut the Timeline draws by, so a row&rsquo;s indent is
+          its depth here rather than its real stack depth. The time a dropped frame burned in its own body is charged
+          to the nearest frame above it that was kept, which is why a row can read more self time here than on the
+          full tree.
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
 /** Root to `id`, or just the root when the id names nothing in this task. */
 function pathTo(root: TaskTreeNode, id: string): TaskTreeNode[] {
   const stack: TaskTreeNode[][] = [[root]];
@@ -316,8 +644,6 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
   const focus = path[path.length - 1];
   const parent = path.length > 1 ? path[path.length - 2] : null;
   const siblings = parent ? parent.children.filter((child) => child.id !== focus.id) : [];
-  const flame = useMemo(() => taskFlameNode(focus), [focus]);
-
   const refocus = (id: string) => {
     setFocusId(id);
     // Keep the address bar in step so the view can be reloaded or shared at the
@@ -389,19 +715,21 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
         </nav>
       ) : null}
 
-      <Tabs className="explore-tabs" defaultValue="flame">
+      <Tabs className="explore-tabs" defaultValue="timeline">
         <Tabs.List size="sm" aria-label="Views of this task">
+          <Tabs.Tab value="timeline">Timeline</Tabs.Tab>
           <Tabs.Tab value="flame">Flame graph</Tabs.Tab>
           <Tabs.Tab value="tree">Call tree</Tabs.Tab>
           <Tabs.Tab value="culprits">Culprits</Tabs.Tab>
         </Tabs.List>
+        <Tabs.Panel value="timeline" className="explore-panel">
+          <TaskTimelineChart timeline={card.timeline} focusId={focusId} onFocus={refocus} />
+        </Tabs.Panel>
         <Tabs.Panel value="flame" className="explore-panel">
-          <FlameGraph data={flame} formatValue={formatMs} rowHeight={24} />
+          <TaskFlameGraph focus={focus} />
         </Tabs.Panel>
         <Tabs.Panel value="tree" className="explore-panel">
-          <ul className="explore-tree">
-            <TaskTreeRow node={focus} taskMs={card.durationMs} depth={0} onFocus={refocus} />
-          </ul>
+          <TaskCallTree focus={focus} taskMs={card.durationMs} onFocus={refocus} />
         </Tabs.Panel>
         <Tabs.Panel value="culprits" className="explore-panel">
           {card.culprits.length > 0 ? (

@@ -321,6 +321,31 @@ button, input { font: inherit; }
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+/* The callers that reached this row's frame. Sits between the title and the
+   figures because it finishes the row's name: `isReceiptBeingScanned` alone is
+   a function, and `via reportMatchesTodoBucket › isApproveAction` is a finding. */
+.row-callers {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 9px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.row-callers-label {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
 .row-figure-line {
   display: flex;
   align-items: baseline;
@@ -1267,7 +1292,7 @@ body { background: var(--background, #151419); }
 }
 .hotspot-heading-copy { display: grid; min-width: 0; gap: 3px; }
 /* The burst count qualifies the headline total; it must not compete with it. */
-.hotspot-subtitle { color: var(--muted-foreground); font-size: 12px; opacity: 0.75; }
+.hotspot-subtitle { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; opacity: 0.75; overflow-wrap: anywhere; }
 .hotspot-head .hotspot-heading-copy strong { font-size: 15px; line-height: 1.4; }
 .hotspot-time {
   padding: 6px 9px;
@@ -1283,6 +1308,8 @@ body { background: var(--background, #151419); }
 .hot-path-row:last-child { border-bottom: 0; }
 .row-location { margin-bottom: 13px; }
 .row-location-label { color: var(--primary); background: var(--accent); border-color: transparent; }
+.row-callers { margin-bottom: 13px; }
+.row-callers-label { color: var(--primary); background: var(--accent); border-color: transparent; }
 .row-title { display: block; margin-bottom: 12px; font-size: 14px; }
 .row-title-link { margin-bottom: 12px; font-size: 14px; }
 .row-shape { margin-top: 10px; font-size: 12px; }
@@ -1646,3 +1673,96 @@ body {
   .explore-tree-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "figures" "bar" "location"; }
   .explore-table { font-size: 12px; }
 }
+
+/* The task against the clock. Positions are percentages of the task duration,
+   so the chart fits at zoom 1 and zooming is one width on the canvas. */
+.timeline { display: flex; flex-direction: column; gap: 10px; }
+.timeline-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-bottom: 10px;
+}
+.timeline-zoom {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.timeline-zoom:hover { background: var(--muted); }
+.timeline-zoom.is-current { border-color: var(--primary); color: var(--primary); }
+.timeline-legend { margin-left: auto; }
+.timeline-zoom:disabled { opacity: 0.4; cursor: default; }
+.timeline-zoom:disabled:hover { background: transparent; }
+
+/* The flame graph's two controls on one line, and the box the stretched graph
+   scrolls inside. The graph itself is percentage-based, so zooming is nothing
+   but a wider canvas: `.flame-scale` is `zoom * 100%` of the viewport and every
+   frame keeps the same share of it. */
+.flame-controls { display: flex; flex-wrap: wrap; align-items: baseline; gap: 18px; }
+.flame-controls .timeline-controls { margin-bottom: 10px; }
+.flame-viewport { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+/* Where a wheel gesture landed, which falls between the ladder's rungs. */
+.zoom-readout { min-width: 4ch; margin-left: 4px; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.flame-scale { min-width: 100%; }
+
+.timeline-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: 10px; }
+.timeline-canvas { position: relative; min-width: 100%; padding: 0 0 8px; }
+
+.timeline-ruler {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.timeline-tick {
+  position: absolute;
+  top: 4px;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Gaps are stretches where only React or engine code was on the stack. They are
+   left empty on a hatched ground so they read as "not our code", never as idle. */
+.timeline-rows {
+  position: relative;
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--muted) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.timeline-box {
+  position: absolute;
+  height: 20px;
+  min-width: 1px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--chart-2, #4ade80);
+  color: #04210f;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--background) 65%, transparent);
+}
+.timeline-box > span { padding: 0 4px; pointer-events: none; }
+.timeline-box:hover { filter: brightness(1.12); }
+.timeline-box.is-selected { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }

@@ -113,15 +113,34 @@ const IDLE = "(idle)";
  * `timeDeltas[i]` is the gap *before* sample `i`, so the prefix sum has to
  * include the current delta: dropping it puts every sample one interval early
  * and the last task of a recording loses its samples to the one before it.
+ *
+ * A real recording carries negative deltas — V8's sampler reads a clock that
+ * can step backwards, and a 13 s Chrome trace of a web app runs to several
+ * hundred of them. They have to be added, not dropped: clamping each one to
+ * zero leaves the reconstructed clock permanently ahead of the real one by
+ * their sum, which on that trace is 69 ms. Nothing says so at the time — the
+ * timestamps still look plausible — but the binary search below then cuts
+ * every task's sample window at the wrong place, so a task picks up the tail
+ * of the one before it, loses its own, and every box on the timeline sits that
+ * far to the right of where it ran.
+ *
+ * The running maximum is what the clamp was reaching for. `lowerBound` needs a
+ * non-decreasing array, and carrying the deltas raw does not give one. Holding
+ * the clock flat across an inversion costs the few samples inside it their
+ * ordering and nothing else: the series rejoins the true clock as soon as the
+ * deltas make the time back up, so the error stays local instead of
+ * accumulating over the recording.
  */
 function sampleTimestamps(profile: CdpProfile): number[] {
   const samples = profile.samples ?? [];
   const deltas = profile.timeDeltas ?? [];
   const out = new Array<number>(samples.length);
   let clock = profile.startTime;
+  let ceiling = profile.startTime;
   for (let index = 0; index < samples.length; index += 1) {
-    clock += Math.max(0, deltas[index] ?? 0);
-    out[index] = clock;
+    clock += deltas[index] ?? 0;
+    ceiling = Math.max(ceiling, clock);
+    out[index] = ceiling;
   }
   return out;
 }

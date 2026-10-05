@@ -25,7 +25,7 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
         "startMs": 1201,
         "durationMs": 2111,
         "boundaries": "measured",
-        "headline": "_onFocus — a 2111 ms task 1.20 s into the recording",
+        "headline": "_onFocus \u2014 a 2111 ms task 1.20 s into the recording",
         "percentOfProfile": 25.97,
         "boundaryFrames": [
           {
@@ -33,10 +33,10 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "location": "app/screens/UserList.js:142:1",
             "nodeId": "0.0",
             "totalMs": 2111,
-            "selfMs": 0.4,
+            "selfMs": 0,
             "invocations": 1,
             "longestCallMs": 2111,
-            "shapeText": "ran once in this task · 2111 ms total"
+            "shapeText": "ran once in this task \u00b7 2.11 s total"
           }
         ],
         "culprits": [
@@ -47,8 +47,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 1568,
             "invocations": 8,
             "longestCallMs": 196,
-            "shapeText": "ran 8 times in this task · 1.57 s total · longest single call 196 ms",
+            "shapeText": "ran 8 times in this task \u00b7 1.57 s total \u00b7 longest single call 196 ms",
             "nodeId": "0.0.0.0.0.0",
+            "callers": ["_onFocus", "getUserByUserName", "_compareUsers"],
             "reachedVia": [
               "_onFocus (app/screens/UserList.js:142:1)",
               "getUserByUserName (app/screens/UserList.js:89:1)",
@@ -67,8 +68,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 420,
             "invocations": 1,
             "longestCallMs": 420,
-            "shapeText": "ran once in this task · 420 ms total",
+            "shapeText": "ran once in this task \u00b7 420 ms total",
             "nodeId": "0.0.0.1",
+            "callers": ["_onFocus", "getUserByUserName"],
             "reachedVia": [
               "_onFocus (app/screens/UserList.js:142:1)",
               "getUserByUserName (app/screens/UserList.js:89:1)",
@@ -86,8 +88,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 2111,
             "invocations": 1,
             "longestCallMs": 2111,
-            "shapeText": "ran once in this task · 2.11 s total",
+            "shapeText": "ran once in this task \u00b7 2.11 s total",
             "nodeId": "0.0.0",
+            "callers": ["_onFocus"],
             "reachedVia": [
               "_onFocus (app/screens/UserList.js:142:1)",
               "getUserByUserName (app/screens/UserList.js:89:1)"
@@ -171,6 +174,118 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             }
           ]
         },
+        "timeline": {
+          "boxes": [
+            {
+              "depth": 0,
+              "name": "_onFocus",
+              "location": "app/screens/UserList.js:142:1",
+              "frameClass": "app",
+              "startMs": 0,
+              "durationMs": 2111,
+              "selfMs": 0,
+              "nodeId": "0.0"
+            },
+            {
+              "depth": 1,
+              "name": "getUserByUserName",
+              "location": "app/screens/UserList.js:89:1",
+              "frameClass": "app",
+              "startMs": 0,
+              "durationMs": 2111,
+              "selfMs": 543,
+              "nodeId": "0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 87,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 289,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 490,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 691,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 892,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 1093,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 1294,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            },
+            {
+              "depth": 2,
+              "name": "_compareUsers",
+              "location": "app/screens/UserList.js:95:1",
+              "frameClass": "app",
+              "startMs": 1495,
+              "durationMs": 196,
+              "selfMs": 196,
+              "nodeId": "0.0.0.0.0"
+            }
+          ],
+          "durationMs": 2111,
+          "coveredMs": 2111,
+          "rows": 3,
+          "kept": [
+            "app"
+          ],
+          "omittedBoxCount": 0,
+          "omittedBoxMs": 0
+        },
         "subtreeFunctionCount": 6,
         "confidence": "ok",
         "segments": [
@@ -234,7 +349,7 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
         "startMs": 5001,
         "durationMs": 655,
         "boundaries": "measured",
-        "headline": "_onChange — a 655 ms task 5.00 s into the recording",
+        "headline": "_onChange \u2014 a 655 ms task 5.00 s into the recording",
         "percentOfProfile": 8.06,
         "boundaryFrames": [
           {
@@ -242,10 +357,10 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "location": "app/screens/UserList.js:168:1",
             "nodeId": "0.0",
             "totalMs": 655,
-            "selfMs": 0.2,
+            "selfMs": 0,
             "invocations": 1,
             "longestCallMs": 655,
-            "shapeText": "ran once in this task · 655 ms total"
+            "shapeText": "ran once in this task \u00b7 655 ms total"
           }
         ],
         "culprits": [
@@ -256,8 +371,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 420,
             "invocations": 12,
             "longestCallMs": 35,
-            "shapeText": "ran 12 times in this task · 420 ms total · longest single call 35 ms",
+            "shapeText": "ran 12 times in this task \u00b7 420 ms total \u00b7 longest single call 35 ms",
             "nodeId": "0.0.0.0.0",
+            "callers": ["_onChange", "formatDate"],
             "reachedVia": [
               "_onChange (app/screens/UserList.js:168:1)",
               "arrayPrototypeMap (native array.js:1:1)",
@@ -275,8 +391,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 75,
             "invocations": 1,
             "longestCallMs": 75,
-            "shapeText": "ran once in this task · 75 ms total",
+            "shapeText": "ran once in this task \u00b7 75 ms total",
             "nodeId": "0.0.1.0.0",
+            "callers": ["_onChange", "_temp3"],
             "reachedVia": [
               "_onChange (app/screens/UserList.js:168:1)",
               "arrayPrototypeSort (native array.js:1:1)",
@@ -295,8 +412,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 535,
             "invocations": 1,
             "longestCallMs": 535,
-            "shapeText": "ran once in this task · 535 ms total",
+            "shapeText": "ran once in this task \u00b7 535 ms total",
             "nodeId": "0.0.0.0",
+            "callers": ["_onChange"],
             "reachedVia": [
               "_onChange (app/screens/UserList.js:168:1)",
               "arrayPrototypeMap (native array.js:1:1)",
@@ -314,8 +432,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 55,
             "invocations": 1,
             "longestCallMs": 55,
-            "shapeText": "ran once in this task · 55 ms total",
+            "shapeText": "ran once in this task \u00b7 55 ms total",
             "nodeId": "0.0.0.0.1",
+            "callers": ["_onChange", "formatDate"],
             "reachedVia": [
               "_onChange (app/screens/UserList.js:168:1)",
               "arrayPrototypeMap (native array.js:1:1)",
@@ -334,8 +453,9 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "totalMs": 120,
             "invocations": 1,
             "longestCallMs": 120,
-            "shapeText": "ran once in this task · 120 ms total",
+            "shapeText": "ran once in this task \u00b7 120 ms total",
             "nodeId": "0.0.1.0",
+            "callers": ["_onChange"],
             "reachedVia": [
               "_onChange (app/screens/UserList.js:168:1)",
               "arrayPrototypeSort (native array.js:1:1)",
@@ -436,6 +556,48 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
               ]
             }
           ]
+        },
+        "timeline": {
+          "boxes": [
+            {
+              "depth": 0,
+              "name": "_onChange",
+              "location": "app/screens/UserList.js:168:1",
+              "frameClass": "app",
+              "startMs": 0,
+              "durationMs": 655,
+              "selfMs": 0,
+              "nodeId": "0.0"
+            },
+            {
+              "depth": 1,
+              "name": "formatDate",
+              "location": "app/lib/format.js:13:1",
+              "frameClass": "app",
+              "startMs": 0,
+              "durationMs": 535,
+              "selfMs": 535,
+              "nodeId": "0.0.0.0"
+            },
+            {
+              "depth": 1,
+              "name": "_temp3",
+              "location": "app/screens/UserList.js:174:1",
+              "frameClass": "app",
+              "startMs": 535,
+              "durationMs": 120,
+              "selfMs": 120,
+              "nodeId": "0.0.1.0"
+            }
+          ],
+          "durationMs": 655,
+          "coveredMs": 655,
+          "rows": 2,
+          "kept": [
+            "app"
+          ],
+          "omittedBoxCount": 0,
+          "omittedBoxMs": 0
         },
         "subtreeFunctionCount": 8,
         "confidence": "ok"

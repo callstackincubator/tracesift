@@ -30,6 +30,17 @@ test('the hardcoded lists are a floor under the URL', () => {
   assert.equal(classifyByRule(frame('(anonymous)', '')), 'anonymous');
 });
 
+test("V8's call wrappers are a call boundary, not an engine built-in", () => {
+  // They carry no URL, so the urlless rule would otherwise file them with the
+  // built-ins and the timeline would drop them — taking the nesting around the
+  // frames underneath with them.
+  assert.equal(classifyByRule(frame('Function call', '')), 'anonymous');
+  assert.equal(classifyByRule(frame('FunctionCall', '')), 'anonymous');
+  // Everything else without a URL is still the engine.
+  assert.equal(classifyByRule(frame('(program)', '')), 'native');
+  assert.equal(classifyByRule(frame('toString', '')), 'native');
+});
+
 test('a real name inside a bundle is the residue the model call exists for', () => {
   assert.equal(classifyByRule(frame('Search_Search', 'http://localhost:8081/index.bundle')), undefined);
   assert.equal(classifyByRule(frame('Ci', 'https://cdn.example.com/app.min.js')), undefined);

@@ -19,6 +19,17 @@ const MAX_PROMPT_FRAMES = 8;
 /** Only the culprits worth opening a file over get a stack of their own. */
 const MAX_STACKED_CULPRITS = 3;
 
+/**
+ * Culprits listed in the hand-off.
+ *
+ * A task ships up to `MAX_CULPRITS` of them, which is sized for a table a
+ * reader sorts; this is prose pasted into another agent's context, where the
+ * tail dilutes the rows above it rather than adding to them. The remainder
+ * line below still accounts for every millisecond the list leaves out, so
+ * cutting it loses coverage of nothing.
+ */
+const MAX_PROMPT_CULPRITS = 24;
+
 function culpritLine(culprit: TaskCulprit, taskMs: number): string {
   const where = culprit.location ? ` (${culprit.location})` : "";
   const share = taskMs > 0 ? ` — ${Math.round((culprit.selfMs / taskMs) * 100)}% of the task` : "";
@@ -65,17 +76,18 @@ export function buildTaskPrompt(card: TaskCard, totalMs: number): string {
   if (card.confidence === "low") task.push("- Few samples landed in this task, so treat these figures as a hint rather than a measurement.");
   sections.push(`## The task\n${task.join("\n")}`);
 
-  if (card.culprits.length > 0) {
-    const named = card.culprits.reduce((sum, culprit) => sum + culprit.selfMs, 0);
-    const lines = card.culprits.map((culprit) => culpritLine(culprit, card.durationMs));
+  const listed = card.culprits.slice(0, MAX_PROMPT_CULPRITS);
+  if (listed.length > 0) {
+    const named = listed.reduce((sum, culprit) => sum + culprit.selfMs, 0);
+    const lines = listed.map((culprit) => culpritLine(culprit, card.durationMs));
     const rest = round1(Math.max(0, card.durationMs - named));
     // Self time inside a task is a partition, so this remainder is exact rather
     // than the difference between two overlapping inclusive totals.
-    if (rest >= 1) lines.push(`- ${rest} ms of the task is spread across frames too small to list individually.`);
+    if (rest >= 1) lines.push(`- ${rest} ms of the task is spread across frames smaller than the ones listed above.`);
     sections.push(`## Where the task's time went\n${lines.join("\n")}`);
   }
 
-  const stacked = card.culprits.slice(0, MAX_STACKED_CULPRITS);
+  const stacked = listed.slice(0, MAX_STACKED_CULPRITS);
   if (stacked.length > 0) {
     sections.push(`## Stacks\n\n${stacked.map(stackBlock).join("\n\n")}`);
   }

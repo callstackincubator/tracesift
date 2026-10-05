@@ -18,7 +18,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { ANONYMOUS_NAMES, TRANSPARENT_NAMES, isMeaningfulFrame } from "./frame-names.ts";
+import { ANONYMOUS_NAMES, SYNTHETIC_CALL_NAMES, TRANSPARENT_NAMES, isMeaningfulFrame } from "./frame-names.ts";
 import { isFrameworkInternalFrame } from "./framework-frames.ts";
 import { traceSiftHome, type AnalysisModel, type TokenUsage } from "./analysis.ts";
 import { debugLog } from "./debug-log.ts";
@@ -83,7 +83,10 @@ export function classifyByRule(frame: CdpCallFrame, codeSplit = false): FrameCla
   if (isFrameworkInternalFrame(frame)) return "framework";
   if (DEPENDENCY_URL.test(url) || VENDOR_CHUNK.test(url)) return "library";
   if (ANONYMOUS_NAMES.has(name)) return "anonymous";
-  if (!url) return "native";
+  // No URL means the engine, with one exception: the call wrappers V8 parks at
+  // the boundary between native and JavaScript name a real call the product
+  // made, not work the engine did on its own account.
+  if (!url) return SYNTHETIC_CALL_NAMES.has(name) ? "anonymous" : "native";
   // A bundler that emitted a vendor chunk has already sorted the dependencies
   // out of the rest, so a frame in a sibling chunk is the product's own code.
   // This only holds when such a chunk was actually seen in the recording —

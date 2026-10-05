@@ -40,6 +40,17 @@ export const DISPATCH_NAMES = new Set([
 export const ANONYMOUS_NAMES = new Set(["", "(anonymous)", "anonymous", "<anonymous>"]);
 
 /**
+ * V8's label for a call it entered from outside JavaScript — an event handler,
+ * a timer, a microtask drain. It carries no URL, which would otherwise sort it
+ * with the engine built-ins and hide it, and that is wrong: a built-in is work
+ * the engine did, while this is the moment the engine handed control back to
+ * the product. On a time-ordered chart it is the frame that says *a new piece
+ * of work started here*, so it is kept and classified alongside `(anonymous)`:
+ * a real call boundary whose name explains nothing on its own.
+ */
+export const SYNTHETIC_CALL_NAMES = new Set(["Function call", "FunctionCall"]);
+
+/**
  * Names that exist but explain nothing: generic call wrappers, module loaders,
  * and the shapes async transpilation leaves behind. Titling a card `eval` or
  * `Function call` tells a developer strictly less than the frame below it.
