@@ -31,6 +31,12 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       catch { throw new ReactProfileError(400, "Expected a multipart form containing the profile file."); }
       const profile = form.get("profile");
       if (!(profile instanceof File) || !profile.size) throw new ReactProfileError(400, "A React profile file is required.");
+      // The React path has no deterministic engine behind it: every issue it
+      // reports is the analyzer's reading of a commit, so with AI assist off
+      // there is nothing to fall back to and saying so beats an empty report.
+      if (!(await getAnalysisSettings()).aiAssisted) {
+        throw new ReactProfileError(409, "React profile analysis needs AI assist. Turn it on in Analysis settings, or analyze a JavaScript CPU profile instead.");
+      }
       if (profile.size > maxUploadBytes()) throw new ReactProfileError(413, uploadTooLargeMessage());
       const options = parseReactProfileOptions(form);
       const frameBudgetMs = parseFrameBudget(form);

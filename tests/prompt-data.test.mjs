@@ -8,10 +8,12 @@ import { analysisPromptData, bottleneckPromptData, debugReactIssuePromptData, MA
 function largeGroup(id = 'b1') {
   return {
     id, title: 'render', combinedTimeMs: 10000, percentOfTotal: 100,
-    stack: Array(100).fill('caller (app.js:1:1)'),
+    stack: Array(100).fill('caller (src/app.js:1:1)'),
     functions: Array.from({length: 10000}, (_, i) => ({
       id: `${id}-f${i}`, title: `function${i}`, selfTimeMs: 1, percentOfGroup: 0.01,
-      stack: Array(100).fill('heavy (bundle.js:1:1)'),
+      // A path, not a chunk: `bundle.js:1:1` is a build artefact, and a frame
+      // carrying one keeps its name and loses its position by design.
+      stack: Array(100).fill('heavy (src/heavy.js:1:1)'),
     })),
   };
 }

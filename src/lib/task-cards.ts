@@ -40,6 +40,7 @@ import {
 } from "./tasks.ts";
 import { buildTaskTimeline, SHOWN_CLASSES, type TaskTimeline } from "./task-timeline.ts";
 import type { FrameClass, FrameClassTable } from "./frame-classes.ts";
+import type { TaskInsight } from "./task-insight.ts";
 import type { CdpProfile } from "../app/js-profiler/types";
 
 /**
@@ -235,6 +236,12 @@ export interface TaskCard {
   timeline: TaskTimeline;
   subtreeFunctionCount: number;
   confidence: "ok" | "low";
+  /**
+   * The model's reading of this task, when AI assist is on. Everything else on
+   * the card is measured; this is the one field that is inferred, so the view
+   * labels it and the hand-off says so in as many words.
+   */
+  insight?: TaskInsight;
   /**
    * The old node descent run inside this one task. Present only for a task long
    * enough that it is a phase rather than a single piece of work; scoped to one

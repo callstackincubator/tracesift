@@ -421,6 +421,60 @@ button, input { font: inherit; }
   opacity: 0.75;
 }
 
+/* The one inferred block on an otherwise measured card, so it is set apart
+   rather than blended in: a reader has to be able to see where the arithmetic
+   stops and the model's reading begins. */
+.card-insight {
+  margin: 0 20px 16px;
+  padding: 13px 15px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 10px;
+}
+.card-insight-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.card-insight ul { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; list-style: none; }
+.card-insight li {
+  position: relative;
+  padding-left: 15px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.card-insight li::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 75%, transparent);
+}
+.explore-header .card-insight { margin: 14px 0 0; }
+/* The same panel before anything has been inferred into it: the offer sits
+   where the reading will, so the card does not jump when it arrives. */
+.card-insight-offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+  border-style: dashed;
+}
+.card-insight-offer > div { display: flex; flex-direction: column; gap: 3px; }
+.card-insight-offer strong { font-size: 13px; }
+.card-insight-offer small { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
+.card-insight-error { margin: -4px 20px 14px; }
+
 .hotspot-footer {
   display: grid;
   justify-items: end;
@@ -870,6 +924,17 @@ body { background: var(--background, #151419); }
 .autosave-toggle input:checked + .toggle-control { background: var(--primary); }
 .autosave-toggle input:checked + .toggle-control span { transform: translateX(16px); }
 .autosave-toggle:focus-within .toggle-control { outline: 2px solid var(--ring); outline-offset: 2px; }
+.settings-popover .ai-assist-toggle { margin-top: 0; margin-bottom: 18px; }
+.ai-assist-off-note {
+  margin: 0;
+  padding: 13px 14px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--muted);
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 10px;
+}
 .settings-privacy { margin: 11px 2px 0; color: var(--muted-foreground); font-size: 11px; }
 
 .workspace { width: min(1220px, calc(100% - 40px)); padding: 42px 0 70px; }

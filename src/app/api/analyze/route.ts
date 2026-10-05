@@ -86,7 +86,10 @@ export async function POST(request: Request): Promise<Response> {
   // One classification pass over the distinct frames of the upload, cached by
   // name and url. Everything a task card says about which code is whose is a
   // lookup in this table, so the same file always produces the same cards.
-  const classes = nodeCardEngineRequested() ? ruleClassTable() : await classifyFrames(
+  // With AI assist off it is the rule table, which is the same fallback a
+  // failed or unconfigured model already produced.
+  const settings = await getAnalysisSettings();
+  const classes = nodeCardEngineRequested() || !settings.aiAssisted ? ruleClassTable() : await classifyFrames(
     parsedProfile.nodes.map((node) => node.callFrame), dir,
   );
   const taskCards = nodeCardEngineRequested()
@@ -148,7 +151,6 @@ export async function POST(request: Request): Promise<Response> {
     saved: false,
   };
   putRecord(record);
-  const settings = await getAnalysisSettings();
   let saved = false;
   if (settings.autoSave) {
     try { await saveAnalysis(record); saved = true; }

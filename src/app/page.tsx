@@ -21,6 +21,7 @@ import type { ProfileCard } from "@/lib/profile-cards";
 import { storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
 import { CULPRIT_MIN_MS, HEADLINE_FRAMES, MAX_CULPRITS, type TaskCard, type TaskCardSet } from "@/lib/task-cards";
 import { formatMs } from "@/lib/format";
+import { profileCardLocations, taskCardLocations, type FrameLocations } from "@/lib/frame-location";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
@@ -124,7 +125,7 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" }) {
+function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" | "sparkle" }) {
   const paths = {
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.65 1 .3.27.68.41 1.08.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -133,6 +134,7 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
     arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
     back: <path d="M19 12H5m6 6-6-6 6-6" />,
     explore: <><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
+    sparkle: <><path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3Z" /><path d="M18 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7Z" /></>,
   };
   return <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]}</svg>;
 }
@@ -319,8 +321,9 @@ function hotspotRows(hotspot: Hotspot): HotPathCard {
  * self time alone cannot say that a 240 ms helper sits under this parent.
  */
 function cardRows(card: ProfileCard): HotPathCard {
+  const locations = profileCardLocations(card);
   const rows: HotPathRow[] = card.highlights.map((highlight) => ({
-    location: highlight.location,
+    location: locations.shown(highlight.name, highlight.location),
     title: highlight.name,
     ms: highlight.totalMs,
     secondaryLabel: `${formatMs(highlight.selfMs)} self`,
@@ -367,8 +370,11 @@ function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string
   // A card is read at a glance, so it takes the head of the list; the whole of
   // it is one click away in Explore's Culprits tab.
   const shown = card.culprits.slice(0, CARD_CULPRIT_ROWS);
+  // A row's position is labelled `file`, so it is drawn only where it names
+  // one or where the frame's name cannot locate it — see `frame-location.ts`.
+  const locations = taskCardLocations(card);
   const rows: HotPathRow[] = shown.map((culprit) => ({
-    location: culprit.location,
+    location: locations.shown(culprit.name, culprit.location),
     title: culprit.name,
     ms: culprit.selfMs,
     // Only when the two differ. A leaf burns all of its own time, so printing
@@ -416,13 +422,13 @@ function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string
   // otherwise render as a card with no rows at all, and the renderer drops the
   // footnotes with them. The boundary frames are weaker rows, and weaker rows
   // beat an empty card.
-  if (rows.length === 0) return { rows: boundaryFrameRows(card, onFocus), footnotes };
+  if (rows.length === 0) return { rows: boundaryFrameRows(card, onFocus, locations), footnotes };
   return { rows, footnotes };
 }
 
-function boundaryFrameRows(card: TaskCard, onFocus: (nodeId: string) => void): HotPathRow[] {
+function boundaryFrameRows(card: TaskCard, onFocus: (nodeId: string) => void, locations: FrameLocations): HotPathRow[] {
   return card.boundaryFrames.map((frame) => ({
-    location: frame.location,
+    location: locations.shown(frame.name, frame.location),
     title: frame.name,
     ms: frame.totalMs,
     secondaryLabel: `${formatMs(frame.selfMs)} self`,
@@ -485,6 +491,10 @@ function AnalysisResultCard({
   title,
   subtitle,
   timeLabel,
+  insight,
+  onExplain,
+  explaining,
+  insightError,
   rows,
   footnotes,
   loading,
@@ -498,6 +508,16 @@ function AnalysisResultCard({
   title: string;
   subtitle?: string;
   timeLabel: string;
+  /**
+   * The model's reading of this finding, when AI assist is on. Labelled on the
+   * card because it is the only thing there that was not measured, and placed
+   * above the rows because it is the claim the rows are the evidence for.
+   */
+  insight?: string[];
+  /** Asks a model to read this task. Absent where no inference is on offer. */
+  onExplain?: () => void;
+  explaining?: boolean;
+  insightError?: string;
   rows: HotPathRow[];
   footnotes: string[];
   loading: boolean;
@@ -517,6 +537,24 @@ function AnalysisResultCard({
         </div>
         <span className="hotspot-time">{timeLabel}</span>
       </div>
+      {insight && insight.length > 0 ? (
+        <div className="card-insight">
+          <span className="card-insight-label">AI reading</span>
+          <ul>{insight.map((finding) => <li key={finding}>{finding}</li>)}</ul>
+        </div>
+      ) : onExplain ? (
+        <div className="card-insight card-insight-offer">
+          <div>
+            <strong>What went wrong here?</strong>
+            <small>Have a model read this task&apos;s timeline and name the issue and where it starts.</small>
+          </div>
+          <Button size="sm" variant="outline" className="prompt-action-button" disabled={explaining} onClick={onExplain}>
+            {explaining ? <RozeniteLoader size={14} label="" /> : <HeaderIcon type="sparkle" />}
+            {explaining ? "Reading…" : "Explain with AI"}
+          </Button>
+        </div>
+      ) : null}
+      {insightError ? <p className="hotspot-prompt-error card-insight-error">{insightError}</p> : null}
       {rows.length > 0 && (
         <div className="hot-path-rows">
           {rows.map((row, rowIndex) => (
@@ -669,6 +707,7 @@ function InspectorApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const [autoSave, setAutoSave] = useState(true);
+  const [aiAssisted, setAiAssisted] = useState(true);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [showWelcome, setShowWelcome] = useState(true);
@@ -702,7 +741,10 @@ function InspectorApp() {
   };
   useEffect(() => {
     void refreshHistory();
-    fetch("/api/analysis-settings", { cache: "no-store" }).then(r => r.json()).then(data => setAutoSave(data.autoSave !== false)).catch(() => undefined);
+    fetch("/api/analysis-settings", { cache: "no-store" }).then(r => r.json()).then(data => {
+      setAutoSave(data.autoSave !== false);
+      setAiAssisted(data.aiAssisted !== false);
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -745,6 +787,8 @@ function InspectorApp() {
   const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
   const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [explainingId, setExplainingId] = useState<string | null>(null);
+  const [insightErrors, setInsightErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [isSample, setIsSample] = useState(false);
 
@@ -754,7 +798,9 @@ function InspectorApp() {
 
   const validBudget = frameBudget.trim() !== "" && Number.isFinite(Number(frameBudget)) && Number(frameBudget) > 0;
   const isReady = Boolean(
-    (profileType === "javascript" ? files.cpu : files.reactProfile) && modelStatus?.configured && (profileType !== "react" || validBudget),
+    (profileType === "javascript" ? files.cpu : files.reactProfile)
+    && (!aiAssisted || modelStatus?.configured)
+    && (profileType !== "react" || validBudget),
   );
 
   const handleAnalyze = async () => {
@@ -764,7 +810,7 @@ function InspectorApp() {
       setErrorDetail(null);
       return;
     }
-    if (!modelStatus?.configured) {
+    if (aiAssisted && !modelStatus?.configured) {
       setError("Choose a provider and model in Analysis settings first.");
       setErrorDetail(null);
       return;
@@ -915,6 +961,49 @@ function InspectorApp() {
     window.open(taskExploreHref(analysisId, card.taskIndex, focusNodeId), "_blank", "noopener");
   };
 
+  /**
+   * Ask a model to read one task. The server stores what comes back on the
+   * analysis, so the card is updated in place rather than re-fetched, and a
+   * hand-off already copied for this task is dropped — the next one carries
+   * the inference the server has just cached against it.
+   */
+  const explainTask = async (card: TaskCard) => {
+    if (!analysisId || explainingId) return;
+    setExplainingId(card.id);
+    setInsightErrors((current) => {
+      if (!(card.id in current)) return current;
+      const next = { ...current };
+      delete next[card.id];
+      return next;
+    });
+    try {
+      const response = await fetch("/api/task-insight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId, cardId: card.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; insight?: TaskCard["insight"]; usage?: TokenUsage; model?: AnalysisModel };
+      if (!response.ok || !data.insight) throw new Error(data.error ?? `Could not read this task (${response.status}).`);
+      const insight = data.insight;
+      setTaskCards((current) => current && ({
+        ...current,
+        cards: current.cards.map((entry) => (entry.id === card.id ? { ...entry, insight } : entry)),
+      }));
+      setPrompts((current) => {
+        if (!(card.id in current)) return current;
+        const next = { ...current };
+        delete next[card.id];
+        return next;
+      });
+      if (data.usage) setAnalyzerUsage(data.usage);
+      if (data.model) setAnalysisModel(data.model);
+    } catch (err) {
+      setInsightErrors((current) => ({ ...current, [card.id]: errorMessageFrom(err) }));
+    } finally {
+      setExplainingId((current) => (current === card.id ? null : current));
+    }
+  };
+
   const copyHandoff = async (id: string) => {
     if (!analysisId || promptLoadingId) return;
     setPromptErrors((current) => {
@@ -971,6 +1060,8 @@ function InspectorApp() {
     setPromptLoadingId(null);
     setPromptErrors({});
     setCopiedId(null);
+    setExplainingId(null);
+    setInsightErrors({});
     setSaved(false);
     setIsSample(false);
   };
@@ -998,6 +1089,13 @@ function InspectorApp() {
   const updateAutoSave = async (enabled: boolean) => {
     setAutoSave(enabled);
     await fetch("/api/analysis-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoSave: enabled }) });
+  };
+  const updateAiAssisted = async (enabled: boolean) => {
+    setAiAssisted(enabled);
+    // The React path is model-driven end to end, so turning AI assist off while
+    // it is selected would leave the upload pane unusable with no explanation.
+    if (!enabled && profileType === "react") setProfileType("javascript");
+    await fetch("/api/analysis-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiAssisted: enabled }) });
   };
   const providerModels = modelStatus?.providers.find(provider => provider.id === selectedProvider)?.models ?? [];
   const selectedProviderSettings = modelStatus?.providers.find(provider => provider.id === selectedProvider);
@@ -1153,6 +1251,12 @@ function InspectorApp() {
                   <div><strong>Analysis settings</strong><small>Preferences are saved on this device.</small></div>
                   <button className="icon-button" aria-label="Close analysis settings" onClick={() => setSettingsOpen(false)}><HeaderIcon type="close" /></button>
                 </div>
+                <label className="autosave-toggle ai-assist-toggle">
+                  <span className="toggle-copy"><strong>AI assisted</strong><small>Let a model name what each task got wrong and where it starts. Off, TraceSift reports only what it measured and never contacts a provider.</small></span>
+                  <input type="checkbox" checked={aiAssisted} onChange={event => void updateAiAssisted(event.target.checked)} />
+                  <span className="toggle-control" aria-hidden="true"><span /></span>
+                </label>
+                {aiAssisted ? (
                 <div className="model-settings-form">
                   <label htmlFor="analysis-provider">Provider</label>
                   <select id="analysis-provider" value={selectedProvider} onChange={event => updateProvider(event.target.value)} disabled={!modelStatus || modelSaving}>
@@ -1245,6 +1349,9 @@ function InspectorApp() {
                     </button>
                   )}
                 </div>
+                ) : (
+                  <p className="ai-assist-off-note">Saved credentials are kept but unused. JavaScript CPU profiles still produce full measured cards; React profiles need AI assist.</p>
+                )}
                 <label className="autosave-toggle">
                   <span className="toggle-copy"><strong>Save analyses automatically</strong><small>Keep completed reports in your local analysis history.</small></span>
                   <input type="checkbox" checked={autoSave} onChange={event => void updateAutoSave(event.target.checked)} />
@@ -1323,9 +1430,9 @@ function InspectorApp() {
                 <span className="radio-indicator" />
               </button>
 
-              <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
+              <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing || !aiAssisted} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
-                <span className="option-copy"><strong>React components</strong><small>Find expensive renders and component updates</small><em>React DevTools JSON</em></span>
+                <span className="option-copy"><strong>React components</strong><small>{aiAssisted ? "Find expensive renders and component updates" : "Needs AI assist — turn it on in Settings"}</small><em>React DevTools JSON</em></span>
                 <span className="radio-indicator" />
               </button>
             </div>
@@ -1361,11 +1468,11 @@ function InspectorApp() {
               )}
 
               <div className="key-field">
-                <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
+                <Text>{!aiAssisted ? "AI assist is off — measured analysis only." : modelStatus === null ? "Loading model…" : modelStatus.configured
                   ? `Model: ${modelStatus.provider} / ${modelStatus.model}`
                   : modelStatus.error || "Choose a model in Analysis settings."}</Text>
                   <br />
-                <Text className="italic text-muted-foreground">Change the provider or model from Analysis settings.</Text>
+                <Text className="italic text-muted-foreground">{aiAssisted ? "Change the provider or model from Analysis settings." : "Turn AI assist on in Analysis settings to have a model name each task's issue."}</Text>
               </div>
             </section>
 
@@ -1384,7 +1491,7 @@ function InspectorApp() {
             )}
 
             <div className="action-row">
-              <p>Your profile stays on this device and is analyzed via your configured model.</p>
+              <p>{aiAssisted ? "Your profile stays on this device and is analyzed via your configured model." : "Your profile stays on this device, and with AI assist off nothing leaves it."}</p>
               <Button className="analyze-profile-button" size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
@@ -1493,6 +1600,10 @@ function InspectorApp() {
                     title={card.headline}
                     timeLabel={formatMs(card.durationMs)}
                     subtitle={taskSubtitle(card)}
+                    insight={card.insight?.findings}
+                    onExplain={aiAssisted && modelStatus?.configured && analysisId && !isSample ? () => void explainTask(card) : undefined}
+                    explaining={explainingId === card.id}
+                    insightError={insightErrors[card.id]}
                     rows={rows}
                     footnotes={footnotes}
                     loading={promptLoadingId === card.id}

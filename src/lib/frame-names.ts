@@ -97,6 +97,24 @@ const MINIFIED = /^[_$A-Za-z][_$A-Za-z0-9]?$/;
  */
 export type NameTier = 0 | 1 | 2;
 
+/**
+ * The half of the tier test that needs only the name, for a caller holding a
+ * frame's name and class but not the recorded frame — a node in a shipped task
+ * tree, for one. The other half is `isFrameworkInternalFrame`, which a caller
+ * in that position asks `frameClass` instead.
+ */
+export function isMeaningfulName(name: string): boolean {
+  if (
+    ANONYMOUS_NAMES.has(name)
+    || TRANSPARENT_NAMES.has(name)
+    || OPAQUE_NAMES.has(name)
+    || DISPATCH_NAMES.has(name)
+  ) {
+    return false;
+  }
+  return !MINIFIED.test(name);
+}
+
 export function frameNameTier(frame: CdpCallFrame): NameTier {
   const name = frame.functionName;
   if (

@@ -8,6 +8,7 @@ import { ThemeGate } from "@/app/theme-gate";
 import { useStretchZoom, ZoomControls } from "./stretch-zoom";
 import { fetchTaskHandoff, readCardHandoff, type CardHandoff, type TaskHandoff } from "@/lib/card-handoff";
 import { formatMs } from "@/lib/format";
+import { profileCardLocations, taskCardLocations, type FrameLocations } from "@/lib/frame-location";
 import type { CardChildNode, RepeatedFunction } from "@/lib/profile-cards";
 import { focusedTree, type TaskTreeNode } from "@/lib/task-cards";
 import type { TaskTimeline, TimelineBox } from "@/lib/task-timeline";
@@ -53,8 +54,9 @@ function callLabel(count: number, exact: boolean): string {
  * enough to overflow the JS stack in React's commit traversal before a single
  * row appeared. Rows now mount as they are opened.
  */
-function TreeRow({ node, cardTotalMs, exact, depth }: { node: CardChildNode; cardTotalMs: number; exact: boolean; depth: number }) {
+function TreeRow({ node, cardTotalMs, exact, depth, locations }: { node: CardChildNode; cardTotalMs: number; exact: boolean; depth: number; locations: FrameLocations }) {
   const [open, setOpen] = useState(depth === 0);
+  const where = locations.shown(node.name, node.location);
   const share = cardTotalMs > 0 ? (node.totalMs / cardTotalMs) * 100 : 0;
   const count = exact ? node.invocations ?? node.callSites : node.callSites;
   const row = (
@@ -70,7 +72,7 @@ function TreeRow({ node, cardTotalMs, exact, depth }: { node: CardChildNode; car
         {count > 1 ? <span className="row-share">{callLabel(count, exact)}</span> : null}
       </span>
       <span className="row-bar-track" aria-hidden="true"><span className="row-bar-fill" style={{ width: `${share}%` }} /></span>
-      {node.location ? <code className="explore-tree-location" title={node.location}>{node.location}</code> : null}
+      {where ? <code className="explore-tree-location" title={where}>{where}</code> : null}
     </div>
   );
 
@@ -82,7 +84,7 @@ function TreeRow({ node, cardTotalMs, exact, depth }: { node: CardChildNode; car
         {open ? (
           <ul className="explore-tree">
             {node.children.map((child, index) => (
-              <TreeRow key={`${child.name}-${index}`} node={child} cardTotalMs={cardTotalMs} exact={exact} depth={depth + 1} />
+              <TreeRow key={`${child.name}-${index}`} node={child} cardTotalMs={cardTotalMs} exact={exact} depth={depth + 1} locations={locations} />
             ))}
           </ul>
         ) : null}
@@ -95,8 +97,9 @@ function TreeRow({ node, cardTotalMs, exact, depth }: { node: CardChildNode; car
  * The task tree's own row. Clicking a name refocuses the view on that frame.
  * Children mount only while the row is open — see `TreeRow` for why.
  */
-function TaskTreeRow({ node, taskMs, depth, onFocus }: { node: TaskTreeNode; taskMs: number; depth: number; onFocus: (id: string) => void }) {
+function TaskTreeRow({ node, taskMs, depth, onFocus, locations }: { node: TaskTreeNode; taskMs: number; depth: number; onFocus: (id: string) => void; locations: FrameLocations }) {
   const [open, setOpen] = useState(depth < 2);
+  const where = locations.shown(node.name, node.location);
   const share = taskMs > 0 ? (node.totalMs / taskMs) * 100 : 0;
   const row = (
     <div className="explore-tree-row">
@@ -110,7 +113,7 @@ function TaskTreeRow({ node, taskMs, depth, onFocus }: { node: TaskTreeNode; tas
         {node.invocations > 1 ? <span className="row-share">{node.invocations} calls</span> : null}
       </span>
       <span className="row-bar-track" aria-hidden="true"><span className="row-bar-fill" style={{ width: `${share}%` }} /></span>
-      {node.location ? <code className="explore-tree-location" title={node.location}>{node.location}</code> : null}
+      {where ? <code className="explore-tree-location" title={where}>{where}</code> : null}
     </div>
   );
 
@@ -122,7 +125,7 @@ function TaskTreeRow({ node, taskMs, depth, onFocus }: { node: TaskTreeNode; tas
         {open ? (
           <ul className="explore-tree">
             {node.children.map((child) => (
-              <TaskTreeRow key={child.id} node={child} taskMs={taskMs} depth={depth + 1} onFocus={onFocus} />
+              <TaskTreeRow key={child.id} node={child} taskMs={taskMs} depth={depth + 1} onFocus={onFocus} locations={locations} />
             ))}
           </ul>
         ) : null}
@@ -131,10 +134,20 @@ function TaskTreeRow({ node, taskMs, depth, onFocus }: { node: TaskTreeNode; tas
   );
 }
 
+/**
+ * A frame's position in a table cell, drawn only when it locates the frame.
+ * A chunk offset in a `file` column is worse than nothing: it labels a build
+ * artefact as a file and invites a reader to go looking for it.
+ */
+function RowLocation({ name, location, locations }: { name: string; location: string | undefined; locations: FrameLocations }) {
+  const where = locations.shown(name, location);
+  return where ? <code title={where}>{where}</code> : null;
+}
+
 type SortKey = "totalMs" | "selfMs" | "callSites";
 
 /** Every function that ran more than once under this parent, and what it cost across all of them. */
-function RepeatedTable({ rows, exact }: { rows: RepeatedFunction[]; exact: boolean }) {
+function RepeatedTable({ rows, exact, locations }: { rows: RepeatedFunction[]; exact: boolean; locations: FrameLocations }) {
   const [sortKey, setSortKey] = useState<SortKey>("totalMs");
   const sorted = useMemo(() => [...rows].sort((a, b) => b[sortKey] - a[sortKey]), [rows, sortKey]);
 
@@ -164,7 +177,7 @@ function RepeatedTable({ rows, exact }: { rows: RepeatedFunction[]; exact: boole
           <tr key={`${row.name}-${row.location ?? ""}`}>
             <th scope="row">
               {row.name}
-              {row.location ? <code title={row.location}>{row.location}</code> : null}
+              <RowLocation name={row.name} location={row.location} locations={locations} />
             </th>
             <td>{formatMs(row.totalMs)}</td>
             <td>{formatMs(row.selfMs)}</td>
@@ -590,7 +603,7 @@ function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
  * the profiler recorded, and a reader who wanted the collapsed picture has had
  * it on the Timeline tab since arriving.
  */
-function TaskCallTree({ focus, taskMs, onFocus }: { focus: TaskTreeNode; taskMs: number; onFocus: (id: string) => void }) {
+function TaskCallTree({ focus, taskMs, onFocus, locations }: { focus: TaskTreeNode; taskMs: number; onFocus: (id: string) => void; locations: FrameLocations }) {
   const [mode, setMode] = useState<TreeMode>("full");
   const tree = useMemo(() => (mode === "focused" ? focusedTree(focus) : focus), [mode, focus]);
 
@@ -600,7 +613,7 @@ function TaskCallTree({ focus, taskMs, onFocus }: { focus: TaskTreeNode; taskMs:
       <ul className="explore-tree">
         {/* Keyed by mode so the two trees do not share open/closed state: a row
             open at depth 4 in one is a different frame at that depth in the other. */}
-        <TaskTreeRow key={mode} node={tree} taskMs={taskMs} depth={0} onFocus={onFocus} />
+        <TaskTreeRow key={mode} node={tree} taskMs={taskMs} depth={0} onFocus={onFocus} locations={locations} />
       </ul>
       {mode === "focused" ? (
         <Text className="explore-caveat">
@@ -641,6 +654,9 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
   const { card } = handoff;
   const [focusId, setFocusId] = useState(initialFocus || card.tree.id);
   const path = useMemo(() => pathTo(card.tree, focusId), [card.tree, focusId]);
+  // Judged over the whole card, so a frame reads the same in the tree, the
+  // culprit table and the hand-off the developer copies from this page.
+  const locations = useMemo(() => taskCardLocations(card), [card]);
   const focus = path[path.length - 1];
   const parent = path.length > 1 ? path[path.length - 2] : null;
   const siblings = parent ? parent.children.filter((child) => child.id !== focus.id) : [];
@@ -657,6 +673,12 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
     <>
       <header className="explore-header">
         <h1>{card.headline}</h1>
+        {card.insight ? (
+          <div className="card-insight">
+            <span className="card-insight-label">AI reading</span>
+            <ul>{card.insight.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
+          </div>
+        ) : null}
         {card.boundaryFrames.length > 0 ? (
           <p className="explore-path">
             <span className="explore-path-label">feature</span>
@@ -729,7 +751,7 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
           <TaskFlameGraph focus={focus} />
         </Tabs.Panel>
         <Tabs.Panel value="tree" className="explore-panel">
-          <TaskCallTree focus={focus} taskMs={card.durationMs} onFocus={refocus} />
+          <TaskCallTree focus={focus} taskMs={card.durationMs} onFocus={refocus} locations={locations} />
         </Tabs.Panel>
         <Tabs.Panel value="culprits" className="explore-panel">
           {card.culprits.length > 0 ? (
@@ -748,7 +770,7 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
                   <tr key={culprit.nodeId}>
                     <th scope="row">
                       <button type="button" className="explore-tree-focus" onClick={() => refocus(culprit.nodeId)}>{culprit.name}</button>
-                      {culprit.location ? <code title={culprit.location}>{culprit.location}</code> : null}
+                      <RowLocation name={culprit.name} location={culprit.location} locations={locations} />
                     </th>
                     <td>{formatMs(culprit.selfMs)}</td>
                     <td>{formatMs(culprit.totalMs)}</td>
@@ -771,12 +793,14 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
 function CardExplorer({ handoff }: { handoff: CardHandoff }) {
   const { card } = handoff;
   const flame = useMemo(() => toFlameNode(card.title, card.totalMs, card.selfMs, card.children, card.id), [card]);
+  const locations = useMemo(() => profileCardLocations(card), [card]);
+  const where = locations.shown(card.title, card.location);
 
   return (
     <>
       <header className="explore-header">
         <h1>{card.title}</h1>
-        {card.location ? <code className="explore-location">{card.location}</code> : null}
+        {where ? <code className="explore-location">{where}</code> : null}
         <p className="explore-figures">
           <strong>{formatMs(card.totalMs)}</strong> total
           <span>·</span>
@@ -820,6 +844,7 @@ function CardExplorer({ handoff }: { handoff: CardHandoff }) {
                   cardTotalMs={card.totalMs}
                   exact={handoff.callCountIsExact}
                   depth={0}
+                  locations={locations}
                 />
               ))}
             </ul>
@@ -828,7 +853,7 @@ function CardExplorer({ handoff }: { handoff: CardHandoff }) {
           )}
         </Tabs.Panel>
         <Tabs.Panel value="repeated" className="explore-panel">
-          <RepeatedTable rows={card.repeated} exact={handoff.callCountIsExact} />
+          <RepeatedTable rows={card.repeated} exact={handoff.callCountIsExact} locations={locations} />
         </Tabs.Panel>
       </Tabs>
     </>

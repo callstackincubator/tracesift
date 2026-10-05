@@ -50,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   log(`analysis=${analysisId} hotspot=${hotspotId} ("${taskCard?.headline ?? card?.title ?? hotspot!.title}"): rendering prompt`);
   const prompt = taskCard
-    ? buildTaskPrompt(taskCard, record.totalMs)
+    ? buildTaskPrompt(taskCard)
     : card
       ? buildCardPrompt(card, record.totalMs, record.callCountIsExact === true)
       : buildCpuFixPrompt(hotspot!);

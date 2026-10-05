@@ -10,7 +10,7 @@
  */
 
 import { isTransparentFrame } from "./frame-names.ts";
-import { frameSourceLocation } from "./source-location.ts";
+import { compactLocation } from "./source-location.ts";
 import type { CdpCallFrame, CdpProfile } from "../app/js-profiler/types";
 
 export interface CallTreeNode {
@@ -279,19 +279,32 @@ export function nodeName(node: CallTreeNode): string {
   return node.frame.functionName || "(anonymous)";
 }
 
+/**
+ * Where the frame is, as short as it can be said: a source path whole, and a
+ * bundle chunk cut back to its file name and position.
+ *
+ * Readable-path-only was the rule here, and on a bundled app it left every row
+ * in every stack, card and hand-off with no position at all — the frames a
+ * reader most needs to tell apart are exactly the ones a minified build gives
+ * the least to go on. `vendors.bundle.js:189:701931` is not a file to open, but
+ * it separates two `(anonymous)` frames and says whether the cost is in the
+ * product or in a dependency, and it is the string a source map resolves.
+ * Anything that needs a path it can actually open tests it with
+ * `isReadableSourcePath` rather than assuming this returned one.
+ */
 export function nodeLocation(node: CallTreeNode): string | undefined {
-  return frameSourceLocation(node.frame);
+  const { frame } = node;
+  if (!frame.url) return undefined;
+  return compactLocation(frame.url, frame.lineNumber, frame.columnNumber);
 }
 
 /**
- * `name (url:line:col)` for a frame that has a position, and the bare name for
- * one that does not — `(anonymous) ((anonymous):0:0)` is noise, not detail.
+ * `name (where)` for a frame that has a position, and the bare name for one
+ * that does not — `(anonymous) ((anonymous):0:0)` is noise, not detail.
  */
 export function nodeLabel(node: CallTreeNode): string {
-  const { frame } = node;
-  const name = frame.functionName || "(anonymous)";
-  if (!frame.url) return name;
-  return `${name} (${frame.url}:${frame.lineNumber + 1}:${frame.columnNumber + 1})`;
+  const where = nodeLocation(node);
+  return where ? `${nodeName(node)} (${where})` : nodeName(node);
 }
 
 export { isTransparentFrame };
