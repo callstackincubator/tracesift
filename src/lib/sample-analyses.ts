@@ -26,6 +26,8 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
         "durationMs": 2111,
         "boundaries": "measured",
         "headline": "_onFocus \u2014 a 2111 ms task 1.20 s into the recording",
+        "pathline": "_onFocus \u203a getUserByUserName \u203a _compareUsers",
+        "shapeline": "74% in datePrototypeToLocaleStringHelper \u00b7 8 calls, longest 196 ms",
         "percentOfProfile": 25.97,
         "boundaryFrames": [
           {
@@ -389,6 +391,8 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
         "durationMs": 655,
         "boundaries": "measured",
         "headline": "_onChange \u2014 a 655 ms task 5.00 s into the recording",
+        "pathline": "_onChange \u203a formatDate",
+        "shapeline": "64% in intlDateTimeFormatFormat \u00b7 12 calls, longest 35 ms",
         "percentOfProfile": 8.06,
         "boundaryFrames": [
           {

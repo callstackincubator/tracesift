@@ -276,6 +276,21 @@ export interface TaskCard {
   boundaries: TaskBoundaryKind;
   /** `A 1502 ms task 3.2 s into the recording` */
   headline: string;
+  /**
+   * Two candidate headings, under evaluation against `headline` above.
+   *
+   * `headline` leads with the boundary frame and then spends its remaining
+   * words on the duration and the start offset — both of which the card
+   * already prints as its time label and its figures row, and neither of which
+   * can help a reader choose a card from a list that is ranked by duration
+   * and numbered. These two replace that tail with the only things on the card
+   * the reader cannot already see: where the cost sits, and what shape it is.
+   *
+   * Optional because both are read back from analyses saved before they
+   * existed; the views fall back to `headline` when they are absent.
+   */
+  pathline?: string;
+  shapeline?: string;
   percentOfProfile: number;
   boundaryFrames: BoundaryFrame[];
   /**
@@ -689,6 +704,204 @@ function focusedChildren(
 }
 
 /**
+ * A dominant culprit holds at least this much of the time that reached the
+ * reader's own code. Below it the cost has no single home, and a line naming
+ * the heaviest frame would read as a finding where the measurement only
+ * supports "spread thin".
+ */
+const DOMINANT_SELF_SHARE = 0.25;
+
+/**
+ * Below this much of the task reaching the reader's code, the shape line states
+ * the figure it is measuring shares against before it states a share.
+ *
+ * Every percentage on this row is a share of the reader's own code, not of the
+ * task — those are the same number when the framework took almost none of the
+ * task, and wildly different when it took most of it. `datePrototypeToLocale‐
+ * StringHelper` is 2923 ms either way: 6% of a 50.6 s task, and 77% of the
+ * 3.79 s that ever reached a frame of the reader's own. The second figure is
+ * the one that says where to look, and measuring against the task instead made
+ * the same frame dominant on one recording and invisible on another purely
+ * because of how much framework time sat beside it.
+ *
+ * Which leaves one hazard: `77%` beside a 50.6 s time label invites the reader
+ * to multiply the two. Naming the 3.79 s first closes that, and costs a clause
+ * only on the cards where the two denominators actually diverge.
+ */
+const SCOPE_IMPLICIT_SHARE = 0.9;
+
+/**
+ * A feature this far below the task is noise in a heading — the reader would be
+ * handed a name for something the chart draws as a seam between its neighbours.
+ */
+const FEATURE_MIN_SHARE = 0.1;
+
+/**
+ * One feature holding this much of the task *is* the task, and a call path into
+ * it is the right heading. Below it, with another feature of comparable weight
+ * beside it, naming one path leaves the rest of the measurement unaccounted for
+ * while sounding just as certain.
+ */
+const DOMINANT_FEATURE_SHARE = 0.6;
+
+/**
+ * A split reading has to be a reading of the task, not of a corner of it: the
+ * features it names must cover this much between them, and the heaviest must
+ * clear `SPLIT_LEAD_SHARE`.
+ *
+ * Both gates exist because a task can fail to have a dominant feature in two
+ * opposite ways. `37% _onFocus · 12% _onChange` *is* the task — half of it
+ * never reached the product's code at all, so those two are nearly all of what
+ * did. A task divided 17/11/9/7/6/5/5/3 across sixty frames is not split
+ * between two features, it is spread across all of them, and naming the top
+ * two would present 28% of the task as its shape. That task has better
+ * readings further down — its segments, or how thin the heaviest frame was.
+ */
+const SPLIT_COVERAGE_SHARE = 0.4;
+const SPLIT_LEAD_SHARE = 0.25;
+
+/** Features a heading names before the list stops reading as a sentence. */
+const MAX_HEADING_FEATURES = 3;
+
+/** Frames a reader can open. An engine built-in is never where the fix goes. */
+const ACTIONABLE = NAMEABLE;
+
+/**
+ * The features a task is split between, or nothing when it has no such shape.
+ *
+ * Shared by both heading rows so they cannot contradict each other: when this
+ * returns frames, the path row names them instead of a path into one of them,
+ * and the shape row reads their shares. Boundary frames are an antichain, so
+ * these shares are a true partition and can be stated side by side.
+ */
+function splitFeatures(card: Pick<TaskCard, "boundaryFrames" | "durationMs">): BoundaryFrame[] | undefined {
+  const taskMs = card.durationMs;
+  if (taskMs <= 0) return undefined;
+
+  const features = card.boundaryFrames.filter((frame) => frame.totalMs / taskMs >= FEATURE_MIN_SHARE);
+  if (features.length < 2) return undefined;
+  if (features[0].totalMs / taskMs >= DOMINANT_FEATURE_SHARE) return undefined;
+  if (features[0].totalMs / taskMs < SPLIT_LEAD_SHARE) return undefined;
+
+  const named = features.slice(0, MAX_HEADING_FEATURES);
+  const covered = named.reduce((sum, frame) => sum + frame.totalMs, 0);
+  return covered / taskMs >= SPLIT_COVERAGE_SHARE ? named : undefined;
+}
+
+/**
+ * Row one: the call path a developer opens.
+ *
+ * The heaviest culprit placed in the feature that reached it, which is the
+ * question that follows "which card" — not how big it was, which the rank and
+ * the time label already answered twice over.
+ *
+ * It stops at the last frame of the reader's own when the cost landed in an
+ * engine built-in. `intlDateTimeFormatFormat` is not a file anyone can edit;
+ * `formatDate`, which called it twelve times, is. The shape line names the
+ * built-in, so nothing is lost by ending the path above it.
+ *
+ * A path is a confident claim — this is where the cost sits — and the one shape
+ * of task that cannot support one is a task split between features of
+ * comparable weight, where any single path is a fraction of the answer. There
+ * the features are named instead.
+ *
+ * The culprit's share of the *task* is deliberately not a gate here. On a task
+ * that spent 93% of itself in the framework, the heaviest frame of the reader's
+ * own is 6% of the task and 77% of the code that ran — the second figure is the
+ * one that says whether the path is worth naming, and the shape line states the
+ * 93% beside it, so the reader cannot mistake a small slice for the whole.
+ */
+export function pathlineFor(card: Pick<TaskCard, "culprits" | "boundaryFrames" | "durationMs">): string {
+  const split = splitFeatures(card);
+  if (split) return split.map((frame) => frame.name).join(" + ");
+
+  const dominant = card.culprits[0];
+  if (!dominant) return card.boundaryFrames.map((frame) => frame.name).join(" › ");
+
+  const chain = [...dominant.callers];
+  // `callers` keeps the three nearest named frames, so on a deep stack the
+  // feature the work belongs to can fall off the top. Anchoring there costs one
+  // frame and an ellipsis, and without it the path starts in the middle of a
+  // stack with no indication that it does.
+  const feature = card.boundaryFrames.find((frame) =>
+    frame.culprits.some((culprit) => culprit.name === dominant.name)
+  ) ?? card.boundaryFrames[0];
+  if (feature && chain[0] !== feature.name) chain.unshift(feature.name, "…");
+
+  if (ACTIONABLE.has(dominant.frameClass)) chain.push(dominant.name);
+  // A culprit with no named caller above it and no path of its own is all the
+  // line has to name.
+  return chain.length > 0 ? chain.join(" › ") : dominant.name;
+}
+
+/**
+ * Row two: the measured shape of the cost.
+ *
+ * One of several readings, each a claim the card's own figures carry — no
+ * inference, so this line is identical with AI assist off and is the same
+ * sentence for the bundled samples as for an upload.
+ *
+ * The share is what makes it a finding rather than a label: `64% in
+ * intlDateTimeFormatFormat` says the card is about one frame, and `heaviest 9%
+ * of 512 functions` says it is about none. The invocation count separates the
+ * two shapes a merged call tree cannot tell apart — one slow call, or a cheap
+ * one paid per item.
+ *
+ * Every share on this row is measured against the time that reached the
+ * reader's own code, for the reasons under `SCOPE_IMPLICIT_SHARE`. When no
+ * frame dominates, the reading falls back to the task's division by
+ * feature. That is deliberately the same partition the contribution chart under
+ * this heading draws, so a reader is not handed two different decompositions of
+ * one task and left to reconcile them.
+ */
+export function shapelineFor(card: Pick<TaskCard,
+  "culprits" | "durationMs" | "outsideBoundariesMs" | "boundaryFrames" | "segments" | "subtreeFunctionCount">): string {
+  const taskMs = card.durationMs;
+  if (taskMs <= 0) return "no measurable work in this block";
+
+  // The whole this line measures against: the time that reached a named frame
+  // of the reader's own. Framework and engine time is deliberately absent from
+  // this row — the contribution chart below draws it as its own slice, so the
+  // card still reports it, and the heading gets to be about code the reader can
+  // open instead of spending its words on code they cannot.
+  const codeMs = Math.max(0, taskMs - card.outsideBoundariesMs);
+  if (codeMs <= 0) return "no code of your own ran in this block";
+
+  const pct = (ms: number) => Math.round((ms / codeMs) * 100);
+  // Stated only where it is not the task's own duration, and only on the
+  // readings that print a percentage for it to qualify.
+  const scope = codeMs / taskMs < SCOPE_IMPLICIT_SHARE ? `${formatMs(codeMs)} in your code · ` : "";
+
+  const dominant = card.culprits[0];
+  if (dominant && dominant.selfMs / codeMs >= DOMINANT_SELF_SHARE) {
+    const share = `${scope}${pct(dominant.selfMs)}% in ${dominant.name}`;
+    return dominant.invocations > 1
+      ? `${share} · ${dominant.invocations} calls, longest ${formatMs(dominant.longestCallMs)}`
+      : `${share} · one ${formatMs(dominant.totalMs)} call`;
+  }
+
+  // No one frame to pin the cost on, but the task is split between a few
+  // features that hold most of it — the same partition the contribution chart
+  // under this heading draws, so the two now agree instead of dividing one task
+  // two different ways.
+  const split = splitFeatures(card);
+  if (split) {
+    return scope + split.map((frame) => `${pct(frame.totalMs)}% ${frame.name}`).join(" · ");
+  }
+
+  // Long enough to be a phase, and no one frame or feature to pin it on: the
+  // segments are the only division of it left to offer. No percentage, so no
+  // denominator to qualify.
+  if (card.segments && card.segments.length > 0) {
+    return `${card.segments.length} distinct pieces of work · ${card.segments.map((segment) => segment.title).join(", ")}`;
+  }
+
+  return dominant
+    ? `${scope}no single hot frame · heaviest ${pct(dominant.selfMs)}% (${dominant.name}) of ${card.subtreeFunctionCount} functions`
+    : `no single hot frame · ${card.subtreeFunctionCount} functions, none over ${CULPRIT_MIN_MS} ms`;
+}
+
+/**
  * A heading names what ran. Duration and offset alone produce one sentence
  * repeated down the page with different numbers, which tells a reader how long
  * each block was and nothing about which of them to open.
@@ -736,7 +949,7 @@ function buildCard(
   );
   const shownMs = shownEntries.reduce((sum, entry) => sum + entry.totalMs, 0);
 
-  return {
+  const card: TaskCard = {
     id: `task-${task.index}`,
     taskIndex: task.index,
     startMs: round1(task.startMs),
@@ -757,6 +970,11 @@ function buildCard(
       ? { segments: selectCards(tree).cards.slice(0, MAX_SEGMENTS) }
       : {}),
   };
+
+  // Both read the finished card rather than the tree: they are statements
+  // about the figures the card ships, so deriving them from anything else
+  // would let a heading and the chart under it disagree.
+  return { ...card, pathline: pathlineFor(card), shapeline: shapelineFor(card) };
 }
 
 export function selectTaskCards(

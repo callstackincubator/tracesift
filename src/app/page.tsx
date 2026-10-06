@@ -452,6 +452,7 @@ function reactIssueRows(issue: ReactIssue): HotPathCard {
 function AnalysisResultCard({
   rank,
   title,
+  shape,
   subtitle,
   timeLabel,
   insight,
@@ -470,6 +471,12 @@ function AnalysisResultCard({
 }: {
   rank: number;
   title: string;
+  /**
+   * The second heading row: the measured shape of the cost, where the card has
+   * one. Under evaluation beside `title`, so it is optional and the legacy
+   * engines below simply do not pass it.
+   */
+  shape?: string;
   subtitle?: string;
   timeLabel: string;
   /**
@@ -503,6 +510,7 @@ function AnalysisResultCard({
         <span className="hotspot-rank">#{rank}</span>
         <div className="hotspot-heading-copy">
           <strong>{title}</strong>
+          {shape ? <span className="hotspot-shape">{shape}</span> : null}
           {subtitle ? <span className="hotspot-subtitle">{subtitle}</span> : null}
         </div>
         <span className="hotspot-time">{timeLabel}</span>
@@ -1598,7 +1606,8 @@ function InspectorApp() {
                   <AnalysisResultCard
                     key={card.id}
                     rank={index + 1}
-                    title={card.headline}
+                    title={card.pathline ?? card.headline}
+                    shape={card.shapeline}
                     timeLabel={formatMs(card.durationMs)}
                     subtitle={taskSubtitle(card)}
                     chart={rows.length === 0

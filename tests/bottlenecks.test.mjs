@@ -8,29 +8,29 @@ const profile = (nodes, samples) => ({ nodes, samples, startTime: 0, endTime: 10
 
 test('separate bursts of the same caller combine into one umbrella that counts them', () => {
   const nodes = [
-    node(0, '(root)', [1, 4, 5], ''), node(1, 'dispatchEvent', [2, 3]),
+    node(0, '(root)', [1, 4, 5], ''), node(1, 'onSearchPress', [2, 3]),
     node(2, 'formatDate'), node(3, 'compare'), node(4, '(idle)', [], ''), node(5, 'otherWork'),
   ];
   for (const boundary of [0, 4, 5, 999]) {
     const groups = groupBottlenecks(profile(nodes, [2, 2, 3, boundary, 3, 3, 2]), 210);
-    const dispatches = groups.filter(g => g.title === 'dispatchEvent');
+    const dispatches = groups.filter(g => g.title === 'onSearchPress');
     assert.equal(dispatches.length, 1);
     assert.equal(dispatches[0].combinedTimeMs, 180);
     // The per-run partition still drives attribution; only the reporting combines.
     assert.deepEqual(dispatches[0].functions.map(f => [f.title, f.selfTimeMs]), [['formatDate', 90], ['compare', 90]]);
     assert.equal(dispatches[0].occurrences, 2);
     assert.equal(dispatches[0].longestRunMs, 90);
-    assert.equal(normalizeHotspots([], 210, groups).hotspots.filter(g => g.groupingCaller === 'dispatchEvent').length, 1);
+    assert.equal(normalizeHotspots([], 210, groups).hotspots.filter(g => g.groupingCaller === 'onSearchPress').length, 1);
   }
 });
 
 test('the same caller reached by different call paths is one bottleneck', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1, 3], ''), node(1, 'dispatchEvent', [2]), node(2, 'helper'),
-    node(3, 'dispatchEvent', [4]), node(4, 'helper'),
+    node(0, '(root)', [1, 3], ''), node(1, 'onSearchPress', [2]), node(2, 'helper'),
+    node(3, 'onSearchPress', [4]), node(4, 'helper'),
   ], [2, 4]), 60);
   // Contiguous samples in one function are one burst, whichever node they came from.
-  assert.deepEqual(groups.map(g => [g.title, g.combinedTimeMs, g.occurrences]), [['dispatchEvent', 60, 1]]);
+  assert.deepEqual(groups.map(g => [g.title, g.combinedTimeMs, g.occurrences]), [['onSearchPress', 60, 1]]);
 });
 
 test('render work is attributed to the component, not React\'s scheduler', () => {
@@ -58,7 +58,7 @@ test('a stack with no application frame still groups, then drops as framework-on
 
 test('nested work and GC interruptions stay in one caller run', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1, 4], ''), node(1, 'dispatchEvent', [2, 3]),
+    node(0, '(root)', [1, 4], ''), node(1, 'onSearchPress', [2, 3]),
     node(2, 'formatDate'), node(3, 'compare'), node(4, '(garbage collector)', [], ''),
   ], [2, 3, 4, 2, 3]), 150);
   assert.equal(groups.length, 1);
@@ -71,7 +71,7 @@ test('a caller whose bursts never add up to a meaningful share earns no card', (
   // past the absolute floor, nowhere near worth a card against a 10 s profile.
   const samples = Array.from({ length: 1000 }, (_, index) => (index % 400 === 0 ? 1 : 0));
   assert.deepEqual(groupBottlenecks(profile([
-    node(0, '(root)', [1], ''), node(1, 'dispatchEvent'),
+    node(0, '(root)', [1], ''), node(1, 'onSearchPress'),
   ], samples), 10000), []);
 });
 
@@ -92,7 +92,7 @@ test('shared helpers remain attributed to their own caller, including zero-self 
   assert.deepEqual(groups.map(g => [g.title, g.combinedTimeMs]), [['search', 75], ['save', 25]]);
 });
 
-test('dispatch wrappers do not combine separate work; recursion does not double count', () => {
+test('separate callers do not combine their work; recursion does not double count', () => {
   const groups = groupBottlenecks(profile([
     node(0, '(root)', [1], ''), node(1, 'processTicksAndRejections', [2, 4]), node(2, 'search', [3]), node(3, 'search'), node(4, 'save'),
   ], [2, 3, 4]), 90);
@@ -110,7 +110,7 @@ test('parentId profiles and malformed cycles terminate safely; empty profiles ha
 test('uses CPU-profile time deltas instead of treating unequal intervals as equal samples', () => {
   const weighted = {
     ...profile([
-      node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3]),
+      node(0, '(root)', [1], ''), node(1, 'onSearchPress', [2, 3]),
       node(2, 'briefWork'), node(3, 'expensiveWork'),
     ], [2, 3]),
     timeDeltas: [10_000, 90_000],
@@ -135,9 +135,9 @@ test('agent cannot alter measured times, omit groups, or duplicate cards', () =>
 });
 
 
-test('descriptive annotations replace wrapper titles without changing measured traces', () => {
+test('descriptive annotations replace measured titles without changing measured traces', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2]),
+    node(0, '(root)', [1], ''), node(1, 'onSearchPress', [2]),
     node(2, 'batchedUpdates', [3, 6]), node(3, 'formatDate', [4, 5]),
     node(4, 'Intl.DateTimeFormat.prototype.format'), node(5, 'Intl.DateTimeFormat'),
     node(6, 'Array.prototype.sort', [7]), node(7, 'String.prototype.localeCompare'),
@@ -148,9 +148,9 @@ test('descriptive annotations replace wrapper titles without changing measured t
     functions: group.functions.slice(0, 3).map(fn => ({ id: fn.id, evidence: `${fn.title} costs measured time.` })),
     percentOfTotal: 999,
   }], 700, groups).hotspots[0];
-  assert.equal(group.title, 'dispatchEvent');
+  assert.equal(group.title, 'onSearchPress');
   assert.equal(result.title, 'Expensive date formatting and locale-aware sorting');
-  assert.equal(result.groupingCaller, 'dispatchEvent');
+  assert.equal(result.groupingCaller, 'onSearchPress');
   assert.equal(result.combinedTimeMs, 700);
   assert.equal(result.percentOfTotal, 100);
   assert.deepEqual(result.functions, group.functions);
@@ -159,7 +159,7 @@ test('descriptive annotations replace wrapper titles without changing measured t
 
 test('missing, foreign, or incomplete evidence falls back to measured work', () => {
   const groups = groupBottlenecks(profile([
-    node(1, 'dispatchEvent', [2, 3]), node(2, 'formatDate'), node(3, 'compare'),
+    node(1, 'onSearchPress', [2, 3]), node(2, 'formatDate'), node(3, 'compare'),
   ], [2, 2, 3]), 90);
   const group = groups[0];
   for (const cited of [
@@ -180,7 +180,7 @@ test('missing, foreign, or incomplete evidence falls back to measured work', () 
 
 test('evidence stays attached to the function it was written about', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3, 4]),
+    node(0, '(root)', [1], ''), node(1, 'onSearchPress', [2, 3, 4]),
     node(2, 'formatDate'), node(3, 'compare'), node(4, 'sort'),
   ], [2, 2, 3, 4]), 120);
   const [formatDate, compare, sort] = groups[0].functions;
@@ -244,7 +244,7 @@ test('evidence survives a full sentence and trims on a word boundary', () => {
 
 test('client hotspots keep card function names and omit stacks', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3, 4, 5]),
+    node(0, '(root)', [1], ''), node(1, 'onSearchPress', [2, 3, 4, 5]),
     node(2, 'one'), node(3, 'two'), node(4, 'three'), node(5, 'four'),
   ], [2, 3, 4, 5]), 120);
   const stored = normalizeHotspots([], 120, groups).hotspots[0];
@@ -259,7 +259,7 @@ test('client hotspots keep card function names and omit stacks', () => {
 
 test('published hotspots carry the measured totals the card needs to split unlisted from unnamed time', () => {
   const groups = groupBottlenecks(profile([
-    node(0, '(root)', [1], ''), node(1, 'dispatchEvent', [2, 3, 4, 5]),
+    node(0, '(root)', [1], ''), node(1, 'onSearchPress', [2, 3, 4, 5]),
     node(2, 'one'), node(3, 'two'), node(4, 'three'), node(5, 'four'),
   ], [2, 3, 4, 5]), 120);
   const published = clientHotspots(normalizeHotspots([], 120, groups).hotspots)[0];

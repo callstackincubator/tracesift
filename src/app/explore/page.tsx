@@ -682,7 +682,8 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
   return (
     <>
       <header className="explore-header">
-        <h1>{card.headline}</h1>
+        <h1>{card.pathline ?? card.headline}</h1>
+        {card.shapeline ? <p className="explore-shape">{card.shapeline}</p> : null}
         {card.insight ? (
           <div className="card-insight">
             <span className="card-insight-label">AI reading</span>

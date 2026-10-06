@@ -1358,6 +1358,17 @@ body { background: var(--background, #151419); }
 .hotspot-heading-copy { display: grid; min-width: 0; gap: 3px; }
 /* The burst count qualifies the headline total; it must not compete with it. */
 .hotspot-subtitle { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; opacity: 0.75; overflow-wrap: anywhere; }
+/* The measured shape of the cost: the card's finding, so it sits above the
+   subtitle's weight and below the heading's. Tabular figures because the shares
+   are read down a column of cards. */
+.hotspot-shape {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .hotspot-head .hotspot-heading-copy strong { font-size: 15px; line-height: 1.4; }
 .hotspot-time {
   padding: 6px 9px;
@@ -1579,6 +1590,14 @@ body {
   margin: 0;
   font-size: 24px;
   font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+.explore-shape {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }
 .explore-location {

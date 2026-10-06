@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ruleClassTable } from '../src/lib/frame-classes.ts';
-import { CULPRIT_MIN_MS, focusedTree, selectTaskCards } from '../src/lib/task-cards.ts';
+import { CULPRIT_MIN_MS, focusedTree, pathlineFor, selectTaskCards, shapelineFor } from '../src/lib/task-cards.ts';
 import { attachMeasuredTasks, extractTasks } from '../src/lib/tasks.ts';
 
 const node = (id, name, children = [], url = 'app.js', line = 0) => ({
@@ -361,4 +361,176 @@ test('what never reached a frame of your own is reported rather than left in a r
   const accounted = card.boundaryFrames.reduce((sum, entry) => sum + entry.totalMs, 0)
     + card.boundaryTailMs + card.outsideBoundariesMs;
   assert.equal(accounted, card.durationMs);
+});
+
+/**
+ * The two candidate headings, which are measured from a finished card rather
+ * than from the tree — so they are asserted against hand-written cards as well
+ * as against built ones, to pin the branch each reading comes from.
+ */
+const culprit = (name, selfMs, overrides = {}) => ({
+  name, selfMs, totalMs: selfMs, frameClass: 'native', invocations: 1, longestCallMs: selfMs,
+  shapeText: '', nodeId: '0.0', callers: [], reachedVia: [], hotPath: [], ...overrides,
+});
+
+const feature = (name, totalMs, culprits = []) => ({ name, totalMs, culprits });
+
+const bare = (overrides) => ({
+  durationMs: 1000, outsideBoundariesMs: 0, subtreeFunctionCount: 40,
+  culprits: [], boundaryFrames: [], ...overrides,
+});
+
+test('the path line places the heaviest culprit in the feature that reached it', () => {
+  const { cards } = cardsFor(oneTask, 400);
+  // `toLocaleString` is the engine built-in that burned the task, reached
+  // through two frames of the product's own. The line stops above it: a native
+  // frame is not a file anyone can open, and the shape line names it anyway.
+  assert.equal(cards[0].pathline, 'Search_Search › applyMerge');
+});
+
+test('the path line ends at the culprit when the culprit is code of your own', () => {
+  const card = bare({
+    culprits: [culprit('applyMerge', 400, { frameClass: 'app', callers: ['Search_Search'] })],
+    boundaryFrames: [{ name: 'Search_Search', culprits: [{ name: 'applyMerge' }] }],
+  });
+  assert.equal(pathlineFor(card), 'Search_Search › applyMerge');
+});
+
+test('the path line anchors on the feature when the caller chain was clipped', () => {
+  // `callers` keeps three frames, so a deep stack loses the feature off the
+  // top. The ellipsis says frames were skipped rather than implying the
+  // feature called the first one directly.
+  const card = bare({
+    culprits: [culprit('toLocaleString', 400, { callers: ['one', 'two', 'three'] })],
+    boundaryFrames: [{ name: 'Search_Search', culprits: [{ name: 'toLocaleString' }] }],
+  });
+  assert.equal(pathlineFor(card), 'Search_Search › … › one › two › three');
+});
+
+test('the path line falls back to the features when nothing cleared the culprit floor', () => {
+  const card = bare({ boundaryFrames: [{ name: 'Search_Search', culprits: [] }, { name: 'Reports', culprits: [] }] });
+  assert.equal(pathlineFor(card), 'Search_Search › Reports');
+});
+
+test('the shape line reads a dominant culprit as a share, a count and a worst call', () => {
+  const card = bare({ culprits: [culprit('toLocaleString', 740, { invocations: 8, longestCallMs: 196 })] });
+  assert.equal(shapelineFor(card), '74% in toLocaleString · 8 calls, longest 196 ms');
+});
+
+test('the shape line tells one slow call apart from a cheap one paid per item', () => {
+  // The distinction the merged call tree cannot draw, and the one that decides
+  // whether the fix is inside the callee or at the call site.
+  const once = bare({ culprits: [culprit('jsonParse', 840, { totalMs: 840 })] });
+  assert.equal(shapelineFor(once), '84% in jsonParse · one 840 ms call');
+});
+
+test('a share is measured against the code that ran, not against the task', () => {
+  // 600 ms of the task never reached the product's code, so the 300 ms frame is
+  // 75% of the 400 ms that did — and the line says 400 ms first, because 75%
+  // beside a 1000 ms time label would otherwise invite multiplying the two.
+  const card = bare({ outsideBoundariesMs: 600, culprits: [culprit('toLocaleString', 300)] });
+  assert.equal(shapelineFor(card), '400 ms in your code · 75% in toLocaleString · one 300 ms call');
+});
+
+test('one frame is read the same way however much framework time sat beside it', () => {
+  // The bug this denominator fixes. The same 300 ms frame, the same 400 ms of
+  // the product's own code, in a short task and in a long one: measured against
+  // the task it was dominant on the first and invisible on the second, which
+  // made a card's finding depend on something the frame had no part in.
+  const short = bare({ durationMs: 500, outsideBoundariesMs: 100, culprits: [culprit('toLocaleString', 300)] });
+  const long = bare({ durationMs: 50000, outsideBoundariesMs: 49600, culprits: [culprit('toLocaleString', 300)] });
+  assert.match(shapelineFor(short), /75% in toLocaleString/);
+  assert.match(shapelineFor(long), /75% in toLocaleString/);
+});
+
+test('a task with no frame of your own anywhere in it has no share to report', () => {
+  // Nothing of the reader's own ran, so there is no whole to measure against
+  // and the row says that rather than dividing by zero or printing a 0%.
+  const card = bare({ outsideBoundariesMs: 1000 });
+  assert.equal(shapelineFor(card), 'no code of your own ran in this block');
+});
+
+test('a task split between features is read as that split, not as one frame in one of them', () => {
+  // The case the framework early-return used to swallow: half the task outside,
+  // the rest divided between two features. Both are named, and the shares are
+  // of the 3.22 s that reached the product's code, so they add up to it.
+  const card = bare({
+    durationMs: 6490,
+    outsideBoundariesMs: 3270,
+    culprits: [culprit('arrayPrototypeSort', 400)],
+    boundaryFrames: [feature('_onFocus', 2420), feature('_onChange', 760), feature('tiny', 37)],
+    segments: [{ title: 'sort' }, { title: 'format' }],
+  });
+  assert.equal(shapelineFor(card), '3.22 s in your code · 75% _onFocus · 24% _onChange');
+});
+
+test('a task spread across many features is not reported as a split between two of them', () => {
+  // The 17/11/9/7/6/5/5/3 shape of a real search render. The top two hold 28%
+  // between them, so naming them would present a corner of the task as its
+  // shape — the segments are the honest reading, and the path line keeps its
+  // path rather than collapsing to two feature names.
+  const card = bare({
+    durationMs: 3227,
+    outsideBoundariesMs: 462,
+    culprits: [culprit('getReportSections', 193, { frameClass: 'library', callers: ['hooks_useSearchSnapshot', 'getSections'] })],
+    boundaryFrames: [
+      feature('Search_Search', 548), feature('flushRecompute', 355), feature('keysChanged', 306),
+      feature('Search_SearchTypeMenuWide', 229), feature('applyMerge', 187),
+    ],
+    segments: [{ title: 'getReportSections' }, { title: 'flushRecompute' }, { title: 'fireCallbacks' }],
+  });
+  assert.equal(shapelineFor(card), '3 distinct pieces of work · getReportSections, flushRecompute, fireCallbacks');
+  assert.equal(pathlineFor(card), 'Search_Search › … › hooks_useSearchSnapshot › getSections › getReportSections');
+});
+
+test('the path line names the features when the task is split between them', () => {
+  const card = bare({
+    durationMs: 6490,
+    culprits: [culprit('arrayPrototypeSort', 900, { callers: ['_onFocus'] })],
+    boundaryFrames: [feature('_onFocus', 2420), feature('_onChange', 760), feature('tiny', 37)],
+  });
+  assert.equal(pathlineFor(card), '_onFocus + _onChange');
+});
+
+test('the path line still builds a path when one feature is the task', () => {
+  const card = bare({
+    culprits: [culprit('applyMerge', 400, { frameClass: 'app', callers: ['Search_Search'] })],
+    boundaryFrames: [feature('Search_Search', 800, [{ name: 'applyMerge' }]), feature('Reports', 120)],
+  });
+  assert.equal(pathlineFor(card), 'Search_Search › applyMerge');
+});
+
+test('a culprit that is a sliver of the task is still the finding when it is most of the code that ran', () => {
+  // The real shape of a 50.6 s task that spent 93% of itself in the framework:
+  // the heaviest frame is 6% of the task and 77% of the 3.79 s that reached the
+  // product's code. Both rows report it — the path names the caller it came
+  // from, the shape names the frame and the 3.79 s it is a share of.
+  const card = bare({
+    durationMs: 50560,
+    outsideBoundariesMs: 46770,
+    culprits: [culprit('[Native] datePrototypeToLocaleStringHelper', 2923, {
+      callers: ['_onFocus', 'findFeaturedReviewer'], invocations: 97, longestCallMs: 135,
+    })],
+    boundaryFrames: [feature('_onFocus', 2948)],
+  });
+  assert.equal(pathlineFor(card), '_onFocus › findFeaturedReviewer');
+  assert.equal(shapelineFor(card),
+    '3.79 s in your code · 77% in [Native] datePrototypeToLocaleStringHelper · 97 calls, longest 135 ms');
+});
+
+test('a long task with no dominant frame is read as its segments', () => {
+  const card = bare({
+    culprits: [culprit('toLocaleString', 100)],
+    segments: [{ title: 'startup' }, { title: 'first render' }],
+  });
+  assert.equal(shapelineFor(card), '2 distinct pieces of work · startup, first render');
+});
+
+test('a diffuse task says so, and says how thin the heaviest frame was', () => {
+  const card = bare({ culprits: [culprit('toLocaleString', 90)], subtreeFunctionCount: 512 });
+  assert.equal(shapelineFor(card), 'no single hot frame · heaviest 9% (toLocaleString) of 512 functions');
+});
+
+test('neither line claims a figure on a block with no measurable duration', () => {
+  assert.equal(shapelineFor(bare({ durationMs: 0 })), 'no measurable work in this block');
 });

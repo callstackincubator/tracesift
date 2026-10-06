@@ -24,6 +24,21 @@ const internalNames = new Set([
   // engine — and now that a built-in which names itself is drawn, an unlisted
   // `batchedUpdatesImpl` would be drawn with it.
   "batchedUpdates", "batchedUpdatesImpl", "discreteUpdates",
+  // The event system between a host event and the handler the product wrote.
+  // These are listed by name because the module heuristic below cannot see
+  // them: a Metro or webpack bundle gives every frame in the app one URL, so
+  // `dispatchEvent` out of `expo-router/entry.bundle` is indistinguishable by
+  // path from a component. Left unlisted it classifies as the product's own
+  // code, and since it sits above every handler it becomes the outermost named
+  // frame on the stack — the boundary search stops there and one wrapper is
+  // drawn holding 100% of the task, with `_onFocus` and every other feature
+  // hidden inside it. `prompts.ts` already excludes these from a card title
+  // for the same reason; this is that knowledge moved to where the tree is cut.
+  "dispatchEvent", "dispatchEventForPluginEventSystem", "dispatchEventsForPlugins",
+  "dispatchEventsForPluginEventSystem", "dispatchDiscreteEvent", "dispatchContinuousEvent",
+  "executeDispatch", "executeDispatchesInOrder", "executeDispatchesAndReleaseTopLevel",
+  "processDispatchQueue", "processDispatchQueueItemsInOrder", "forEachAccumulated",
+  "runWithFiberInDEV",
   // Render phase
   "beginWork", "completeWork", "completeUnitOfWork", "unwindWork", "bubbleProperties",
   "renderWithHooks", "finishRenderingHooks", "finishClassComponent", "appendAllChildren",
