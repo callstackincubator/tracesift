@@ -20,7 +20,7 @@ import { TaskContribution, type ContributionChartKind } from "@/app/task-contrib
 import type { Hotspot } from "@/lib/analysis";
 import type { ProfileCard } from "@/lib/profile-cards";
 import { storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
-import { HEADLINE_FRAMES, type TaskCard, type TaskCardSet } from "@/lib/task-cards";
+import { type TaskCard, type TaskCardSet } from "@/lib/task-cards";
 import { CHART_SLICES } from "@/lib/contribution";
 import { formatMs } from "@/lib/format";
 import { profileCardLocations, taskCardLocations } from "@/lib/frame-location";
@@ -128,7 +128,7 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" | "sparkle" }) {
+function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" | "sparkle" | "chevron-up" | "chevron-down" }) {
   const paths = {
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.65 1 .3.27.68.41 1.08.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -138,6 +138,8 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
     back: <path d="M19 12H5m6 6-6-6 6-6" />,
     explore: <><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
     sparkle: <><path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3Z" /><path d="M18 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7Z" /></>,
+    "chevron-up": <path d="m6 14 6-6 6 6" />,
+    "chevron-down": <path d="m6 10 6 6 6-6" />,
   };
   return <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]}</svg>;
 }
@@ -364,18 +366,9 @@ function cardRows(card: ProfileCard): HotPathCard {
  * why the residuals are slices rather than footnotes — which is also why the
  * footnotes below no longer describe the remainder.
  */
-function taskCardFootnotes(card: TaskCard, set: TaskCardSet): string[] {
+function taskCardFootnotes(card: TaskCard): string[] {
   const footnotes: string[] = [];
-  if (card.segments && card.segments.length > 0) {
-    footnotes.push(`this task is long enough to be a phase — ${card.segments.map((segment) => segment.title).join(", ")}`);
-  }
   if (card.confidence === "low") footnotes.push("few samples landed in this task — treat these figures as a hint");
-  if (card.boundaries === "inferred") {
-    footnotes.push("the profiler recorded no task boundaries, so this block was reconstructed from idle gaps");
-  }
-  if (set.classesDegraded) {
-    footnotes.push("frames inside the bundle were classified without a model, so your own code and your dependencies are not told apart here");
-  }
   return footnotes;
 }
 
@@ -403,29 +396,11 @@ function taskFallbackRows(card: TaskCard, onFocus: (nodeId: string) => void): Ho
   }));
 }
 
-/** Boundary frames named in the subtitle, before the line gets too long to scan. */
-const SUBTITLE_FRAMES = 4;
-
-/**
- * The second line of a card: the rest of your frames this task ran inside.
- *
- * This is where the boundary frames went when the rows became culprits. They
- * are a real answer to "which feature is this" and a poor answer to "what do I
- * change", so naming them reads once and gets out of the way. It replaces
- * `8 entry points into your code in this task`, which counted the rows beneath
- * it and said nothing else.
- *
- * It starts after the ones the heading already named, so a task entered through
- * a single frame has no subtitle at all rather than a line echoing its title.
- */
-function taskSubtitle(card: TaskCard): string | undefined {
-  const rest = card.boundaryFrames.slice(HEADLINE_FRAMES);
-  if (rest.length === 0) return undefined;
-  const shown = rest.slice(0, SUBTITLE_FRAMES);
-  const named = shown.map((frame) => `${frame.name} ${formatMs(frame.totalMs)}`).join(" · ");
-  const hidden = rest.length - shown.length;
-  return hidden > 0 ? `also ${named} · +${hidden} more` : `also ${named}`;
-}
+/* A task card's heading used to carry a third line naming the rest of the
+   boundary frames ("also keysChanged 306 ms · …"). The breakdown beneath the
+   chart already names every one of them with its share, so the line repeated
+   the evidence in a form you could not click. The heading now stops at the
+   shape. */
 
 /** The second line of a card: how often this frame ran. */
 function cardSubtitle(card: ProfileCard, callCountIsExact: boolean): string | undefined {
@@ -483,7 +458,8 @@ function AnalysisResultCard({
   /**
    * The model's reading of this finding, when AI assist is on. Labelled on the
    * card because it is the only thing there that was not measured, and placed
-   * above the rows because it is the claim the rows are the evidence for.
+   * below the rows: the reading is the conclusion the evidence above leads to,
+   * and it lands next to the button that asked for it.
    */
   insight?: string[];
   /** Asks a model to read this task. Absent where no inference is on offer. */
@@ -505,6 +481,10 @@ function AnalysisResultCard({
   onCopy: () => void;
   onExplore?: () => void;
 }) {
+  /* The reading opens with the card that produced it; hiding it is for getting
+     back to the measured evidence without losing the reading. */
+  const [readingOpen, setReadingOpen] = useState(true);
+  const hasReading = Boolean(insight && insight.length > 0);
   return (
     <article className="hotspot-card">
       <div className="hotspot-head">
@@ -516,24 +496,6 @@ function AnalysisResultCard({
         </div>
         <span className="hotspot-time">{timeLabel}</span>
       </div>
-      {insight && insight.length > 0 ? (
-        <div className="card-insight">
-          <span className="card-insight-label">AI reading</span>
-          <ul>{insight.map((finding) => <li key={finding}>{finding}</li>)}</ul>
-        </div>
-      ) : onExplain ? (
-        <div className="card-insight card-insight-offer">
-          <div>
-            <strong>What went wrong here?</strong>
-            <small>Have a model read this task&apos;s timeline and name the issue and where it starts.</small>
-          </div>
-          <Button size="sm" variant="outline" className="prompt-action-button" disabled={explaining} onClick={onExplain}>
-            {explaining ? <RozeniteLoader size={14} label="" /> : <HeaderIcon type="sparkle" />}
-            {explaining ? "Reading…" : "Explain with AI"}
-          </Button>
-        </div>
-      ) : null}
-      {insightError ? <p className="hotspot-prompt-error card-insight-error">{insightError}</p> : null}
       {chart}
       {/* The footnotes qualify whatever evidence the card carried, so they
           belong to the chart as much as to the rows. */}
@@ -582,20 +544,55 @@ function AnalysisResultCard({
           {footnotes.map((footnote) => <p className="hot-path-footnote" key={footnote}>{footnote}</p>)}
         </div>
       )}
+      {insight && insight.length > 0 && readingOpen ? (
+        <div className="card-insight">
+          <span className="card-insight-label">AI reading</span>
+          <ul>{insight.map((finding) => <li key={finding}>{finding}</li>)}</ul>
+        </div>
+      ) : null}
+      {insightError ? <p className="hotspot-prompt-error card-insight-error">{insightError}</p> : null}
       <div className="hotspot-footer">
         {error ? <p className="hotspot-prompt-error">{error}</p> : null}
-        <div className="hotspot-actions">
-          {onExplore ? (
-            <Button size="sm" variant="outline" className="prompt-action-button" onClick={onExplore}>
-              <HeaderIcon type="explore" /> Explore
-            </Button>
-          ) : null}
-          <PromptActionButton
-            loading={loading}
-            copied={copied}
-            busy={busy}
-            onCopy={onCopy}
-          />
+        <div className="hotspot-footer-bar">
+          <div className="hotspot-footer-lead">
+            {hasReading ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="prompt-action-button explain-action-button"
+                aria-expanded={readingOpen}
+                onClick={() => setReadingOpen((open) => !open)}
+              >
+                <HeaderIcon type={readingOpen ? "chevron-down" : "chevron-up"} />
+                {readingOpen ? "Hide AI reading" : "Show AI reading"}
+              </Button>
+            ) : onExplain ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="prompt-action-button explain-action-button"
+                disabled={explaining}
+                onClick={onExplain}
+                title="Have a model read this task's timeline and name the issue and where it starts."
+              >
+                {explaining ? <RozeniteLoader size={14} label="" /> : <HeaderIcon type="sparkle" />}
+                {explaining ? "Reading…" : "Explain with AI"}
+              </Button>
+            ) : null}
+          </div>
+          <div className="hotspot-actions">
+            {onExplore ? (
+              <Button size="sm" variant="outline" className="prompt-action-button" onClick={onExplore}>
+                <HeaderIcon type="explore" /> Explore
+              </Button>
+            ) : null}
+            <PromptActionButton
+              loading={loading}
+              copied={copied}
+              busy={busy}
+              onCopy={onCopy}
+            />
+          </div>
         </div>
       </div>
     </article>
@@ -1598,7 +1595,7 @@ function InspectorApp() {
 
             <div className="hotspot-list">
               {taskCards ? taskList.map((card, index) => {
-                const footnotes = taskCardFootnotes(card, taskCards);
+                const footnotes = taskCardFootnotes(card);
                 // No frame of their own means nothing to divide the task into.
                 const rows = card.boundaryFrames.length === 0
                   ? taskFallbackRows(card, (nodeId) => exploreTask(card, nodeId))
@@ -1610,7 +1607,6 @@ function InspectorApp() {
                     title={card.pathline ?? card.headline}
                     shape={card.shapeline}
                     timeLabel={formatMs(card.durationMs)}
-                    subtitle={taskSubtitle(card)}
                     chart={rows.length === 0
                       ? <TaskContribution card={card} kind={chartKind} onFocus={(nodeId) => exploreTask(card, nodeId)} />
                       : undefined}

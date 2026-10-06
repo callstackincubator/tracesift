@@ -459,32 +459,43 @@ button, input { font: inherit; }
   background: color-mix(in srgb, var(--primary) 75%, transparent);
 }
 .explore-header .card-insight { margin: 14px 0 0; }
-/* The same panel before anything has been inferred into it: the offer sits
-   where the reading will, so the card does not jump when it arrives. */
-.card-insight-offer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  background: color-mix(in srgb, var(--primary) 4%, transparent);
-  border-style: dashed;
-}
-.card-insight-offer > div { display: flex; flex-direction: column; gap: 3px; }
-.card-insight-offer strong { font-size: 13px; }
-.card-insight-offer small { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
-.card-insight-error { margin: -4px 20px 14px; }
+.card-insight-error { margin: 0 20px 14px; text-align: left; }
 
 .hotspot-footer {
   display: grid;
-  justify-items: end;
+  justify-items: stretch;
   gap: 8px;
   margin-top: 4px;
 }
+/* The footer carries two kinds of action: asking for a reading on the left,
+   and taking the finding elsewhere on the right. */
+.hotspot-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.hotspot-footer-lead { display: flex; align-items: center; gap: 8px; }
 .hotspot-actions {
-  display: grid;
-  justify-items: end;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+/* Tinted so the one action that produces something new reads differently from
+   the two that only carry the card away. */
+.explain-action-button {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 32%, transparent);
+}
+.explain-action-button:hover:not(:disabled) {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 46%, transparent);
 }
 .prompt-action-button {
   height: auto;
@@ -493,6 +504,9 @@ button, input { font: inherit; }
   color: var(--muted-foreground);
   border-color: var(--border);
 }
+/* The base Button ships no pointer cursor, so every clickable one here says so
+   for itself. */
+.prompt-action-button:not(:disabled) { cursor: pointer; }
 .prompt-action-button svg {
   width: 13px;
   height: 13px;
@@ -1408,7 +1422,7 @@ body { background: var(--background, #151419); }
 .hotspot-footer {
   min-height: 62px;
   align-items: center;
-  justify-items: end;
+  justify-items: stretch;
   margin: 0;
   padding: 12px 20px;
   background: color-mix(in srgb, var(--muted) 34%, transparent);
@@ -1634,9 +1648,44 @@ body {
 .explore-path-frame + .explore-path-frame::before { content: "→ "; opacity: 0.5; }
 .explore-caveat { font-style: italic; }
 
+/* A segmented control rather than four boxes in a row. The component ships one
+   already, but the app sets `--radius: 0` and a 16px body size, which squares
+   its corners and overfills its 24px track — so the strip is sized and rounded
+   here instead of inheriting those two. */
 .explore-tabs { width: 100%; }
+.explore-tabs [data-slot="tabs-list"] {
+  gap: 2px;
+  height: auto;
+  padding: 4px;
+  background: color-mix(in srgb, var(--muted) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 11px;
+}
+.explore-tabs [data-slot="tabs-tab"] {
+  height: auto;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.explore-tabs [data-slot="tabs-tab"]:not(:disabled) { cursor: pointer; }
+.explore-tabs [data-slot="tabs-tab"]:hover:not([data-active]) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+/* The selected view is the one you are reading, so it lifts off the track. */
+.explore-tabs [data-slot="tabs-tab"][data-active] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary) 15%, var(--card));
+  border-color: color-mix(in srgb, var(--primary) 32%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+}
 .explore-panel {
-  padding-top: 16px;
+  padding-top: 18px;
   min-height: 320px;
 }
 
@@ -1761,6 +1810,7 @@ body {
 .explore-caller em { color: var(--muted-foreground); font-style: normal; }
 
 .explore-footer { display: flex; justify-content: flex-end; }
+.explore-footer button:not(:disabled) { cursor: pointer; }
 
 @media (max-width: 640px) {
   .explore-tree-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "figures" "bar" "location"; }
@@ -1912,7 +1962,10 @@ body {
   --series-rest: color-mix(in srgb, var(--muted-foreground) 22%, var(--muted));
 }
 
-.contribution { display: grid; gap: 14px; padding: 18px 20px 4px; }
+/* The bottom padding is the chart's own breathing room: the legend is the last
+   thing read before the footer or the AI reading, and it needs separating from
+   both rather than sitting on the divider. */
+.contribution { display: grid; gap: 14px; padding: 18px 20px 18px; }
 
 /* Which whole the chart is currently dividing. Only drawn one level down,
    where the question "per cent of what" has a second possible answer. */
