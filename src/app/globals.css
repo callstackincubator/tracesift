@@ -1707,6 +1707,15 @@ body {
 }
 .explore-table tbody th code { font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
 .explore-table td { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
+/* A figure column is as wide as its widest figure and no wider. Left to wrap,
+   a long frame name or path claims the table's width and `2.92 s` breaks after
+   the number, so the digits in one row no longer line up with the next. The
+   `Called from` column is the one that holds prose, so it opts back in. */
+.explore-table thead th,
+.explore-table td { white-space: nowrap; }
+.explore-table .explore-table-callers { white-space: normal; }
+/* The name column takes what is left, and wraps inside itself. */
+.explore-table tbody th { width: 100%; }
 /* Every frame name in Explore is a way to refocus the view on that frame. */
 .explore-tree-focus {
   padding: 0;

@@ -8,10 +8,19 @@ import { ThemeGate } from "@/app/theme-gate";
 import { useStretchZoom, ZoomControls } from "./stretch-zoom";
 import { fetchTaskHandoff, readCardHandoff, type CardHandoff, type TaskHandoff } from "@/lib/card-handoff";
 import { formatMs } from "@/lib/format";
+import { shortLocationLabel } from "@/lib/source-location";
 import { profileCardLocations, taskCardLocations, type FrameLocations } from "@/lib/frame-location";
+import type { FrameClass } from "@/lib/frame-classes";
 import type { CardChildNode, RepeatedFunction } from "@/lib/profile-cards";
-import { focusedTree, type TaskTreeNode } from "@/lib/task-cards";
-import type { TaskTimeline, TimelineBox } from "@/lib/task-timeline";
+import { focusedTree, type TaskCulprit, type TaskTreeNode } from "@/lib/task-cards";
+import { isShownFrame, SHOWN_CLASSES, type TaskTimeline, type TimelineBox } from "@/lib/task-timeline";
+
+/**
+ * The classes the focused views keep, as the set `isShownFrame` tests against.
+ * `SHOWN_CLASSES` is the list and this is the lookup; the cut itself lives in
+ * `task-timeline.ts` so the chart, the tree and the culprit table share it.
+ */
+const DRAWN_CLASSES = new Set<FrameClass>(SHOWN_CLASSES);
 
 /** The captured subtree, in the shape the flame graph reads. */
 function toFlameNode(name: string, totalMs: number, selfMs: number, children: CardChildNode[], path: string): FlameGraphNode {
@@ -76,7 +85,7 @@ function TreeRow({ node, cardTotalMs, exact, depth, locations }: { node: CardChi
         {count > 1 ? <span className="row-share">{callLabel(count, exact)}</span> : null}
       </span>
       <span className="row-bar-track" aria-hidden="true"><span className="row-bar-fill" style={{ width: `${share}%` }} /></span>
-      {where ? <code className="explore-tree-location" title={where}>{where}</code> : null}
+      {where ? <code className="explore-tree-location" title={where}>{shortLocationLabel(where)}</code> : null}
     </div>
   );
 
@@ -117,7 +126,7 @@ function TaskTreeRow({ node, taskMs, depth, onFocus, locations }: { node: TaskTr
         {node.invocations > 1 ? <span className="row-share">{node.invocations} calls</span> : null}
       </span>
       <span className="row-bar-track" aria-hidden="true"><span className="row-bar-fill" style={{ width: `${share}%` }} /></span>
-      {where ? <code className="explore-tree-location" title={where}>{where}</code> : null}
+      {where ? <code className="explore-tree-location" title={where}>{shortLocationLabel(where)}</code> : null}
     </div>
   );
 
@@ -145,7 +154,7 @@ function TaskTreeRow({ node, taskMs, depth, onFocus, locations }: { node: TaskTr
  */
 function RowLocation({ name, location, locations }: { name: string; location: string | undefined; locations: FrameLocations }) {
   const where = locations.shown(name, location);
-  return where ? <code title={where}>{where}</code> : null;
+  return where ? <code title={where}>{shortLocationLabel(where)}</code> : null;
 }
 
 type SortKey = "totalMs" | "selfMs" | "callSites";
@@ -186,7 +195,7 @@ function RepeatedTable({ rows, exact, locations }: { rows: RepeatedFunction[]; e
             <td>{formatMs(row.totalMs)}</td>
             <td>{formatMs(row.selfMs)}</td>
             <td>{exact ? row.invocations ?? row.callSites : row.callSites}</td>
-            <td>
+            <td className="explore-table-callers">
               {row.callers.map((caller) => (
                 <span className="explore-caller" key={caller.name}>
                   {caller.name} <em>{callLabel(exact ? caller.invocations ?? caller.callSites : caller.callSites, exact)}, {formatMs(caller.totalMs)}</em>
@@ -637,6 +646,88 @@ function TaskCallTree({ focus, taskMs, onFocus, locations }: { focus: TaskTreeNo
   );
 }
 
+/**
+ * Every frame that burned time in this task, with the framework and the engine
+ * either listed or cut away.
+ *
+ * The same toggle as the flame graph and the call tree, and the same cut behind
+ * it, so a frame that is gone from one focused view is gone from all three. It
+ * earns its place here for a different reason, though. The tree's problem is
+ * depth — a product frame twelve rows under the reconciler. A ranked table has
+ * no depth to scroll past, so the framework arrives interleaved instead: on a
+ * React profile `batchedUpdatesImpl`, `batchedUpdates$1` and `dispatchEvent`
+ * each hold the task's whole inclusive time at 0 ms of their own, and they sit
+ * in the middle of the rows that name something to go and change.
+ *
+ * Nothing is recomputed under the filter, which is the part that differs from
+ * the focused tree. A culprit's self time is measured over the whole task and
+ * does not depend on which other rows are listed, so hiding a row leaves every
+ * remaining figure exactly as it was. A dropped frame's time is not charged
+ * onward either: it was never this table's to charge, since each row already
+ * reports only what that frame burned in its own body.
+ *
+ * `Everything` is the default: this table is the measured partition of the
+ * task — self time over every row sums to its duration — and a reader who
+ * opened the Culprits tab asked what the task did, not what of it is theirs.
+ */
+function TaskCulpritTable({ culprits, onFocus, locations }: { culprits: readonly TaskCulprit[]; onFocus: (id: string) => void; locations: FrameLocations }) {
+  const [mode, setMode] = useState<TreeMode>("full");
+  const rows = useMemo(
+    () => (mode === "focused" ? culprits.filter((culprit) => isShownFrame(culprit.name, culprit.frameClass, DRAWN_CLASSES)) : culprits),
+    [mode, culprits],
+  );
+  const hidden = culprits.length - rows.length;
+
+  if (culprits.length === 0) {
+    return <EmptyState title="No culprit stands out" description="This task's time is spread too thinly for any single frame to account for it." />;
+  }
+
+  return (
+    <>
+      <TreeModeToggle label="rows" mode={mode} onChange={setMode} />
+      {rows.length > 0 ? (
+        <table className="explore-table">
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Self</th>
+              <th scope="col">Total</th>
+              <th scope="col">Calls</th>
+              <th scope="col">Longest call</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((culprit) => (
+              <tr key={culprit.nodeId}>
+                <th scope="row">
+                  <button type="button" className="explore-tree-focus" onClick={() => onFocus(culprit.nodeId)}>{culprit.name}</button>
+                  <RowLocation name={culprit.name} location={culprit.location} locations={locations} />
+                </th>
+                <td>{formatMs(culprit.selfMs)}</td>
+                <td>{formatMs(culprit.totalMs)}</td>
+                <td>{culprit.invocations}</td>
+                <td>{formatMs(culprit.longestCallMs)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <EmptyState
+          title="None of these frames are yours"
+          description="Every frame that burned time in this task is React's or the engine's. Switch to Everything to see them."
+        />
+      )}
+      {mode === "focused" && hidden > 0 ? (
+        <Text className="explore-caveat">
+          {hidden === 1 ? "One React or engine frame is" : `${hidden} React and engine frames are`} hidden, the same cut
+          the Timeline draws by. Every figure above is unchanged: a culprit&rsquo;s self time is measured over the whole
+          task, so hiding a row neither moves time onto another row nor takes it off this one.
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
 /** Root to `id`, or just the root when the id names nothing in this task. */
 function pathTo(root: TaskTreeNode, id: string): TaskTreeNode[] {
   const stack: TaskTreeNode[][] = [[root]];
@@ -765,35 +856,7 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
           <TaskCallTree focus={focus} taskMs={card.durationMs} onFocus={refocus} locations={locations} />
         </Tabs.Panel>
         <Tabs.Panel value="culprits" className="explore-panel">
-          {card.culprits.length > 0 ? (
-            <table className="explore-table">
-              <thead>
-                <tr>
-                  <th scope="col">Function</th>
-                  <th scope="col">Self</th>
-                  <th scope="col">Total</th>
-                  <th scope="col">Calls</th>
-                  <th scope="col">Longest call</th>
-                </tr>
-              </thead>
-              <tbody>
-                {card.culprits.map((culprit) => (
-                  <tr key={culprit.nodeId}>
-                    <th scope="row">
-                      <button type="button" className="explore-tree-focus" onClick={() => refocus(culprit.nodeId)}>{culprit.name}</button>
-                      <RowLocation name={culprit.name} location={culprit.location} locations={locations} />
-                    </th>
-                    <td>{formatMs(culprit.selfMs)}</td>
-                    <td>{formatMs(culprit.totalMs)}</td>
-                    <td>{culprit.invocations}</td>
-                    <td>{formatMs(culprit.longestCallMs)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <EmptyState title="No culprit stands out" description="This task's time is spread too thinly for any single frame to account for it." />
-          )}
+          <TaskCulpritTable culprits={card.culprits} onFocus={refocus} locations={locations} />
         </Tabs.Panel>
       </Tabs>
     </>
@@ -811,7 +874,7 @@ function CardExplorer({ handoff }: { handoff: CardHandoff }) {
     <>
       <header className="explore-header">
         <h1>{card.title}</h1>
-        {where ? <code className="explore-location">{where}</code> : null}
+        {where ? <code className="explore-location" title={where}>{shortLocationLabel(where)}</code> : null}
         <p className="explore-figures">
           <strong>{formatMs(card.totalMs)}</strong> total
           <span>·</span>

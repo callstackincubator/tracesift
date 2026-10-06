@@ -24,6 +24,7 @@ import { HEADLINE_FRAMES, type TaskCard, type TaskCardSet } from "@/lib/task-car
 import { CHART_SLICES } from "@/lib/contribution";
 import { formatMs } from "@/lib/format";
 import { profileCardLocations, taskCardLocations } from "@/lib/frame-location";
+import { shortLocationLabel } from "@/lib/source-location";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
@@ -548,7 +549,7 @@ function AnalysisResultCard({
               {row.location ? (
                 <p className="row-location" title={row.location}>
                   <span className="row-location-label">file</span>
-                  <code>{row.location}</code>
+                  <code>{shortLocationLabel(row.location)}</code>
                 </p>
               ) : null}
               {row.title ? (

@@ -37,12 +37,59 @@ function stripContentHash(fileName: string): string {
   return fileName.replace(/(?<=[^-.])[-.]([0-9a-f]{8,}|(?=[\w-]*\d)(?=[\w-]*[a-zA-Z])[\w-]{8,})(?=\.)/g, "");
 }
 
+/**
+ * The request a frame's URL was served by, dropped so what is left is a path.
+ *
+ * `?` and `#` are the forms every other server uses. Metro is the reason this
+ * is not a one-liner: it appends its build options to the bundle path itself,
+ * `index.bundle//&platform=ios&dev=true&…&unstable_transformProfile=hermes-stable`,
+ * so the last `/`-segment of the URL is three hundred characters of query and
+ * the file name is the segment before it. Cutting at the first `&` leaves
+ * `index.bundle`, which is what a reader needs; a path with a literal `&` in a
+ * directory name loses the rest of itself, and that trade is worth taking
+ * against a bundle label nobody can read.
+ */
+function stripRequest(url: string): string {
+  return url.split(/[?#&]/, 1)[0].replace(/\/+$/, "");
+}
+
 /** The shortest label that still identifies a frame's position. */
 export function compactLocation(url: string, lineNumber: number, columnNumber: number): string {
   const position = lineNumber < 0 ? "" : `:${lineNumber + 1}:${columnNumber + 1}`;
-  if (isReadableSourcePath(url)) return `${url}${position}`;
-  const fileName = url.split(/[?#]/, 1)[0].split("/").pop() || url;
+  if (isReadableSourcePath(url)) return `${stripRequest(url)}${position}`;
+  const path = stripRequest(url);
+  const fileName = path.split("/").pop() || path || url;
   return `${stripContentHash(fileName)}${position}`;
+}
+
+/**
+ * A readable path cut down to the part that tells a reader where they are.
+ *
+ * Compaction keeps a source path whole because an agent holding the codebase
+ * can open it, and that is the right call for a prompt. On screen it is not: a
+ * profile recorded on another machine carries that machine's home directory,
+ * and `/Users/someone/Desktop/work/test-projects/expoapp57/node_modules/react-native/…`
+ * spends sixty characters before the first thing that distinguishes it from
+ * every other row. Those characters are also what widens the function column
+ * until the figures beside it wrap.
+ *
+ * What survives: the package, once a path passes through `node_modules`, and
+ * otherwise the last few segments. Both are prefixed `…/` so the label never
+ * reads as the whole path, and every caller keeps the full one in a `title`.
+ */
+export function shortLocationLabel(label: string): string {
+  const position = /(?::\d+){1,2}$/.exec(label)?.[0] ?? "";
+  const path = position ? label.slice(0, -position.length) : label;
+  if (!isSourceLabel(label) || !path.includes("/")) return label;
+
+  const segments = path.split("/");
+  const vendored = segments.lastIndexOf("node_modules");
+  const start = vendored >= 0 ? vendored : Math.max(segments.length - 3, 0);
+  // A leading `/` splits to an empty first segment, so `/src/app/list.tsx` has
+  // one segment to drop and nothing in it. Cutting there would add a `…/` that
+  // promises a prefix the reader was never missing.
+  if (segments.slice(0, start).every((segment) => segment === "")) return label;
+  return `…/${segments.slice(start).join("/")}${position}`;
 }
 
 /**

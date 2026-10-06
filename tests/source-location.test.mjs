@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compactLocation, isReadableSourcePath, isSourceLabel } from '../src/lib/source-location.ts';
+import { compactLocation, isReadableSourcePath, isSourceLabel, shortLocationLabel } from '../src/lib/source-location.ts';
 
 test('a path a developer can open is printed whole', () => {
   assert.ok(isReadableSourcePath('src/screens/Search.tsx'));
@@ -54,4 +54,43 @@ test('a path a developer can open survives compaction as one', () => {
   // A bare file name followed by a position reads as a URL scheme to the
   // whole-URL test, and has since before this rule existed.
   assert.ok(!isReadableSourcePath('Search.tsx:12:1'), 'pre-existing: the stem is taken for a scheme');
+});
+
+test("a Metro bundle's build options never reach the label", () => {
+  // Metro appends its options to the bundle path itself, so the last segment
+  // of the URL is the query and the file name is the segment before it. Left
+  // whole, that is three hundred characters in a `function` column.
+  const metro =
+    'http://localhost:8081/node_modules/expo-router/entry.bundle//&platform=ios&dev=true&lazy=true' +
+    '&minify=false&transform.engine=hermes&unstable_transformProfile=hermes-stable';
+  assert.equal(compactLocation(metro, 193701, 39), 'entry.bundle:193702:40');
+  assert.ok(!isSourceLabel(compactLocation(metro, 193701, 39)), 'a bundle is not a file to open');
+});
+
+test('a path is shown from the part that tells one row from another', () => {
+  // The machine the profile was recorded on is not information.
+  assert.equal(
+    shortLocationLabel('/Users/me/Desktop/work/app/node_modules/react-native/Libraries/Renderer/ReactFabric-dev.js:2321:25'),
+    '…/node_modules/react-native/Libraries/Renderer/ReactFabric-dev.js:2321:25',
+  );
+  assert.equal(
+    shortLocationLabel('/Users/me/Desktop/work/app/src/screens/Search.tsx:11:4'),
+    '…/src/screens/Search.tsx:11:4',
+  );
+});
+
+test('a path that was already short is left exactly as it is', () => {
+  // A leading slash is the only segment dropped here, and a `…/` standing for
+  // it would promise a prefix the reader was never missing.
+  assert.equal(
+    shortLocationLabel('/node_modules/react-native/Libraries/Renderer/ReactFabric-prod.js:10036:1'),
+    '/node_modules/react-native/Libraries/Renderer/ReactFabric-prod.js:10036:1',
+  );
+  assert.equal(shortLocationLabel('/src/app/explore-list.tsx:157:16'), '/src/app/explore-list.tsx:157:16');
+  assert.equal(shortLocationLabel('src/screens/Search.tsx:11:4'), 'src/screens/Search.tsx:11:4');
+});
+
+test('a build artefact is shown whole, because compaction already cut it', () => {
+  assert.equal(shortLocationLabel('vendors.bundle.js:189:701931'), 'vendors.bundle.js:189:701931');
+  assert.equal(shortLocationLabel('native date.js'), 'native date.js');
 });

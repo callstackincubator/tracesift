@@ -10,6 +10,7 @@ import {
   type ContributionSlice,
 } from "@/lib/contribution";
 import { taskCardLocations } from "@/lib/frame-location";
+import { shortLocationLabel } from "@/lib/source-location";
 import { BOUNDARY_MIN_SHARE, type BoundaryFrame, type TaskCard } from "@/lib/task-cards";
 
 /**
@@ -305,7 +306,7 @@ function SliceDetail({
           {location ? (
             <p className="contribution-detail-line">
               <span className="contribution-detail-label">file</span>
-              <code>{location}</code>
+              <code title={location}>{shortLocationLabel(location)}</code>
             </p>
           ) : null}
           <p className="contribution-detail-shape">{frame.shapeText}</p>
