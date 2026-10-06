@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ChangeEvent, DragEvent, useEffect, useId, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   Alert,
   ArrowRight,
@@ -16,12 +16,14 @@ import {
 
 import { HowToUseGuide } from "@/app/how-to-use";
 import { ThemeGate } from "@/app/theme-gate";
+import { TaskContribution, type ContributionChartKind } from "@/app/task-contribution";
 import type { Hotspot } from "@/lib/analysis";
 import type { ProfileCard } from "@/lib/profile-cards";
 import { storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
-import { CULPRIT_MIN_MS, HEADLINE_FRAMES, MAX_CULPRITS, type TaskCard, type TaskCardSet } from "@/lib/task-cards";
+import { HEADLINE_FRAMES, type TaskCard, type TaskCardSet } from "@/lib/task-cards";
+import { CHART_SLICES } from "@/lib/contribution";
 import { formatMs } from "@/lib/format";
-import { profileCardLocations, taskCardLocations, type FrameLocations } from "@/lib/frame-location";
+import { profileCardLocations, taskCardLocations } from "@/lib/frame-location";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
@@ -346,68 +348,23 @@ function cardRows(card: ProfileCard): HotPathCard {
   return { rows, footnotes };
 }
 
-/** A card's worth of culprits. The rest of the list lives in Explore. */
-const CARD_CULPRIT_ROWS = 8;
-
 /**
- * A task card's rows are its culprits — the functions whose own bodies burned
- * the time — each under the callers that reached it.
+ * A task card's content is a drawing of how the block divides between the
+ * features it entered, plus the footnotes that qualify the measurement.
  *
- * The rows used to be the boundary frames, and those are the wrong end of the
- * stack to put a bar against. A boundary frame is the *outermost* drawable
- * frame on its branch, so on a React profile it is a component that delegates
- * everything downward: on a real 3.2 s task six of its eight rows read `0 ms
- * self`, their bars measured how long the frame sat on the stack rather than
- * what it cost, and two cards over the same screen listed the same five names.
- * Which feature ran is worth saying once, so it is the heading and the subtitle
- * now. The rows answer the question after it, which is what to go and change.
+ * It was a list of culprit rows until the chart replaced it, and before that a
+ * list of boundary frames with inclusive-time bars. Both were readings of a
+ * card as eight independent rows, which is the thing the chart is not: the rows
+ * shared no whole, so a reader could not see that the eight heaviest culprits
+ * of a 3227 ms task account for 30% of it, nor what the other 70% was.
  *
- * Self time is also a true partition of the task, so unlike the inclusive
- * figures these rows replace, the numbers add up and no millisecond is claimed
- * twice.
+ * Dividing by boundary frame instead is what makes the whole say something. See
+ * `contribution.ts` for why both levels of the chart are honest partitions, and
+ * why the residuals are slices rather than footnotes — which is also why the
+ * footnotes below no longer describe the remainder.
  */
-function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string) => void): HotPathCard {
-  // A card is read at a glance, so it takes the head of the list; the whole of
-  // it is one click away in Explore's Culprits tab.
-  const shown = card.culprits.slice(0, CARD_CULPRIT_ROWS);
-  // A row's position is labelled `file`, so it is drawn only where it names
-  // one or where the frame's name cannot locate it — see `frame-location.ts`.
-  const locations = taskCardLocations(card);
-  const rows: HotPathRow[] = shown.map((culprit) => ({
-    location: locations.shown(culprit.name, culprit.location),
-    title: culprit.name,
-    ms: culprit.selfMs,
-    // Only when the two differ. A leaf burns all of its own time, so printing
-    // `1.57 s` beside `1.57 s with callees` says the same thing twice and
-    // invites the reader to look for a distinction that is not there.
-    secondaryLabel: culprit.totalMs - culprit.selfMs >= 1 ? `${formatMs(culprit.totalMs)} with callees` : undefined,
-    percentLabel: card.durationMs > 0 ? `${Math.round((culprit.selfMs / card.durationMs) * 100)}% of task` : undefined,
-    barPercent: card.durationMs > 0 ? (culprit.selfMs / card.durationMs) * 100 : 0,
-    shape: culprit.shapeText,
-    callers: culprit.callers.length > 0 ? culprit.callers.join(" › ") : undefined,
-    onFocus: () => onFocus(culprit.nodeId),
-  }));
-
+function taskCardFootnotes(card: TaskCard, set: TaskCardSet): string[] {
   const footnotes: string[] = [];
-  const named = shown.reduce((sum, culprit) => sum + culprit.selfMs, 0);
-  const rest = card.durationMs - named;
-  const more = card.culprits.length - shown.length;
-  if (rest >= 1) {
-    // How the remainder is shaped, not just how big it is. A list this short
-    // covering a quarter of a three-second task reads as a short measurement
-    // unless the card says the cost really is spread that thin — which is
-    // itself the finding, and the opposite of a task with one hot function.
-    // The claim only holds while nothing above the floor was cut.
-    if (more === 0 && card.culprits.length < MAX_CULPRITS) {
-      footnotes.push(`${formatMs(rest)} ran in functions that each burned under ${CULPRIT_MIN_MS} ms of their own and under ${CULPRIT_MIN_MS} ms including their callees — the cost here is spread rather than concentrated`);
-    } else {
-      // Where the rest went is a click away rather than a dead end, so the
-      // footnote says how much of it Explore can actually name.
-      footnotes.push(more > 0
-        ? `${formatMs(rest)} ran in functions smaller than the ones above — Explore names the next ${more}`
-        : `${formatMs(rest)} ran in functions smaller than the ones above`);
-    }
-  }
   if (card.segments && card.segments.length > 0) {
     footnotes.push(`this task is long enough to be a phase — ${card.segments.map((segment) => segment.title).join(", ")}`);
   }
@@ -416,26 +373,32 @@ function taskCardRows(card: TaskCard, set: TaskCardSet, onFocus: (nodeId: string
     footnotes.push("the profiler recorded no task boundaries, so this block was reconstructed from idle gaps");
   }
   if (set.classesDegraded) {
-    footnotes.push("frames inside the bundle were classified without a model, so your own code and your dependencies are not told apart below");
+    footnotes.push("frames inside the bundle were classified without a model, so your own code and your dependencies are not told apart here");
   }
-  // A task whose cost is spread so thin that nothing clears the floor would
-  // otherwise render as a card with no rows at all, and the renderer drops the
-  // footnotes with them. The boundary frames are weaker rows, and weaker rows
-  // beat an empty card.
-  if (rows.length === 0) return { rows: boundaryFrameRows(card, onFocus, locations), footnotes };
-  return { rows, footnotes };
+  return footnotes;
 }
 
-function boundaryFrameRows(card: TaskCard, onFocus: (nodeId: string) => void, locations: FrameLocations): HotPathRow[] {
-  return card.boundaryFrames.map((frame) => ({
-    location: locations.shown(frame.name, frame.location),
-    title: frame.name,
-    ms: frame.totalMs,
-    secondaryLabel: `${formatMs(frame.selfMs)} self`,
-    percentLabel: card.durationMs > 0 ? `${Math.round((frame.totalMs / card.durationMs) * 100)}% of task` : undefined,
-    barPercent: card.durationMs > 0 ? (frame.totalMs / card.durationMs) * 100 : 0,
-    shape: frame.shapeText,
-    onFocus: () => onFocus(frame.nodeId),
+/**
+ * A task that entered no frame of its own — a bundle whose identifiers are all
+ * mangled, or work that really was all framework — has no features to divide
+ * into, so the chart could only say "none of this was your code" and offer
+ * nothing to open. Its culprits can still name functions, so the card falls
+ * back to the rows they used to be drawn as.
+ */
+function taskFallbackRows(card: TaskCard, onFocus: (nodeId: string) => void): HotPathRow[] {
+  const locations = taskCardLocations(card);
+  return card.culprits.slice(0, CHART_SLICES).map((culprit) => ({
+    location: locations.shown(culprit.name, culprit.location),
+    title: culprit.name,
+    ms: culprit.selfMs,
+    // Only when the two differ. A leaf burns all of its own time, so printing
+    // `1.57 s` beside `1.57 s with callees` says the same thing twice.
+    secondaryLabel: culprit.totalMs - culprit.selfMs >= 1 ? `${formatMs(culprit.totalMs)} with callees` : undefined,
+    percentLabel: card.durationMs > 0 ? `${Math.round((culprit.selfMs / card.durationMs) * 100)}% of task` : undefined,
+    barPercent: card.durationMs > 0 ? (culprit.selfMs / card.durationMs) * 100 : 0,
+    shape: culprit.shapeText,
+    callers: culprit.callers.length > 0 ? culprit.callers.join(" › ") : undefined,
+    onFocus: () => onFocus(culprit.nodeId),
   }));
 }
 
@@ -495,6 +458,7 @@ function AnalysisResultCard({
   onExplain,
   explaining,
   insightError,
+  chart,
   rows,
   footnotes,
   loading,
@@ -518,6 +482,12 @@ function AnalysisResultCard({
   onExplain?: () => void;
   explaining?: boolean;
   insightError?: string;
+  /**
+   * The evidence as a drawing rather than as rows. Where a finding divides into
+   * parts of a whole it is the better reading, and where it does not — a React
+   * commit, a hotspot group — the card still takes rows.
+   */
+  chart?: ReactNode;
   rows: HotPathRow[];
   footnotes: string[];
   loading: boolean;
@@ -555,6 +525,14 @@ function AnalysisResultCard({
         </div>
       ) : null}
       {insightError ? <p className="hotspot-prompt-error card-insight-error">{insightError}</p> : null}
+      {chart}
+      {/* The footnotes qualify whatever evidence the card carried, so they
+          belong to the chart as much as to the rows. */}
+      {chart && rows.length === 0 && footnotes.length > 0 ? (
+        <div className="hot-path-rows hot-path-rows-footnotes-only">
+          {footnotes.map((footnote) => <p className="hot-path-footnote" key={footnote}>{footnote}</p>)}
+        </div>
+      ) : null}
       {rows.length > 0 && (
         <div className="hot-path-rows">
           {rows.map((row, rowIndex) => (
@@ -791,6 +769,10 @@ function InspectorApp() {
   const [insightErrors, setInsightErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [isSample, setIsSample] = useState(false);
+  // Two readings of the same slices are on offer while we decide which one a
+  // card keeps; the switch is per page rather than per card so the comparison
+  // is between pages of cards rather than between neighbours.
+  const [chartKind, setChartKind] = useState<ContributionChartKind>("bar");
 
   const updateFile = (kind: UploadKind, file?: File) => {
     setFiles((current) => ({ ...current, [kind]: file }));
@@ -1585,6 +1567,21 @@ function InspectorApp() {
                 )}
               </div>
               <div className="result-actions">
+                {taskCards ? (
+                  <div className="chart-switch">
+                    <span className="chart-switch-label">contribution</span>
+                    {(["bar", "treemap"] as const).map((kind) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        className={chartKind === kind ? "timeline-zoom is-current" : "timeline-zoom"}
+                        onClick={() => setChartKind(kind)}
+                      >
+                        {kind}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
@@ -1592,7 +1589,11 @@ function InspectorApp() {
 
             <div className="hotspot-list">
               {taskCards ? taskList.map((card, index) => {
-                const { rows, footnotes } = taskCardRows(card, taskCards, (nodeId) => exploreTask(card, nodeId));
+                const footnotes = taskCardFootnotes(card, taskCards);
+                // No frame of their own means nothing to divide the task into.
+                const rows = card.boundaryFrames.length === 0
+                  ? taskFallbackRows(card, (nodeId) => exploreTask(card, nodeId))
+                  : [];
                 return (
                   <AnalysisResultCard
                     key={card.id}
@@ -1600,6 +1601,9 @@ function InspectorApp() {
                     title={card.headline}
                     timeLabel={formatMs(card.durationMs)}
                     subtitle={taskSubtitle(card)}
+                    chart={rows.length === 0
+                      ? <TaskContribution card={card} kind={chartKind} onFocus={(nodeId) => exploreTask(card, nodeId)} />
+                      : undefined}
                     insight={card.insight?.findings}
                     onExplain={aiAssisted && modelStatus?.configured && analysisId && !isSample ? () => void explainTask(card) : undefined}
                     explaining={explainingId === card.id}

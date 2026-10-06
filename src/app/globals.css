@@ -1800,8 +1800,9 @@ body {
   pointer-events: none;
 }
 
-/* Gaps are stretches where only React or engine code was on the stack. They are
-   left empty on a hatched ground so they read as "not our code", never as idle. */
+/* Gaps are stretches where only React, or engine code naming nothing, was on the
+   stack. They are left empty on a hatched ground so they read as "not our code",
+   never as idle. */
 .timeline-rows {
   position: relative;
   background-image: repeating-linear-gradient(
@@ -1828,6 +1829,339 @@ body {
   cursor: pointer;
   box-shadow: inset -1px 0 0 color-mix(in srgb, var(--background) 65%, transparent);
 }
+/* A built-in the code called by name — `[Native] intlDateTimeFormatFormat` — is
+   kept on the chart because the cost is real and the caller controls it, but it
+   is not the reader's own code: a paler fill inside a hairline ring says
+   `engine` at a glance without taking it off the row it ran on. The name is on the box
+   and the class is in the tooltip, so this never carries the distinction alone. */
+.timeline-box[data-class="native"] {
+  background: color-mix(in srgb, var(--chart-2, #4ade80) 32%, var(--muted));
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
 .timeline-box > span { padding: 0 4px; pointer-events: none; }
 .timeline-box:hover { filter: brightness(1.12); }
 .timeline-box.is-selected { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
+
+/* ── A task's cost as parts of a whole ────────────────────────────────────────
+   The categorical palette the contribution charts paint with. Eight slots in a
+   fixed order, assigned by a slice's rank in the culprit list and never by how
+   many slices survived the fold, so a colour means one function rather than one
+   position. Both columns were validated against this app's own surfaces
+   (#ffffff light, #201f24 dark): every slot clears the lightness band, the
+   chroma floor, and an adjacent-pair separation of ΔE 9.1 light / 8.4 dark
+   under protanopia and deuteranopia simulation. Three of the light steps sit
+   below 3:1 against white, which is why the legend and the detail strip are not
+   optional — identity never rests on the fill alone.
+   The remainder takes no slot: it is not a series, it is what is left. */
+[data-slot="plugin-shell"] {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  /* The residuals. `tail` is code of yours that is merely small, so it stays
+     nearer the series; `outside` was never your code, so it recedes and is
+     hatched. */
+  --series-tail: color-mix(in srgb, var(--muted-foreground) 42%, var(--muted));
+  --series-outside: color-mix(in srgb, var(--muted-foreground) 16%, var(--muted));
+  --series-rest: color-mix(in srgb, var(--muted-foreground) 26%, var(--muted));
+}
+[data-slot="plugin-shell"].dark {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-tail: color-mix(in srgb, var(--muted-foreground) 34%, var(--muted));
+  --series-outside: color-mix(in srgb, var(--muted-foreground) 12%, var(--muted));
+  --series-rest: color-mix(in srgb, var(--muted-foreground) 22%, var(--muted));
+}
+
+.contribution { display: grid; gap: 14px; padding: 18px 20px 4px; }
+
+/* Which whole the chart is currently dividing. Only drawn one level down,
+   where the question "per cent of what" has a second possible answer. */
+.contribution-crumbs {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.contribution-crumb {
+  padding: 0;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.contribution-crumb:hover { text-decoration: underline; }
+.contribution-crumb-current { color: var(--muted-foreground); }
+.contribution-crumb-current::before { content: "/"; margin-right: 8px; opacity: 0.5; }
+.contribution-lede {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* One bar, the task wide. The 2px seams are the surface showing through
+   between fills, not borders: a border would eat into a slice's width and make
+   the drawing disagree with the figure beside it. */
+.contribution-bar {
+  display: flex;
+  gap: 2px;
+  height: 34px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+.contribution-band {
+  min-width: 3px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+.contribution-band.is-outside {
+  /* Hatched for the same reason the timeline hatches its gaps: this is not one
+     thing that ran, it is the absence of anything big enough to name. */
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--background) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.contribution-bar:hover .contribution-band:not(.is-active) { opacity: 0.4; }
+.contribution-band.is-active { filter: brightness(1.08); }
+.contribution-band:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+/* The same slices as area. Tiles are placed in percentages, so the box can be
+   any width; its aspect ratio is set inline from the one the layout assumed. */
+.contribution-treemap {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+.contribution-tile {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  padding: 7px 9px;
+  border: 0;
+  /* The 2px seam again, as an inset ring rather than a gap: a tile is placed at
+     an exact area, so the spacer has to come out of its paint, not its box. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card) 85%, transparent);
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+.contribution-tile.is-outside {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--background) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.contribution-treemap:hover .contribution-tile:not(.is-active) { opacity: 0.45; }
+.contribution-tile.is-active { filter: brightness(1.08); }
+.contribution-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
+.contribution-tile-copy { display: grid; gap: 2px; min-width: 0; }
+.contribution-tile-name {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* White ink on eight different fills, two of which are a light yellow: the
+     scrim is what keeps the label legible on all of them. The name is also in
+     the legend and the detail strip, so this is the convenience channel rather
+     than the only one. */
+  text-shadow: 0 1px 3px rgba(0,0,0,.7);
+}
+.contribution-tile-figure {
+  color: color-mix(in srgb, #ffffff 82%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 1.2;
+  text-shadow: 0 1px 3px rgba(0,0,0,.7);
+}
+.contribution-tile.is-neutral .contribution-tile-name,
+.contribution-tile.is-neutral .contribution-tile-figure { color: var(--muted-foreground); text-shadow: none; }
+
+/* The hovered slice in full. A fixed minimum height, because the strip changes
+   on hover and a card that grows under the cursor moves the slice away from it. */
+.contribution-detail {
+  display: grid;
+  gap: 7px;
+  min-height: 148px;
+  align-content: start;
+  padding: 13px 15px;
+  color: inherit;
+  text-align: left;
+  background: color-mix(in srgb, var(--muted) 48%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 10px;
+}
+.contribution-detail p { margin: 0; }
+.contribution-detail-actions { display: flex; align-items: baseline; gap: 14px; margin-top: 2px; }
+.contribution-detail-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.contribution-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+.contribution-detail-name {
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.contribution-detail-share {
+  margin-left: auto;
+  flex: none;
+  padding: 3px 7px;
+  background: var(--muted);
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.contribution-detail-figures { display: flex; align-items: baseline; gap: 10px; }
+.contribution-detail-ms {
+  color: var(--primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 18px;
+  opacity: 0.85;
+}
+.contribution-detail-secondary { color: var(--muted-foreground); font-size: 13px; }
+.contribution-detail-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 78%, var(--muted-foreground));
+}
+.contribution-detail-line code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contribution-detail-label {
+  flex: none;
+  padding: 2px 6px;
+  color: var(--primary);
+  background: var(--accent);
+  border-radius: 5px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.contribution-detail-shape {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.contribution-detail-open,
+.contribution-detail-aside {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.contribution-detail-open { color: var(--primary); }
+.contribution-detail-aside { color: var(--muted-foreground); font-weight: 500; }
+.contribution-detail-open:hover,
+.contribution-detail-aside:hover { text-decoration: underline; }
+.contribution-detail-aside:hover { color: var(--foreground); }
+
+/* Names and figures for every slice: the table view of the chart above it. */
+.contribution-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(252px, 1fr));
+  gap: 2px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.contribution-legend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.contribution-legend-row:hover,
+.contribution-legend-row.is-active { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.contribution-legend-row .contribution-swatch { align-self: center; }
+.contribution-legend-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contribution-legend-ms {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.contribution-legend-share {
+  flex: none;
+  min-width: 3.5ch;
+  text-align: right;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--foreground) 70%, var(--muted-foreground));
+}
+
+/* Carrying only footnotes, the row container contributes nothing but its own
+   padding, which would indent them past the chart they qualify. */
+.hot-path-rows-footnotes-only { padding: 0; }
+
+/* Which drawing the cards carry, while both are on offer. */
+.chart-switch { display: inline-flex; align-items: center; gap: 6px; }
+.chart-switch-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 640px) {
+  .contribution { padding-inline: 14px; }
+  .contribution-legend { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contribution-band,
+  .contribution-tile { transition: none; }
+}

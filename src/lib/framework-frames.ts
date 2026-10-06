@@ -19,6 +19,11 @@ const internalNames = new Set([
   "flushSyncWorkOnAllRoots", "flushSyncWork", "flushSyncWorkAcrossRoots",
   "flushSyncWorkAcrossRoots_impl", "processRootScheduleInMicrotask",
   "ensureRootIsScheduled", "requestUpdateLane", "markRootUpdated", "throwException",
+  // The batching entry points the renderer wraps a host event in. Dev builds of
+  // React Native record these with no URL at all, which files them under the
+  // engine — and now that a built-in which names itself is drawn, an unlisted
+  // `batchedUpdatesImpl` would be drawn with it.
+  "batchedUpdates", "batchedUpdatesImpl", "discreteUpdates",
   // Render phase
   "beginWork", "completeWork", "completeUnitOfWork", "unwindWork", "bubbleProperties",
   "renderWithHooks", "finishRenderingHooks", "finishClassComponent", "appendAllChildren",

@@ -76,6 +76,19 @@ export const OPAQUE_NAMES = new Set([
 ]);
 
 /**
+ * Hermes reports a collection pause as a frame on the stack — `[GC Young Gen]`,
+ * `[GC Old Gen]` — where V8 reports `(garbage collector)`. It is the engine's
+ * own housekeeping rather than a call the product made, so it is held apart
+ * from the built-ins that are: nobody rewrites a young-generation collection,
+ * and the time belongs to whatever allocated its way into one.
+ */
+const ENGINE_STATE = /^\[GC\b/;
+
+export function isEngineStateName(name: string): boolean {
+  return TRANSPARENT_NAMES.has(name) || ENGINE_STATE.test(name);
+}
+
+/**
  * `t`, `_r`, `Ci` — a real name from a minified bundle that still says nothing.
  * Two characters, not three: `map`, `get`, `run` and `top` are far more often
  * something a developer wrote than a mangled identifier.

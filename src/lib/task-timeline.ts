@@ -21,7 +21,7 @@
  * samples and carry it too.
  */
 
-import { isAttributedToParentFrame } from "./frame-names.ts";
+import { isAttributedToParentFrame, isEngineStateName, isMeaningfulName } from "./frame-names.ts";
 import { nodeLocation, nodeName, type CallTreeNode } from "./call-tree.ts";
 import type { FrameClass, FrameClassTable } from "./frame-classes.ts";
 
@@ -96,8 +96,46 @@ export interface TaskTimeline {
  * V8's `Function call` wrappers, which are hard to reason about but do mark
  * where a real call began, and a chart that silently drops them breaks the
  * nesting around the frames a reader came for.
+ *
+ * `native` is dropped as a class and kept as an exception, which `isShownFrame`
+ * below holds: a built-in that names itself is the one engine frame a reader
+ * can act on.
  */
 export const SHOWN_CLASSES: readonly FrameClass[] = ["app", "library", "anonymous"];
+
+/**
+ * A built-in the product asked for by name: `[Native] intlDateTimeFormatFormat`
+ * under Hermes, `toLocaleString (native date.js)` under V8.
+ *
+ * The rest of the engine is collapsed because a reader cannot act on it, and
+ * these are the frames that test fails on. `(garbage collector)`, `(program)`
+ * and an unnamed built-in describe the engine's own state; `intlDateTimeFormatFormat`
+ * names a call the product made, at a cost the product controls — a formatter
+ * hoisted out of a loop, a `localeCompare` swapped for a collator, a sort given
+ * a cheaper comparator. It is frequently the whole finding, and collapsing it
+ * charged its time to the frame above as self time, so the chart read
+ * `applyMerge — 2.05 s of its own` and named nothing to go and change.
+ *
+ * The name is the whole test, because the class cannot carry it: Hermes files
+ * every built-in under one category and V8 under one URL scheme, so the two
+ * kinds of engine frame arrive indistinguishable apart from what they are
+ * called. `isMeaningfulName` is the same bar a card title has to clear, which
+ * is why `(idle)` and a mangled built-in stay collapsed. `[GC Young Gen]` is
+ * named and still collapsed: a collection pause is the engine's own
+ * housekeeping, charged to whatever allocated its way into one.
+ */
+export function isNamedBuiltin(name: string, frameClass: FrameClass): boolean {
+  return frameClass === "native" && isMeaningfulName(name) && !isEngineStateName(name);
+}
+
+/**
+ * Whether the collapse keeps a frame: one of the kept classes, or a built-in
+ * that names itself. Shared with the focused call tree and flame graph in
+ * `task-cards.ts`, so one toggle means one cut wherever it is drawn.
+ */
+export function isShownFrame(name: string, frameClass: FrameClass, kept: ReadonlySet<FrameClass>): boolean {
+  return kept.has(frameClass) || isNamedBuiltin(name, frameClass);
+}
 
 /**
  * More boxes than a browser can lay out without stalling. A three-second task
@@ -157,7 +195,8 @@ export function buildTaskTimeline(
     const chain: CallTreeNode[] = [];
     for (let current: CallTreeNode | null = node; current; current = current.parent) {
       // The synthetic tree root is not a frame anyone called.
-      if (current.parent !== null && keptSet.has(classes.classOf(current.frame))) chain.push(current);
+      if (current.parent === null) continue;
+      if (isShownFrame(nodeName(current), classes.classOf(current.frame), keptSet)) chain.push(current);
     }
     chain.reverse();
 

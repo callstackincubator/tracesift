@@ -38,7 +38,7 @@ import {
   type TaskBoundaryKind,
   type TaskSet,
 } from "./tasks.ts";
-import { buildTaskTimeline, SHOWN_CLASSES, type TaskTimeline } from "./task-timeline.ts";
+import { buildTaskTimeline, isShownFrame, SHOWN_CLASSES, type TaskTimeline } from "./task-timeline.ts";
 import type { FrameClass, FrameClassTable } from "./frame-classes.ts";
 import type { TaskInsight } from "./task-insight.ts";
 import type { CdpProfile } from "../app/js-profiler/types";
@@ -112,7 +112,7 @@ const MAX_BOUNDARY_FRAMES = 8;
  * inclusive time, where an application frame that delegates its work still
  * carries the full weight of what it called.
  */
-const BOUNDARY_MIN_SHARE = 0.02;
+export const BOUNDARY_MIN_SHARE = 0.02;
 
 /**
  * Boundary frames the heading names. The subtitle starts after these, so the
@@ -149,6 +149,22 @@ const OVERLONG_TASK_MS = 20 * LONG_TASK_MS;
 /** Segments past the fifth repeat what the culprit list already said. */
 const MAX_SEGMENTS = 5;
 
+/**
+ * Culprits a boundary frame carries for its drill-down. Eight is what the
+ * contribution chart can divide into distinguishable slices, and the frame's
+ * own residual carries whatever is left so the figures still add up.
+ */
+const MAX_BOUNDARY_CULPRITS = 8;
+
+/**
+ * The drill-down's floor, as a share of the frame being opened plus an
+ * absolute guard. A share alone would admit 0.2 ms rows under a small feature;
+ * the absolute guard alone is the task-wide floor, which hides how a 108 ms
+ * feature spent itself.
+ */
+const BOUNDARY_CULPRIT_MIN_SHARE = 0.02;
+const BOUNDARY_CULPRIT_MIN_MS = 1;
+
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -176,6 +192,43 @@ export interface BoundaryFrame {
   longestCallMs: number;
   /** `ran 54 times in this task · 424 ms total · longest single call 11 ms` */
   shapeText: string;
+  /**
+   * What burned the time *inside* this frame, by self time within its own
+   * subtree. A boundary frame answers "which feature", and on a React profile
+   * it answers it with 0 ms of its own — `Search_Search` is 562 ms inclusive
+   * and 0 ms self, because it delegates everything. These are the answer to the
+   * question that follows, which is what to go and change, and they are a true
+   * partition of this frame's inclusive time: self time over a subtree sums to
+   * that subtree's total exactly.
+   */
+  culprits: BoundaryCulprit[];
+}
+
+/**
+ * A culprit scoped to one boundary frame.
+ *
+ * `TaskCulprit` without `reachedVia` and `hotPath`: those two carry every
+ * frame's URL and column for a hand-off to an agent that will open the source,
+ * which on a bundled app is several hundred characters of hashed chunk name
+ * per row. The drill-down is read on a card, so it ships what a card shows.
+ *
+ * Its figures are measured inside this boundary only, so a helper called from
+ * three features reports the share each feature is responsible for rather than
+ * its task-wide total three times over.
+ */
+export interface BoundaryCulprit {
+  name: string;
+  location?: string;
+  frameClass: FrameClass;
+  /** Effective self time inside this boundary frame's subtree. */
+  selfMs: number;
+  /** Inclusive time across this frame's calls inside this boundary frame. */
+  totalMs: number;
+  invocations: number;
+  longestCallMs: number;
+  shapeText: string;
+  nodeId: string;
+  callers: string[];
 }
 
 export interface TaskCulprit {
@@ -225,6 +278,21 @@ export interface TaskCard {
   headline: string;
   percentOfProfile: number;
   boundaryFrames: BoundaryFrame[];
+  /**
+   * Boundary frames that exist but are too small to draw or past the cap, as a
+   * count and a total. Without them a chart of the shown frames has a residual
+   * that mixes "smaller features" with "never your code at all", which are
+   * different findings — the first is a reason to look further down the list,
+   * the second is a reason to stop looking.
+   */
+  boundaryTailCount: number;
+  boundaryTailMs: number;
+  /**
+   * Time in this task that never reached a named frame of your own: framework
+   * and engine only, all the way down. On the local trace's 3227 ms task this
+   * is 471 ms — the reconciler and the bridge between your components.
+   */
+  outsideBoundariesMs: number;
   culprits: TaskCulprit[];
   tree: TaskTreeNode;
   /**
@@ -316,12 +384,16 @@ function hotPath(node: CallTreeNode): string[] {
  * row honest — `applyMerge` heads a card usefully, `t.A` does not, so a mangled
  * identifier is walked through to whatever it called.
  */
-function boundaryFrames(
-  root: CallTreeNode,
-  classes: FrameClassTable,
-  shapes: Map<string, InvocationShape>,
-  durationMs: number,
-): BoundaryFrame[] {
+interface BoundaryEntry {
+  key: string;
+  totalMs: number;
+  selfMs: number;
+  /** Every node carrying this frame at the boundary, for the scoped culprit pass. */
+  nodes: CallTreeNode[];
+  best: CallTreeNode;
+}
+
+function boundaryEntries(root: CallTreeNode, classes: FrameClassTable): BoundaryEntry[] {
   const found: CallTreeNode[] = [];
   const stack = [...root.children];
   while (stack.length > 0) {
@@ -337,42 +409,118 @@ function boundaryFrames(
   // is one finding carrying all three. The antichain property survives the
   // merge: none of the nodes behind an entry is an ancestor of another, so
   // their inclusive times still do not overlap.
-  const merged = new Map<string, { totalMs: number; selfMs: number; best: CallTreeNode }>();
+  const merged = new Map<string, BoundaryEntry>();
   for (const node of found) {
     const entry = merged.get(node.key);
-    if (!entry) merged.set(node.key, { totalMs: node.totalMs, selfMs: effectiveSelfMs(node), best: node });
+    if (!entry) {
+      merged.set(node.key, { key: node.key, totalMs: node.totalMs, selfMs: effectiveSelfMs(node), nodes: [node], best: node });
+      continue;
+    }
+    entry.totalMs += node.totalMs;
+    entry.selfMs += effectiveSelfMs(node);
+    entry.nodes.push(node);
+    if (compareByWeight(node, entry.best) < 0) entry.best = node;
+  }
+
+  return [...merged.values()].sort((a, b) => b.totalMs - a.totalMs || compareByWeight(a.best, b.best));
+}
+
+function boundaryFrame(
+  entry: BoundaryEntry,
+  shapes: Map<string, InvocationShape>,
+  culprits: BoundaryCulprit[],
+): BoundaryFrame {
+  const shape = shapes.get(entry.key);
+  const totalMs = round1(entry.totalMs);
+  const invocations = shape?.invocations ?? 1;
+  const longestCallMs = round1(shape?.longestCallMs ?? entry.totalMs);
+  return {
+    name: nodeName(entry.best),
+    location: nodeLocation(entry.best),
+    nodeId: entry.best.id,
+    totalMs,
+    selfMs: round1(entry.selfMs),
+    invocations,
+    longestCallMs,
+    shapeText: shapeText(invocations, totalMs, longestCallMs),
+    culprits,
+  };
+}
+
+/**
+ * The culprits inside one boundary frame, measured inside it.
+ *
+ * The shapes are recomputed against a sample sequence masked to this frame's
+ * subtree rather than read off the task-wide table, because `ran 13 times in
+ * this task` is the wrong figure under a feature that accounts for five of
+ * them. Masking rather than filtering is what keeps it correct: the sequence
+ * keeps its length and its alignment with the weights, and a masked sample
+ * closes every open call, so a run that leaves the subtree and comes back
+ * counts as two calls instead of one long one.
+ */
+function boundaryCulprits(
+  entry: BoundaryEntry,
+  sampleNodes: readonly (CallTreeNode | null)[],
+  weights: readonly number[],
+  classes: FrameClassTable,
+): BoundaryCulprit[] {
+  const inside = new Set<CallTreeNode>();
+  for (const node of entry.nodes) for (const descendant of preOrder(node)) inside.add(descendant);
+  const scopedShapes = invocationShapes(
+    sampleNodes.map((node) => (node && inside.has(node) ? node : null)),
+    weights,
+    (node) => node.key,
+  );
+
+  const merged = new Map<string, { selfMs: number; best: CallTreeNode }>();
+  for (const node of inside) {
+    if (isTransparentFrame(node.frame) || ATTRIBUTED_TO_PARENT.has(node.frame.functionName)) continue;
+    const self = effectiveSelfMs(node);
+    const found = merged.get(node.key);
+    if (!found) merged.set(node.key, { selfMs: self, best: node });
     else {
-      entry.totalMs += node.totalMs;
-      entry.selfMs += effectiveSelfMs(node);
-      if (compareByWeight(node, entry.best) < 0) entry.best = node;
+      found.selfMs += self;
+      if (compareByWeight(node, found.best) < 0) found.best = node;
     }
   }
 
-  const floorMs = BOUNDARY_MIN_SHARE * durationMs;
+  // Relative to the frame being opened, not to the task. The task-wide floor is
+  // an absolute 15 ms because that is the size of a thing worth opening a file
+  // over; inside a 108 ms feature it would leave the drill-down empty and say
+  // nothing about how that feature spent its time.
+  const floorMs = Math.max(BOUNDARY_CULPRIT_MIN_MS, BOUNDARY_CULPRIT_MIN_SHARE * entry.totalMs);
   return [...merged.entries()]
-    .filter(([, entry]) => entry.totalMs >= floorMs)
-    .sort(([, a], [, b]) => b.totalMs - a.totalMs || compareByWeight(a.best, b.best))
-    .slice(0, MAX_BOUNDARY_FRAMES)
-    .map(([key, entry]) => {
-      const shape = shapes.get(key);
-      const totalMs = round1(entry.totalMs);
+    .filter(([, found]) => found.selfMs >= floorMs)
+    .sort(([, a], [, b]) => b.selfMs - a.selfMs || compareByWeight(a.best, b.best))
+    .slice(0, MAX_BOUNDARY_CULPRITS)
+    .map(([key, found]) => {
+      const shape = scopedShapes.get(key);
+      const totalMs = round1(shape?.totalMs ?? found.best.totalMs);
+      const longestCallMs = round1(shape?.longestCallMs ?? totalMs);
       const invocations = shape?.invocations ?? 1;
-      const longestCallMs = round1(shape?.longestCallMs ?? entry.totalMs);
       return {
-        name: nodeName(entry.best),
-        location: nodeLocation(entry.best),
-        nodeId: entry.best.id,
+        name: nodeName(found.best),
+        location: nodeLocation(found.best),
+        frameClass: classes.classOf(found.best.frame),
+        selfMs: round1(found.selfMs),
         totalMs,
-        selfMs: round1(entry.selfMs),
         invocations,
         longestCallMs,
-        shapeText: shapeText(invocations, totalMs, longestCallMs),
+        shapeText: shapeText(invocations, totalMs, longestCallMs, "inside this frame"),
+        nodeId: found.best.id,
+        callers: callers(found.best, classes),
       };
     });
 }
 
-function shapeText(invocations: number, totalMs: number, longestCallMs: number): string {
-  const ran = invocations === 1 ? "ran once in this task" : `ran ${invocations} times in this task`;
+function shapeText(
+  invocations: number,
+  totalMs: number,
+  longestCallMs: number,
+  /** Where the count was measured. A drill-down counts calls inside one frame, not the task. */
+  scope = "in this task",
+): string {
+  const ran = invocations === 1 ? `ran once ${scope}` : `ran ${invocations} times ${scope}`;
   const longest = invocations === 1 ? [] : [`longest single call ${formatMs(longestCallMs)}`];
   return [ran, `${formatMs(totalMs)} total`, ...longest].join(" · ");
 }
@@ -507,6 +655,10 @@ function treePayload(
  *
  * `node` itself is always kept, whatever it is: it is the frame the reader
  * focused the view on, and a tree rendered without its own root is not a tree.
+ *
+ * `isShownFrame` rather than the class alone, so a built-in that names itself —
+ * `[Native] intlDateTimeFormatFormat` — survives the cut here exactly as it
+ * does on the chart. It is engine code and it is still the answer.
  */
 export function focusedTree(node: TaskTreeNode, kept: ReadonlySet<FrameClass> = DRAWABLE): TaskTreeNode {
   const below = focusedChildren(node.children, kept);
@@ -521,7 +673,7 @@ function focusedChildren(
   let strippedMs = 0;
   for (const node of nodes) {
     const below = focusedChildren(node.children, kept);
-    if (kept.has(node.frameClass)) {
+    if (isShownFrame(node.name, node.frameClass, kept)) {
       out.push({ ...node, selfMs: round1(node.selfMs + below.strippedMs), children: below.nodes });
       continue;
     }
@@ -570,7 +722,19 @@ function buildCard(
   // than the node they were counted on.
   const weights = sampleWeightsMs(scoped, task.durationMs);
   const shapes = invocationShapes(tree.sampleNodes ?? [], weights, (node) => node.key);
-  const frames = boundaryFrames(tree.root, classes, shapes, task.durationMs);
+
+  // The whole antichain, so the residuals below can tell "features too small to
+  // draw" apart from "never your code at all". On the local trace's 3227 ms
+  // task the shown frames are 63% of it, the tail another 22%, and what is
+  // left — 15% — is framework and engine the whole way down.
+  const entries = boundaryEntries(tree.root, classes);
+  const entriesMs = entries.reduce((sum, entry) => sum + entry.totalMs, 0);
+  const floorMs = BOUNDARY_MIN_SHARE * task.durationMs;
+  const shownEntries = entries.filter((entry) => entry.totalMs >= floorMs).slice(0, MAX_BOUNDARY_FRAMES);
+  const frames = shownEntries.map((entry) =>
+    boundaryFrame(entry, shapes, boundaryCulprits(entry, tree.sampleNodes ?? [], weights, classes)),
+  );
+  const shownMs = shownEntries.reduce((sum, entry) => sum + entry.totalMs, 0);
 
   return {
     id: `task-${task.index}`,
@@ -581,6 +745,9 @@ function buildCard(
     headline: headlineFor(task, boundaries, frames),
     percentOfProfile: durationMs > 0 ? round2((task.durationMs / durationMs) * 100) : 0,
     boundaryFrames: frames,
+    boundaryTailCount: entries.length - shownEntries.length,
+    boundaryTailMs: round1(Math.max(0, entriesMs - shownMs)),
+    outsideBoundariesMs: round1(Math.max(0, task.durationMs - entriesMs)),
     culprits: culprits(tree, shapes, classes),
     tree: treePayload(tree.root, shapes, classes),
     timeline: buildTaskTimeline(tree.sampleNodes ?? [], weights, classes, task.durationMs),

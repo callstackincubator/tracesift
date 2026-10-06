@@ -103,7 +103,7 @@ test('the chart carries the frames a reader clicks through to the tree', () => {
   assert.deepEqual(timeline.kept, ['app', 'library', 'anonymous']);
 });
 
-test('a dependency is drawn beside the product, and only React and the engine are collapsed', () => {
+test('a dependency is drawn beside the product, and only React is collapsed outright', () => {
   // The chart cannot rely on telling the two apart. In a bundled build most of
   // the product's own frames come back `library`, so keeping `app` alone drew
   // an empty chart over a task that was entirely the reader's own work.
@@ -115,12 +115,37 @@ test('a dependency is drawn beside the product, and only React and the engine ar
   const timeline = timelineWith(nodes, [4, 4, 4], tableOf({
     Search_Search: 'app', applyMerge: 'library', toLocaleString: 'native',
   }));
+  // The built-in stays on the chart under the call that made it. It is engine
+  // code and a reader cannot rewrite it, but `toLocaleString` is the whole
+  // finding here — collapsed, this read `applyMerge, 3 ms of its own`, which
+  // names nothing to change.
   assert.deepEqual(
     timeline.boxes.map((box) => [box.name, box.depth]),
-    [['Search_Search', 0], ['applyMerge', 1]]
+    [['Search_Search', 0], ['applyMerge', 1], ['toLocaleString', 2]]
   );
-  // The built-in's time is not lost: it stays inside the call that made it.
   assert.equal(timeline.coveredMs, 3);
+  // Self time follows the box: the built-in burned it, not its caller.
+  const byName = Object.fromEntries(timeline.boxes.map((box) => [box.name, box.selfMs]));
+  assert.deepEqual(byName, { Search_Search: 0, applyMerge: 0, toLocaleString: 3 });
+});
+
+test('an engine frame that names nothing is still collapsed away', () => {
+  // The exception above is the name, not the class: `(program)` and an unnamed
+  // built-in describe the engine's own state, so they say no more on a chart
+  // than the gap they would leave.
+  const nodes = [
+    node(0, '(root)', [1], ''), node(1, 'Search_Search', [2, 3]),
+    node(2, '(program)', [], ''), node(3, 't', [], ''),
+  ];
+  const timeline = timelineWith(nodes, [2, 2, 3, 3], tableOf({
+    Search_Search: 'app', '(program)': 'native', t: 'native',
+  }));
+  assert.deepEqual(
+    timeline.boxes.map((box) => [box.name, box.depth]),
+    [['Search_Search', 0]]
+  );
+  // Their time is charged to the frame that delegated into them, as before.
+  assert.equal(timeline.boxes[0].selfMs, 4);
 });
 
 test("V8's call wrappers keep their place rather than breaking the nesting under them", () => {

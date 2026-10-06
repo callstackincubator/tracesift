@@ -227,20 +227,48 @@ test('the focused tree drops the framework and lifts the product frame to the to
   const [card] = cardsFor(oneTask, 400).cards;
   const full = card.tree.children;
   assert.deepEqual(full.map((child) => child.name), ['performWorkOnRoot']);
-  // The reconciler and the built-in go; the two frames a reader can open stay.
+  // The reconciler goes. The built-in stays: it names itself, so it is the one
+  // kind of engine frame a reader acts on — and it is where the time went.
   const focused = focusedTree(card.tree);
   assert.deepEqual(focused.children.map((child) => child.name), ['Search_Search']);
   assert.deepEqual(focused.children[0].children.map((child) => child.name), ['applyMerge']);
-  assert.equal(focused.children[0].children[0].children.length, 0);
+  assert.deepEqual(
+    focused.children[0].children[0].children.map((child) => [child.name, child.frameClass]),
+    [['toLocaleString', 'native']],
+  );
+});
+
+test('an engine frame that names nothing is dropped from the focused tree', () => {
+  // The exception is the name, not the class. `(garbage collector)` is charged
+  // to the frame that triggered it elsewhere, so the unnameable case to test
+  // here is a mangled built-in: a real frame whose name says nothing.
+  const mangled = [
+    node(0, '(root)', [1], ''),
+    node(1, 'Search_Search', [2], 'src/screens/Search.tsx', 11),
+    node(2, 'Ci', [], 'native array.js'),
+  ];
+  const raw = attachMeasuredTasks(
+    profile(mangled, Array.from({ length: 200 }, (_, index) => (index % 10 === 0 ? 1 : 2))),
+    [{ ts: 1000, dur: 200_000 }],
+  );
+  const [card] = cardsFor(raw, 400).cards;
+  const focused = focusedTree(card.tree);
+  const [search] = focused.children;
+  assert.equal(search.name, 'Search_Search');
+  assert.deepEqual(search.children, []);
+  // Dropped, so its time travels up to the frame that delegated into it.
+  assert.ok(search.selfMs >= 180, `Search_Search kept ${search.selfMs} ms of self time`);
 });
 
 test('time burned by a dropped frame is charged to the nearest frame kept above it', () => {
   const [card] = cardsFor(oneTask, 400).cards;
   const focused = focusedTree(card.tree);
   const merge = focused.children[0].children[0];
-  // `toLocaleString` held 180 ms of the task in its own body and is gone, so
-  // `applyMerge` — the frame that delegated to it — now carries it.
-  assert.ok(merge.selfMs >= 180, `applyMerge kept ${merge.selfMs} ms of self time`);
+  // `performWorkOnRoot` is gone and `Search_Search` carries what it burned, so
+  // the reconciler's own cost is not lost. `toLocaleString`'s 180 ms stays on
+  // `toLocaleString`, which is the point of keeping it.
+  assert.ok(merge.selfMs < 180, `applyMerge kept ${merge.selfMs} ms of self time`);
+  assert.ok(merge.children[0].selfMs >= 180, `toLocaleString kept ${merge.children[0].selfMs} ms`);
   // A parent still accounts for its own time plus its children's, so the
   // figures on this view add up the way they do on the full tree.
   const total = (entry) => entry.selfMs + entry.children.reduce((sum, child) => sum + total(child), 0);
@@ -254,4 +282,83 @@ test('the focused tree keeps the frame the view is focused on, whatever it is', 
   const focused = focusedTree(framework);
   assert.equal(focused.name, 'performWorkOnRoot');
   assert.deepEqual(focused.children.map((child) => child.name), ['Search_Search']);
+});
+
+test('a boundary frame carries what burned the time inside it, by self time', () => {
+  const [card] = cardsFor(oneTask, 400).cards;
+  const [feature] = card.boundaryFrames;
+  // `Search_Search` spends none of its own 200 ms; the drill-down is the answer
+  // to the question its own figure cannot give.
+  assert.equal(feature.selfMs, 0);
+  assert.deepEqual(
+    feature.culprits.map((entry) => [entry.name, entry.selfMs]),
+    [['toLocaleString', 180], ['applyMerge', 20]],
+  );
+  // Self time over a subtree sums to that subtree's inclusive total, so the
+  // drill-down is a partition of the slice it opened.
+  assert.equal(feature.culprits.reduce((sum, entry) => sum + entry.selfMs, 0), feature.totalMs);
+  // Counted inside the frame rather than across the task, and worded that way.
+  assert.match(feature.culprits[0].shapeText, /inside this frame/);
+});
+
+test('a helper called from two features is split between them, not counted twice', () => {
+  // `formatDate` runs under both screens. As a task culprit it is one finding
+  // of 120 ms; inside each feature it is only the part that feature caused,
+  // because a slice has to be a share of the frame it was drawn in.
+  const shared = [
+    node(0, '(root)', [1], ''),
+    node(1, 'performWorkOnRoot', [2, 5], 'node_modules/react-dom/index.js'),
+    node(2, 'Search_Search', [3], 'src/screens/Search.tsx', 11),
+    node(3, 'formatDate', [4], 'src/lib/format.ts', 7),
+    node(4, 'toLocaleString', [], 'native date.js'),
+    node(5, 'Reports_Reports', [6], 'src/screens/Reports.tsx', 3),
+    node(6, 'formatDate', [7], 'src/lib/format.ts', 7),
+    node(7, 'toLocaleString', [], 'native date.js'),
+  ];
+  // 80 samples under Search, 40 under Reports.
+  const samples = [...Array.from({ length: 80 }, () => 4), ...Array.from({ length: 40 }, () => 7)];
+  const raw = attachMeasuredTasks(profile(shared, samples), [{ ts: 1000, dur: 120_000 }]);
+  const [card] = cardsFor(raw, 240).cards;
+
+  const search = card.boundaryFrames.find((entry) => entry.name === 'Search_Search');
+  const reports = card.boundaryFrames.find((entry) => entry.name === 'Reports_Reports');
+  assert.equal(search.totalMs, 80);
+  assert.equal(reports.totalMs, 40);
+
+  const inside = (frame) => frame.culprits.find((entry) => entry.name === 'toLocaleString');
+  assert.equal(inside(search).selfMs, 80);
+  assert.equal(inside(reports).selfMs, 40);
+  // The task-level culprit still reports the whole 120 ms: the two readings are
+  // of different wholes, and each sums to its own.
+  assert.equal(card.culprits.find((entry) => entry.name === 'toLocaleString').selfMs, 120);
+  // One run under each feature, not two runs task-wide, because masking the
+  // samples to a subtree is what the drill-down's shapes are measured against.
+  assert.equal(inside(search).invocations, 1);
+  assert.equal(inside(reports).invocations, 1);
+});
+
+test('what never reached a frame of your own is reported rather than left in a remainder', () => {
+  // Half the task is React with nothing of the product's on the stack. That is
+  // not a smaller feature and it is not a culprit; it is the reason the shown
+  // frames do not add up to the block.
+  const framework = [
+    node(0, '(root)', [1], ''),
+    node(1, 'performWorkOnRoot', [2, 3], 'node_modules/react-dom/index.js'),
+    node(2, 'Search_Search', [], 'src/screens/Search.tsx', 11),
+    node(3, 'commitMutationEffects', [], 'node_modules/react-dom/index.js'),
+  ];
+  const samples = [...Array.from({ length: 100 }, () => 2), ...Array.from({ length: 100 }, () => 3)];
+  const raw = attachMeasuredTasks(profile(framework, samples), [{ ts: 1000, dur: 200_000 }]);
+  const [card] = cardsFor(raw, 400).cards;
+
+  assert.deepEqual(card.boundaryFrames.map((entry) => entry.name), ['Search_Search']);
+  assert.equal(card.boundaryFrames[0].totalMs, 100);
+  assert.equal(card.boundaryTailCount, 0);
+  assert.equal(card.boundaryTailMs, 0);
+  assert.equal(card.outsideBoundariesMs, 100);
+  // The three figures account for the block exactly, which is what lets the
+  // chart draw them as parts of one whole.
+  const accounted = card.boundaryFrames.reduce((sum, entry) => sum + entry.totalMs, 0)
+    + card.boundaryTailMs + card.outsideBoundariesMs;
+  assert.equal(accounted, card.durationMs);
 });

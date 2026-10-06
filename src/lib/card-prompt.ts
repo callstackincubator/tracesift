@@ -13,7 +13,7 @@ import { isMeaningfulName } from "./frame-names.ts";
 import type { ProfileCard, RepeatedFunction } from "./profile-cards";
 import { CULPRIT_MIN_MS, type BoundaryFrame, type TaskCard, type TaskCulprit, type TaskTreeNode } from "./task-cards.ts";
 import { taskCardLocations, type FrameLocations } from "./frame-location.ts";
-import { SHOWN_CLASSES } from "./task-timeline.ts";
+import { isShownFrame, SHOWN_CLASSES } from "./task-timeline.ts";
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
@@ -145,7 +145,9 @@ interface StackRow {
    * written for, `Search_Search` was named in the section above and folded into
    * `… (10 frames)` here. The test is the one that section uses: a drawable
    * class, which already excludes the framework and the engine, and a name that
-   * is neither mangled nor a generic wrapper.
+   * is neither mangled nor a generic wrapper. A built-in that names itself
+   * passes too: folding `[Native] intlDateTimeFormatFormat` into `… (4 engine
+   * frames)` hides the one line of the stack the agent is being sent to fix.
    */
   named: boolean;
   frameClass: FrameClass;
@@ -231,7 +233,7 @@ function culpritTree(card: TaskCard, listed: readonly TaskCulprit[], locate: Loc
   const rowFor = (node: TaskTreeNode): StackRow => ({
     label: treeLabel(node, locate),
     ...(marked.has(node.id) ? { note: culpritNote(marked.get(node.id)!) } : {}),
-    named: DRAWABLE.has(node.frameClass) && isMeaningfulName(node.name),
+    named: isShownFrame(node.name, node.frameClass, DRAWABLE) && isMeaningfulName(node.name),
     frameClass: node.frameClass,
     children: node.children
       .filter((child) => keep.has(child.id))

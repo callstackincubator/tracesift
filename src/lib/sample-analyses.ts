@@ -36,9 +36,48 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "selfMs": 0,
             "invocations": 1,
             "longestCallMs": 2111,
-            "shapeText": "ran once in this task \u00b7 2.11 s total"
+            "shapeText": "ran once in this task \u00b7 2.11 s total",
+            "culprits": [
+              {
+                "name": "datePrototypeToLocaleStringHelper",
+                "frameClass": "native",
+                "selfMs": 1568,
+                "totalMs": 1568,
+                "invocations": 8,
+                "longestCallMs": 196,
+                "shapeText": "ran 8 times inside this frame \u00b7 1.57 s total \u00b7 longest single call 196 ms",
+                "nodeId": "0.0.0.0.0.0",
+                "callers": ["_onFocus", "getUserByUserName", "_compareUsers"]
+              },
+              {
+                "name": "jsonParse",
+                "frameClass": "native",
+                "selfMs": 420,
+                "totalMs": 420,
+                "invocations": 1,
+                "longestCallMs": 420,
+                "shapeText": "ran once inside this frame \u00b7 420 ms total",
+                "nodeId": "0.0.0.1",
+                "callers": ["_onFocus", "getUserByUserName"]
+              },
+              {
+                "name": "getUserByUserName",
+                "location": "app/screens/UserList.js:89:1",
+                "frameClass": "app",
+                "selfMs": 81,
+                "totalMs": 2111,
+                "invocations": 1,
+                "longestCallMs": 2111,
+                "shapeText": "ran once inside this frame \u00b7 2.11 s total",
+                "nodeId": "0.0.0",
+                "callers": ["_onFocus"]
+              }
+            ]
           }
         ],
+        "boundaryTailCount": 0,
+        "boundaryTailMs": 0,
+        "outsideBoundariesMs": 0,
         "culprits": [
           {
             "name": "datePrototypeToLocaleStringHelper",
@@ -360,9 +399,71 @@ export const CPU_SAMPLE_ANALYSIS: AnalysisRecord = {
             "selfMs": 0,
             "invocations": 1,
             "longestCallMs": 655,
-            "shapeText": "ran once in this task \u00b7 655 ms total"
+            "shapeText": "ran once in this task \u00b7 655 ms total",
+            "culprits": [
+              {
+                "name": "intlDateTimeFormatFormat",
+                "frameClass": "native",
+                "selfMs": 420,
+                "totalMs": 420,
+                "invocations": 12,
+                "longestCallMs": 35,
+                "shapeText": "ran 12 times inside this frame \u00b7 420 ms total \u00b7 longest single call 35 ms",
+                "nodeId": "0.0.0.0.0",
+                "callers": ["_onChange", "formatDate"]
+              },
+              {
+                "name": "stringPrototypeLocaleCompare",
+                "frameClass": "native",
+                "selfMs": 75,
+                "totalMs": 75,
+                "invocations": 1,
+                "longestCallMs": 75,
+                "shapeText": "ran once inside this frame \u00b7 75 ms total",
+                "nodeId": "0.0.1.0.0",
+                "callers": ["_onChange", "_temp3"]
+              },
+              {
+                "name": "formatDate",
+                "location": "app/lib/format.js:13:1",
+                "frameClass": "app",
+                "selfMs": 60,
+                "totalMs": 535,
+                "invocations": 1,
+                "longestCallMs": 535,
+                "shapeText": "ran once inside this frame \u00b7 535 ms total",
+                "nodeId": "0.0.0.0",
+                "callers": ["_onChange"]
+              },
+              {
+                "name": "intlDateTimeFormatConstructor",
+                "frameClass": "native",
+                "selfMs": 55,
+                "totalMs": 55,
+                "invocations": 1,
+                "longestCallMs": 55,
+                "shapeText": "ran once inside this frame \u00b7 55 ms total",
+                "nodeId": "0.0.0.0.1",
+                "callers": ["_onChange", "formatDate"]
+              },
+              {
+                "name": "_temp3",
+                "location": "app/screens/UserList.js:174:1",
+                "frameClass": "app",
+                "selfMs": 45,
+                "totalMs": 120,
+                "invocations": 1,
+                "longestCallMs": 120,
+                "shapeText": "ran once inside this frame \u00b7 120 ms total",
+                "nodeId": "0.0.1.0",
+                "callers": ["_onChange"]
+              }
+            ]
           }
         ],
+        "boundaryTailCount": 0,
+        "boundaryTailMs": 0,
+        "outsideBoundariesMs": 0,
         "culprits": [
           {
             "name": "intlDateTimeFormatFormat",

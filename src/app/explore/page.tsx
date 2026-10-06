@@ -33,7 +33,11 @@ function taskFlameNode(node: TaskTreeNode): FlameGraphNode {
     name: node.name,
     value: node.totalMs,
     selfValue: node.selfMs,
-    tooltip: `${node.name} — ${formatMs(node.totalMs)} total, ${formatMs(node.selfMs)} self`,
+    // The class is on the tooltip because the graph colours by heat and cannot
+    // carry it in the fill. It matters most for an engine built-in: Hermes
+    // writes `[Native] intlDateTimeFormatFormat`, V8 writes `toLocaleString`,
+    // and the second gives a reader nothing to say the cost is in the engine.
+    tooltip: `${node.name}${node.frameClass === "app" ? "" : ` [${node.frameClass}]`} — ${formatMs(node.totalMs)} total, ${formatMs(node.selfMs)} self`,
     children: node.children.map(taskFlameNode),
   };
 }
@@ -257,8 +261,9 @@ function TaskTimelineChart({
       <div className="timeline-controls">
         <ZoomControls zoom={zoom} jumpTo={jumpTo} readout={readout} />
         <span className="timeline-legend">
-          {formatMs(timeline.coveredMs)} of {formatMs(durationMs)} under your code or a dependency
-          {uncoveredMs > 0.5 ? ` · ${formatMs(uncoveredMs)} in React or engine code` : ""}
+          {formatMs(timeline.coveredMs)} of {formatMs(durationMs)} under your code, a dependency or a built-in it
+          called
+          {uncoveredMs > 0.5 ? ` · ${formatMs(uncoveredMs)} in React or unnamed engine code` : ""}
           {timeline.omittedBoxCount > 0
             ? ` · ${timeline.omittedBoxCount} calls too short to draw`
             : ""}
@@ -290,8 +295,10 @@ function TaskTimelineChart({
       <Text className="explore-caveat">
         Zoom stretches the chart and scrolls it sideways, so a short call widens where it sits rather than being
         re-drawn on its own; &#8984;/Ctrl with the scroll wheel zooms about the pointer.
-        React and engine frames are collapsed away, so a box&rsquo;s row is its depth on this chart rather than its
-        real stack depth. A box is one call, at the moment it ran, drawn at sample resolution — two calls closer
+        React frames, and engine frames that name nothing, are collapsed away, so a box&rsquo;s row is its depth on
+        this chart rather than its real stack depth. A built-in the code called by name &mdash; a date formatter, a
+        locale comparison, a sort &mdash; is kept and drawn in a paler fill, because it is engine code and still a
+        cost the code above it controls. A box is one call, at the moment it ran, drawn at sample resolution — two calls closer
         together than one sample merge, and one shorter than a sample may not appear. Its span is wall clock, so it
         covers the framework work the call delegated to and any collection pause that fell inside it; the card&rsquo;s
         longest-call figure counts neither, which is why a box can read slightly wider.
@@ -331,6 +338,9 @@ function TimelineBoxView({
     <button
       type="button"
       className={selected ? "timeline-box is-selected" : "timeline-box"}
+      // A built-in the product called is drawn like any other box and must not
+      // read like code the reader wrote: the fill is what says `engine`.
+      data-class={box.frameClass}
       style={{ left: percent(box.startMs), width: percent(box.durationMs), top: `${box.depth * ROW_HEIGHT}px` }}
       title={`${box.name}\n${timingLine(box)}${box.location ? `\n${box.location}` : ""}`}
       onClick={() => onFocus(box.nodeId)}
