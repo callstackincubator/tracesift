@@ -19,7 +19,7 @@ import { ThemeGate } from "@/app/theme-gate";
 import { TaskContribution, type ContributionChartKind } from "@/app/task-contribution";
 import type { Hotspot } from "@/lib/analysis";
 import type { ProfileCard } from "@/lib/profile-cards";
-import { storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
+import { reactExploreHref, storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
 import { type TaskCard, type TaskCardSet } from "@/lib/task-cards";
 import { CHART_SLICES } from "@/lib/contribution";
 import { formatMs } from "@/lib/format";
@@ -28,6 +28,8 @@ import { shortLocationLabel } from "@/lib/source-location";
 import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
+import type { ReactCard, ReactCardSet } from "@/lib/react-cards";
+import { hookLabel } from "@/lib/react-commit-tree";
 
 type ProfileType = "javascript" | "react";
 type UploadKind = "cpu" | "reactProfile";
@@ -47,7 +49,7 @@ interface AnalyzeResponse {
   model?: AnalysisModel;
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
-interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; taskCards?: TaskCardSet; cards?: ProfileCard[]; callCountIsExact?: boolean; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
+interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; taskCards?: TaskCardSet; cards?: ProfileCard[]; callCountIsExact?: boolean; reactCards?: ReactCardSet; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
 interface AuthMethod { type: 'api_key' | 'oauth'; label: string; configured: boolean; subscription: boolean; }
 interface ModelProvider { id: string; name: string; authMethods: AuthMethod[]; models: Array<{ id: string; name: string }>; }
 interface ModelSettings {
@@ -234,6 +236,25 @@ function PromptActionButton({
 
 const MAX_RESULT_CARDS = 3;
 
+/**
+ * Component rows a React card shows. Eight is what the cards' own culprit floor
+ * admits on a realistic commit, and past it the footnote says as much as another
+ * row would.
+ */
+const MAX_REACT_CARD_ROWS = 8;
+
+/**
+ * The smallest share of a commit worth its own row.
+ *
+ * The cards' own culprit floor (0.5 ms, or 1% of the commit) is set for the
+ * hand-off, where an agent reading the repo can use a small component as a
+ * hint. On the card it produced rows like `VirtualizedList 3 ms / 1% of
+ * commit`: true, measured, and nothing a reader can act on, sitting at the
+ * same visual weight as the 142 ms row above it. Five percent is the point
+ * where fixing the component could plausibly move the commit.
+ */
+const REACT_ROW_MIN_SHARE = 5;
+
 function reactIssueRemainingMs(issue: ReactIssue): number {
   return Math.max(0, issue.commit.durationMs - issue.components.reduce((total, component) => total + component.selfTimeMs, 0));
 }
@@ -407,6 +428,56 @@ function cardSubtitle(card: ProfileCard, callCountIsExact: boolean): string | un
   const count = callCountIsExact ? card.invocations ?? card.callSites : card.callSites;
   if (count <= 1) return undefined;
   return callCountIsExact ? `called ${count} times` : `${count} call sites`;
+}
+
+/**
+ * A React card's rows: the components that burned the commit's own time.
+ *
+ * `percentOfCommit` rather than a share of the summed self time, because the
+ * commit's duration is the figure the heading claims and the one a reader can
+ * check against the recording. The bar is the same number, so the rows read as
+ * parts of the block rather than parts of each other.
+ */
+function reactCardRows(card: ReactCard): HotPathCard {
+  // The top culprit is always shown, however small: a card exists because its
+  // commit went over budget, and a card with no rows states the problem while
+  // withholding the only name it has for it.
+  const worthARow = card.culprits.filter((culprit) => culprit.percentOfCommit >= REACT_ROW_MIN_SHARE);
+  const shown = (worthARow.length > 0 ? worthARow : card.culprits.slice(0, 1)).slice(0, MAX_REACT_CARD_ROWS);
+  const rows: HotPathRow[] = shown.map((culprit) => ({
+    location: culprit.sourceHint ?? undefined,
+    title: culprit.component,
+    ms: culprit.selfMs,
+    percentLabel: `${Math.round(culprit.percentOfCommit)}% of commit`,
+    barPercent: culprit.percentOfCommit,
+    shape: reactCulpritShape(culprit),
+    callers: culprit.path.length > 1 ? culprit.path.slice(0, -1).join(" › ") : undefined,
+  }));
+  /* No footnotes. The three this card used to carry — the sub-floor tail, the
+     reconciler residual, and the effect durations — were each a sentence of
+     arithmetic about time no component is responsible for, which is time the
+     reader cannot act on. They are still in the record, and still in the
+     hand-off, where an agent that can read the repo can use them. */
+  return { rows, footnotes: [] };
+}
+
+/**
+ * Why React rendered this component, on the row it belongs to.
+ *
+ * The single most actionable line on a React card, in the same slot the task
+ * cards use for a call shape: `142 ms in one render` and `142 ms over 54
+ * renders that changed nothing` are the same number and different bugs.
+ */
+function reactCulpritShape(culprit: ReactCard["culprits"][number]): string | undefined {
+  const changed = culprit.changedProps.length > 0
+    ? ` · props ${culprit.changedProps.slice(0, 3).join(", ")}`
+    : culprit.changedHooks.length > 0 ? ` · hooks ${culprit.changedHooks.slice(0, 3).map(hookLabel).join(", ")}` : "";
+  const forget = culprit.compiledWithForget ? " · React Compiler" : "";
+  if (culprit.cause === "unknown") return `render reason not recorded${forget}` ;
+  const cause = culprit.cause === "nothing-changed" ? "re-rendered with nothing changed"
+    : culprit.cause === "first-mount" ? "first mount"
+      : `${culprit.cause} changed`;
+  return `${cause}${changed}${forget}`;
 }
 
 function reactIssueRows(issue: ReactIssue): HotPathCard {
@@ -763,6 +834,7 @@ function InspectorApp() {
   const [callCountIsExact, setCallCountIsExact] = useState(false);
   const [frameBudget, setFrameBudget] = useState("16");
   const [appliedBudget, setAppliedBudget] = useState(16);
+  const [reactCards, setReactCards] = useState<ReactCardSet | null>(null);
   const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
   const [reactSummary, setReactSummary] = useState<ReactSummary | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -828,6 +900,7 @@ function InspectorApp() {
         usage?: TokenUsage;
         model?: AnalysisModel;
         summary?: ReactSummary;
+        reactCards?: ReactCardSet;
         issues?: ReactIssue[];
         noIssue?: boolean;
         frameBudgetMs?: number;
@@ -849,12 +922,14 @@ function InspectorApp() {
     setIsSample(false);
 
       if (profileType === "react") {
-        if (!Array.isArray(data.issues) || data.noIssue !== (data.issues.length === 0)) {
-          setError("The server did not return a valid React issue report. Check the dev server logs.");
+        // The measured engine returns cards; the analyzer engine returns the
+        // issue list it always did. Either is valid, neither is optional.
+        if (!data.reactCards && (!Array.isArray(data.issues) || data.noIssue !== (data.issues.length === 0))) {
+          setError("The server did not return a valid React report. Check the dev server logs.");
           setPhase("upload");
           return;
         }
-        if (data.issues.length > 0 && !data.analysisId) {
+        if ((data.reactCards?.cards.length || data.issues?.length) && !data.analysisId) {
           setError("The server did not return an analysis id. Check the dev server logs.");
           setPhase("upload");
           return;
@@ -863,7 +938,8 @@ function InspectorApp() {
         setHotspots([]);
         setTaskCards(null);
         setCards([]);
-        setReactIssues(data.issues);
+        setReactCards(data.reactCards ?? null);
+        setReactIssues(data.issues ?? []);
         setAppliedBudget(data.frameBudgetMs ?? Number(frameBudget));
         setReactSummary(data.summary ?? null);
         setTotalMs(data.summary?.totalCommitRenderDurationMs ?? 0);
@@ -894,6 +970,7 @@ function InspectorApp() {
       setCards(result.cards ?? []);
       setCallCountIsExact(result.callCountIsExact === true);
       setReactSummary(null);
+      setReactCards(null);
       setPhase("results");
       void refreshHistory();
     } catch (err) {
@@ -947,6 +1024,63 @@ function InspectorApp() {
   const exploreTask = (card: TaskCard, focusNodeId?: string) => {
     if (!analysisId) return;
     window.open(taskExploreHref(analysisId, card.taskIndex, focusNodeId), "_blank", "noopener");
+  };
+
+  /**
+   * Open one React commit in its own tab.
+   *
+   * The recording is fetched there rather than handed over, like a task: the
+   * commit trees live on the analysis record and the drill-down opens on the
+   * whole strip, not on this commit alone.
+   */
+  const exploreReactCommit = (card: ReactCard) => {
+    if (!analysisId) return;
+    window.open(reactExploreHref(analysisId, card.rootId, card.commitIndex), "_blank", "noopener");
+  };
+
+  /**
+   * Ask a model to read one React commit.
+   *
+   * The same button, the same storage and the same discard of a stale hand-off
+   * as `explainTask` below. What the model is shown differs — a commit has no
+   * timeline and no call tree, only the components and the recorded reasons —
+   * and `react-insight.ts` is where that is said.
+   */
+  const explainReactCard = async (card: ReactCard) => {
+    if (!analysisId || explainingId) return;
+    setExplainingId(card.id);
+    setInsightErrors((current) => {
+      if (!(card.id in current)) return current;
+      const next = { ...current };
+      delete next[card.id];
+      return next;
+    });
+    try {
+      const response = await fetch("/api/react-insight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId, cardId: card.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; insight?: ReactCard["insight"]; usage?: TokenUsage; model?: AnalysisModel };
+      if (!response.ok || !data.insight) throw new Error(data.error ?? `Could not read this commit (${response.status}).`);
+      const insight = data.insight;
+      setReactCards((current) => current && ({
+        ...current,
+        cards: current.cards.map((entry) => (entry.id === card.id ? { ...entry, insight } : entry)),
+      }));
+      setPrompts((current) => {
+        if (!(card.id in current)) return current;
+        const next = { ...current };
+        delete next[card.id];
+        return next;
+      });
+      if (data.usage) setAnalyzerUsage(data.usage);
+      if (data.model) setAnalysisModel(data.model);
+    } catch (err) {
+      setInsightErrors((current) => ({ ...current, [card.id]: errorMessageFrom(err) }));
+    } finally {
+      setExplainingId((current) => (current === card.id ? null : current));
+    }
   };
 
   /**
@@ -1041,6 +1175,7 @@ function InspectorApp() {
     setCards([]);
     setCallCountIsExact(false);
     setReactSummary(null);
+    setReactCards(null);
     setReactIssues([]);
     setPrompts({});
     setAnalyzerUsage(null);
@@ -1065,7 +1200,7 @@ function InspectorApp() {
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType(analysis.profileType === "react" ? "react" : "javascript");
     setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
-    setCallCountIsExact(analysis.callCountIsExact === true); setReactIssues(analysis.reactIssues ?? []);
+    setCallCountIsExact(analysis.callCountIsExact === true); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues ?? []);
     setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null); setAnalysisModel(analysis.model ?? null);
     setReactSummary(null); setSaved(true); setPhase("results"); setHistoryOpen(false);
     setIsSample(false);
@@ -1080,9 +1215,6 @@ function InspectorApp() {
   };
   const updateAiAssisted = async (enabled: boolean) => {
     setAiAssisted(enabled);
-    // The React path is model-driven end to end, so turning AI assist off while
-    // it is selected would leave the upload pane unusable with no explanation.
-    if (!enabled && profileType === "react") setProfileType("javascript");
     await fetch("/api/analysis-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiAssisted: enabled }) });
   };
   const providerModels = modelStatus?.providers.find(provider => provider.id === selectedProvider)?.models ?? [];
@@ -1199,7 +1331,7 @@ function InspectorApp() {
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
     setHotspots(analysis.hotspots); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
-    setCallCountIsExact(analysis.callCountIsExact === true); setReactIssues([]); setReactSummary(null);
+    setCallCountIsExact(analysis.callCountIsExact === true); setReactCards(null); setReactIssues([]); setReactSummary(null);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
   const loadReactSample = async () => {
@@ -1209,11 +1341,10 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
-    setHotspots([]); setTaskCards(null); setCards([]); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
+    setHotspots([]); setTaskCards(null); setCards([]); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
 
-  const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
   const analyzing = phase === "analyzing";
 
   return (
@@ -1338,7 +1469,7 @@ function InspectorApp() {
                   )}
                 </div>
                 ) : (
-                  <p className="ai-assist-off-note">Saved credentials are kept but unused. JavaScript CPU profiles still produce full measured cards; React profiles need AI assist.</p>
+                  <p className="ai-assist-off-note">Saved credentials are kept but unused. Both profile types still produce full measured cards; what turns off is the per-card reading of them.</p>
                 )}
                 <label className="autosave-toggle">
                   <span className="toggle-copy"><strong>Save analyses automatically</strong><small>Keep completed reports in your local analysis history.</small></span>
@@ -1418,9 +1549,9 @@ function InspectorApp() {
                 <span className="radio-indicator" />
               </button>
 
-              <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing || !aiAssisted} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
+              <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
-                <span className="option-copy"><strong>React components</strong><small>{aiAssisted ? "Find expensive renders and component updates" : "Needs AI assist — turn it on in Settings"}</small><em>React DevTools JSON</em></span>
+                <span className="option-copy"><strong>React components</strong><small>Find expensive commits, wasted re-renders and cascades</small><em>React DevTools JSON</em></span>
                 <span className="radio-indicator" />
               </button>
             </div>
@@ -1479,7 +1610,9 @@ function InspectorApp() {
             )}
 
             <div className="action-row">
-              <p>{aiAssisted ? "Your profile stays on this device and is analyzed via your configured model." : "Your profile stays on this device, and with AI assist off nothing leaves it."}</p>
+              <p>{profileType === "react"
+                ? "Your profile stays on this device. React commits are analyzed by measurement alone, so nothing leaves it unless you ask a card for an AI reading."
+                : aiAssisted ? "Your profile stays on this device and is analyzed via your configured model." : "Your profile stays on this device, and with AI assist off nothing leaves it."}</p>
               <Button className="analyze-profile-button" size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
@@ -1499,34 +1632,79 @@ function InspectorApp() {
           </>
         )}
 
-        {phase === "results" && analyzedType === "react" && (
+        {phase === "results" && analyzedType === "react" && (() => {
+          const cardList = reactCards?.cards ?? [];
+          const findingCount = cardList.length || reactIssues.length;
+          // A recording of nothing but cheap commits is a real answer, not an
+          // empty one: say so, and show the busiest commits anyway.
+          const summaryLine = reactCards
+            ? (reactCards.noOverBudgetCommits
+              ? `No commit over the ${reactCards.budgetMs} ms budget; the busiest were ${findingCount} of ${formatMs(reactCards.peakCommitMs)} and under`
+              : `${reactCards.commitsOverBudget} commit${reactCards.commitsOverBudget === 1 ? "" : "s"} over the ${reactCards.budgetMs} ms budget, of ${reactCards.commitCount}`)
+              + ` · ${formatMs(reactCards.totalRenderMs)} rendering`
+              + (reactCards.omittedCardCount > 0 ? ` · ${reactCards.omittedCardCount} more not shown` : "")
+              + (reactCards.roots.length > 1 ? ` · ${reactCards.roots.length} roots` : "")
+            : `${reactIssues.length} commit finding${reactIssues.length === 1 ? "" : "s"} · ${appliedBudget} ms budget`
+              + (reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : "")
+              + (reactSummary && reactSummary.omittedEvidenceCommitCount > 0
+                ? ` · ${reactSummary.omittedEvidenceCommitCount} commits omitted from detailed analysis`
+                : "");
+          return (
           <>
             <button className="results-back" type="button" onClick={resetToUpload}><HeaderIcon type="back" /> Back to new analysis</button>
             <div className="results-header">
               <div className="intro">
                 <span className="eyebrow">Analysis results</span>
-                <h1 className="results-title">React issues</h1>
-                <p>
-                  {reactIssues.length} commit finding{reactIssues.length === 1 ? "" : "s"} · {appliedBudget} ms budget
-                  {reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : ""}
-                  {reactSummary && reactSummary.omittedEvidenceCommitCount > 0
-                    ? ` · ${reactSummary.omittedEvidenceCommitCount} commits omitted from detailed analysis`
-                    : ""}
-                </p>
-                {analyzerUsage && (
+                <h1 className="results-title">{reactCards ? "Commits, longest first" : "React issues"}</h1>
+                <p>{summaryLine}</p>
+                {/* Said once, at the top: every render reason on every card
+                    below is unavailable rather than absent, and the fix is a
+                    setting in the recorder rather than anything here. */}
+                {reactCards && !reactCards.causesRecorded ? (
+                  <p className="results-note">
+                    This recording does not say why each component rendered. Re-record with React DevTools&rsquo;
+                    &ldquo;Record why each component rendered&rdquo; setting on to get render causes.
+                  </p>
+                ) : null}
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
                   </p>
                 )}
               </div>
               <div className="result-actions">
-                {analyzerUsage && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
             </div>
 
             <div className="hotspot-list">
-              {reactIssueCards.map((issue, index) => {
+              {reactCards ? cardList.map((card, index) => {
+                const { rows, footnotes } = reactCardRows(card);
+                return (
+                  <AnalysisResultCard
+                    key={card.id}
+                    rank={index + 1}
+                    title={card.insight?.title ?? card.headline}
+                    shape={card.shapeline}
+                    timeLabel={formatMs(card.durationMs)}
+                    insight={card.insight?.findings}
+                    onExplain={aiAssisted && modelStatus?.configured && analysisId && !isSample ? () => void explainReactCard(card) : undefined}
+                    explaining={explainingId === card.id}
+                    insightError={insightErrors[card.id]}
+                    rows={rows}
+                    footnotes={footnotes}
+                    loading={promptLoadingId === card.id}
+                    error={promptErrors[card.id]}
+                    copied={copiedId === card.id}
+                    busy={isSample || promptLoadingId !== null}
+                    onCopy={() => void copyHandoff(card.id)}
+                    onExplore={analysisId && !isSample ? () => exploreReactCommit(card) : undefined}
+                  />
+                );
+              }) : null}
+              {/* Analyses saved by the model-selected engine still hold the old shape. */}
+              {!reactCards && reactIssues.slice(0, MAX_RESULT_CARDS).map((issue, index) => {
                 const { rows, footnotes } = reactIssueRows(issue);
                 return (
                   <AnalysisResultCard
@@ -1546,7 +1724,8 @@ function InspectorApp() {
               })}
             </div>
           </>
-        )}
+          );
+        })()}
 
         {phase === "results" && analyzedType === "javascript" && (() => {
           const taskList = taskCards?.cards ?? [];

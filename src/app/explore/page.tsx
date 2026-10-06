@@ -6,7 +6,7 @@ import type { FlameGraphNode } from "@rozenite/ui";
 
 import { ThemeGate } from "@/app/theme-gate";
 import { useStretchZoom, ZoomControls } from "./stretch-zoom";
-import { fetchTaskHandoff, readCardHandoff, type CardHandoff, type TaskHandoff } from "@/lib/card-handoff";
+import { fetchReactExplore, fetchTaskHandoff, readCardHandoff, type CardHandoff, type ReactExploreHandoff, type TaskHandoff } from "@/lib/card-handoff";
 import { formatMs } from "@/lib/format";
 import { shortLocationLabel } from "@/lib/source-location";
 import { profileCardLocations, taskCardLocations, type FrameLocations } from "@/lib/frame-location";
@@ -14,6 +14,8 @@ import type { FrameClass } from "@/lib/frame-classes";
 import type { CardChildNode, RepeatedFunction } from "@/lib/profile-cards";
 import { focusedTree, type TaskCulprit, type TaskTreeNode } from "@/lib/task-cards";
 import { isShownFrame, SHOWN_CLASSES, type TaskTimeline, type TimelineBox } from "@/lib/task-timeline";
+import { hookLabel, type ReactRenderCause } from "@/lib/react-commit-tree";
+import { focusedReactTree, type ReactExplore, type ReactExploreCommit, type ReactExploreNode } from "@/lib/react-explore";
 
 /**
  * The classes the focused views keep, as the set `isShownFrame` tests against.
@@ -366,6 +368,8 @@ interface ExploreTarget {
   card: CardHandoff | null;
   /** Present when the URL names a task; the task itself is fetched. */
   taskIndex: number | null;
+  /** `<rootId>.<commitIndex>` when the URL names a React commit; the recording is fetched. */
+  commitKey: string;
   /** The frame the view opens on, from `?focus=`. */
   focus: string;
   analysisId: string;
@@ -380,8 +384,9 @@ function readTargetOnce(): ExploreTarget {
   const analysisId = params.get("a") ?? "";
   const taskParam = params.get("task");
   const cardId = params.get("c") ?? "";
+  const commitKey = params.get("commit") ?? "";
   const focus = params.get("focus") ?? "";
-  const key = `${analysisId}:${taskParam ?? ""}:${cardId}`;
+  const key = `${analysisId}:${taskParam ?? ""}:${cardId}:${commitKey}`;
   // Reading a card hand-off consumes it, and `useSyncExternalStore` calls this
   // on every render: without the cache the second call would find nothing.
   if (cached?.key !== key) {
@@ -391,6 +396,7 @@ function readTargetOnce(): ExploreTarget {
       target: {
         card: cardId ? readCardHandoff(analysisId, cardId) : null,
         taskIndex: Number.isInteger(taskIndex) ? taskIndex : null,
+        commitKey,
         focus,
         analysisId,
       },
@@ -429,6 +435,38 @@ function useTaskHandoff(analysisId: string, taskIndex: number | null): TaskLoad 
   return taskIndex === null ? null : load;
 }
 
+type ReactLoad =
+  | { state: "loading" }
+  | { state: "ready"; handoff: ReactExploreHandoff }
+  | { state: "failed"; reason: string };
+
+/**
+ * The whole recording, fetched once.
+ *
+ * Like a task, and for the same reason: the measured React engine keeps the
+ * commit trees on the analysis record, and they are far too large to hand
+ * across tabs through storage. Unlike a task, what comes back is every commit
+ * rather than the one the card named — the strip is the view, and it has to be
+ * complete before a reader can scrub it.
+ */
+function useReactExplore(analysisId: string, wanted: boolean): ReactLoad | null {
+  const [load, setLoad] = useState<ReactLoad>({ state: "loading" });
+
+  useEffect(() => {
+    if (!wanted) return;
+    let live = true;
+    fetchReactExplore(analysisId).then(
+      (handoff) => { if (live) setLoad({ state: "ready", handoff }); },
+      (error: unknown) => {
+        if (live) setLoad({ state: "failed", reason: error instanceof Error ? error.message : "That recording could not be loaded." });
+      }
+    );
+    return () => { live = false; };
+  }, [analysisId, wanted]);
+
+  return wanted ? load : null;
+}
+
 export default function ExplorePage() {
   return <ThemeGate><Explorer /></ThemeGate>;
 }
@@ -440,6 +478,7 @@ function Explorer() {
   // identical between renders.
   const target = useSyncExternalStore(noSubscribe, readTargetOnce, noTarget);
   const task = useTaskHandoff(target?.analysisId ?? "", target?.taskIndex ?? null);
+  const react = useReactExplore(target?.analysisId ?? "", Boolean(target?.commitKey));
 
   return (
     <PluginShell>
@@ -462,9 +501,16 @@ function Explorer() {
               description={`${task.reason} Re-run the analysis and choose Explore again.`}
             />
           ) : null}
+          {react?.state === "loading" ? (
+            <EmptyState title="Loading this recording" description="Fetching the commits the analysis recorded." />
+          ) : null}
+          {react?.state === "failed" ? (
+            <EmptyState title="Nothing to explore" description={`${react.reason} Re-run the analysis and choose Explore again.`} />
+          ) : null}
+          {react?.state === "ready" ? <ReactExplorer handoff={react.handoff} initialKey={target?.commitKey ?? ""} /> : null}
           {task?.state === "ready" ? <TaskExplorer handoff={task.handoff} initialFocus={target?.focus ?? ""} /> : null}
-          {!task && target?.card ? <CardExplorer handoff={target.card} /> : null}
-          {!task && !target?.card ? (
+          {!task && !react && target?.card ? <CardExplorer handoff={target.card} /> : null}
+          {!task && !react && !target?.card ? (
             <EmptyState
               title="Nothing to explore"
               description="This view is opened from a result card, and the card it was given is no longer in this browser session. Re-run the analysis and choose Explore again."
@@ -491,6 +537,40 @@ const DEFAULT_MIN_FRAME_WIDTH = 0.08;
 const DEFAULT_MIN_LABEL_WIDTH = 3;
 
 type TreeMode = "full" | "focused";
+
+/**
+ * The buckets `FlameGraph` colours frames by, and what the share is of.
+ *
+ * The library ships its own legend, but its labels ("Heaviest (>70%)") name a
+ * percentage without saying of what, which is the one thing that has to be
+ * said: a frame's bucket is its own time as a share of the *hottest frame's*
+ * own time in this one graph, not of the profile and not of its parent. That is
+ * why a field of green around a single red box is the usual shape, and reading
+ * it as "almost nothing is hot" is reading it right.
+ */
+const FLAME_BUCKETS = [
+  ["heaviest", "> 70%"],
+  ["heavy", "40\u201370%"],
+  ["moderate", "20\u201340%"],
+  ["light", "< 20%"],
+  ["none", "none"],
+] as const;
+
+/** `what` names the figure the colour is of, in the surface's own words. */
+function FlameLegend({ what }: { what: string }) {
+  return (
+    <div className="flame-legend">
+      <span className="flame-legend-lead">Colour is {what}, as a share of the hottest frame&rsquo;s:</span>
+      {FLAME_BUCKETS.map(([bucket, label]) => (
+        <span key={bucket} className="flame-legend-item">
+          <span className="flame-legend-swatch" data-bucket={bucket} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 
 /**
  * The two cuts of the same subtree, as a pair of buttons. Shared by the flame
@@ -552,6 +632,8 @@ function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
           <ZoomControls zoom={zoom} jumpTo={jumpTo} readout={readout} />
         </div>
       </div>
+
+      <FlameLegend what="a frame's own time" />
 
       {drill ? (
         <p className="explore-path">
@@ -775,26 +857,11 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
       <header className="explore-header">
         <h1>{card.pathline ?? card.headline}</h1>
         {card.shapeline ? <p className="explore-shape">{card.shapeline}</p> : null}
-        {card.insight ? (
-          <div className="card-insight">
-            <span className="card-insight-label">AI reading</span>
-            <ul>{card.insight.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
-          </div>
-        ) : null}
-        {card.boundaryFrames.length > 0 ? (
-          <p className="explore-path">
-            <span className="explore-path-label">feature</span>
-            {card.boundaryFrames.map((frame) => (
-              <button type="button" key={frame.nodeId} className="explore-path-frame explore-tree-focus" onClick={() => refocus(frame.nodeId)}>
-                {frame.name}
-              </button>
-            ))}
-          </p>
-        ) : null}
         <p className="explore-figures">
+          {/* No `into the recording`: where the task sat on the profile's clock
+              tells a reader nothing they act on, and the timeline tab below is
+              already measured from this task's own start. */}
           <strong>{formatMs(card.durationMs)}</strong> of uninterrupted work
-          <span>·</span>
-          {formatMs(card.startMs)} into the recording
           <span>·</span>
           {card.percentOfProfile}% of a {formatMs(handoff.totalMs)} profile
           <span>·</span>
@@ -805,6 +872,16 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
             The profiler recorded no task boundaries on this thread, so this block was reconstructed from the gaps
             between sample runs. Its start and duration are approximate.
           </Text>
+        ) : null}
+        {/* Under the measurements, not over them: the figures above are what the
+            profiler recorded, and a model's reading of them is a second-class
+            claim that should not be the first thing read. It stays in the
+            header, immediately above the views it is a reading of. */}
+        {card.insight ? (
+          <div className="card-insight">
+            <span className="card-insight-label">AI reading</span>
+            <ul>{card.insight.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
+          </div>
         ) : null}
       </header>
 
@@ -906,6 +983,7 @@ function CardExplorer({ handoff }: { handoff: CardHandoff }) {
           <Tabs.Tab value="repeated">Repeated work</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="flame" className="explore-panel">
+          <FlameLegend what="a frame's own time" />
           <FlameGraph data={flame} formatValue={formatMs} rowHeight={24} />
         </Tabs.Panel>
         <Tabs.Panel value="tree" className="explore-panel">
@@ -928,6 +1006,485 @@ function CardExplorer({ handoff }: { handoff: CardHandoff }) {
         </Tabs.Panel>
         <Tabs.Panel value="repeated" className="explore-panel">
           <RepeatedTable rows={card.repeated} exact={handoff.callCountIsExact} locations={locations} />
+        </Tabs.Panel>
+      </Tabs>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * The React drill-down: a recording's commits against the clock, and the tree
+ * each one rendered.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A React duration, to the precision React recorded it at.
+ *
+ * `formatMs` rounds to whole milliseconds, which is right for a CPU task
+ * measured in seconds and wrong for a frame budget of 16: the median self time
+ * in a cascade is 0.03 ms, and every row of it would read `0 ms`.
+ */
+function reactMs(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 ms";
+  if (value < 1) return `${Number(value.toFixed(2))} ms`;
+  if (value < 1000) return `${Number(value.toFixed(1))} ms`;
+  return formatMs(value);
+}
+
+/** Why React rendered a component, in the words a reader acts on. */
+const CAUSE_TEXT: Record<ReactRenderCause, string> = {
+  "first-mount": "first mount",
+  state: "state changed",
+  hooks: "a hook changed",
+  props: "props changed",
+  context: "context changed",
+  "nothing-changed": "nothing changed",
+  unknown: "render reason not recorded",
+};
+
+function causeDetail(node: ReactExploreNode): string {
+  const named = [...node.changedProps, ...node.changedHooks.map(hookLabel)].slice(0, 4);
+  const base = CAUSE_TEXT[node.cause];
+  return named.length > 0 ? `${base}: ${named.join(", ")}` : base;
+}
+
+/**
+ * The commit's tree as an icicle, sized by inclusive time and coloured by self
+ * time.
+ *
+ * Both halves matter and they are different questions. Width is where the time
+ * went — a provider 400 ms wide with 0.1 ms of its own is still the thing that
+ * rendered 400 ms of children. Heat is who burned it, which is the only figure
+ * a fix attaches to.
+ *
+ * The drawn width is `max(actualMs, self + children)`. React records an actual
+ * duration per fiber and the two are not guaranteed to agree — a bailed-out
+ * subtree contributes its base duration to an ancestor without appearing in
+ * this commit at all — and a parent drawn narrower than the children inside it
+ * is not a chart. The recorded figure is the one the tooltip quotes.
+ */
+function reactFlameNode(node: ReactExploreNode, path: string): FlameGraphNode {
+  const children = node.children.map((child, index) => reactFlameNode(child, `${path}.${index}`));
+  const inside = children.reduce((total, child) => total + child.value, 0);
+  const cause = `${causeDetail(node)}${node.compiledWithForget ? " · React Compiler" : ""}`;
+  return {
+    id: `${path}:${node.id}`,
+    name: node.name,
+    value: Math.max(node.actualMs, node.selfMs + inside),
+    selfValue: node.selfMs,
+    tooltip: `${node.name}${node.componentClass === "app" ? "" : ` [${node.componentClass}]`}`
+      + ` — ${reactMs(node.selfMs)} of its own, ${reactMs(node.actualMs)} including what it rendered`
+      + `\n${cause}${node.sourceHint ? `\n${node.sourceHint}` : ""}`,
+    children,
+  };
+}
+
+/** Every rendered fiber of one commit, flattened and ranked by self time. */
+function flattenCommit(commit: ReactExploreCommit): ReactExploreNode[] {
+  const out: ReactExploreNode[] = [];
+  const walk = (nodes: ReactExploreNode[]) => {
+    for (const node of nodes) { out.push(node); walk(node.children); }
+  };
+  walk(commit.tree);
+  return out.sort((a, b) => b.selfMs - a.selfMs || b.actualMs - a.actualMs || a.id - b.id);
+}
+
+/** Rows the component table draws before it stops and says how many are left. */
+const MAX_COMPONENT_ROWS = 150;
+
+/**
+ * The chart's height, and so the share of it the budget line sits at.
+ *
+ * A bar is linear in its commit's duration against the tallest commit in the
+ * recording, so the budget line lands wherever the arithmetic puts it — low on
+ * a recording with one 275 ms commit, which is the honest picture of a
+ * recording with one 275 ms commit.
+ */
+const STRIP_HEIGHT = 132;
+
+/**
+ * The shortest bar drawn for a commit that took measurable time.
+ *
+ * Height is linear in duration against the tallest commit, and in a recording
+ * whose peak is 275 ms a 1.6 ms commit is six tenths of a pixel: invisible. It
+ * only ever applies to bars too small to compare by eye anyway, which is why
+ * each carries its figure as a label. A commit React measured at zero is drawn
+ * at 2px instead, because a floor there would draw time that does not exist.
+ */
+const MIN_BAR_HEIGHT = 6;
+
+function commitKey(commit: { rootId: number; commitIndex: number }): string {
+  return `${commit.rootId}.${commit.commitIndex}`;
+}
+
+/**
+ * Room kept above the tallest bar for its duration label.
+ *
+ * The label sits above the bar rather than inside it because the interesting
+ * bars here are the short ones: a 1.6 ms commit beside a 170 ms one is a few
+ * pixels of fill with nowhere to print a figure.
+ */
+const BAR_LABEL_PX = 14;
+
+/**
+ * How many evenly spaced bars can carry their own label.
+ *
+ * Even spacing gives every commit the same width, so the labels either fit or
+ * they do not: across forty commits a slot is a few pixels and every label
+ * would be one clipped digit. Past this count the labels come off and the
+ * figure lives in the tooltip; the axis underneath keeps thinning its commit
+ * numbers so a reader never loses their place entirely.
+ */
+const MAX_LABELLED_BARS = 20;
+
+/** Narrowest evenly spaced bar. Below this a click lands between two commits. */
+const MIN_SLOT_PX = 14;
+
+/**
+ * Every commit as its own bar, in commit order.
+ *
+ * The bars are evenly spaced, as React DevTools' commit chart is, which costs
+ * the recording's shape in time: forty commits in 300 ms and forty across a
+ * minute draw the same. That is the right trade for a picker. Laying the same
+ * bars against the clock puts a 170 ms commit across half the axis and leaves
+ * its neighbours as three-pixel stubs, and a chart whose job is to let a reader
+ * choose a commit cannot have commits that are hard to click. Every bar is the
+ * same width whatever it cost, so each is a target the size of its neighbours,
+ * and height alone carries time.
+ */
+function CommitBars({
+  explore,
+  selectedKey,
+  onSelect,
+}: {
+  explore: ReactExplore;
+  selectedKey: string;
+  onSelect: (rootId: number, commitIndex: number) => void;
+}) {
+  const peakMs = useMemo(
+    () => explore.commits.reduce((max, commit) => Math.max(max, commit.durationMs), 0),
+    [explore.commits],
+  );
+  const plotMs = STRIP_HEIGHT - BAR_LABEL_PX;
+  const labelled = explore.commits.length <= MAX_LABELLED_BARS;
+  // Beyond the labelled count the axis keeps roughly twenty numbers, so a long
+  // recording still reads as `#0 … #19 … #38` rather than as anonymous bars.
+  const numberEvery = Math.ceil(explore.commits.length / MAX_LABELLED_BARS);
+  const budgetTop = peakMs > explore.budgetMs
+    ? STRIP_HEIGHT - (explore.budgetMs / peakMs) * plotMs
+    : null;
+
+  return (
+    <div className="timeline-scroll">
+      <div className="commit-bars">
+        <div className="commit-bars-plot" style={{ height: `${STRIP_HEIGHT}px` }}>
+          {budgetTop !== null ? (
+            <div className="commit-strip-budget" style={{ top: `${budgetTop}px` }}>
+              <span>{explore.budgetMs} ms</span>
+            </div>
+          ) : null}
+          {explore.commits.map((commit) => {
+            const key = commitKey(commit);
+            const height = commit.durationMs > 0 && peakMs > 0
+              ? Math.max(MIN_BAR_HEIGHT, (commit.durationMs / peakMs) * plotMs)
+              : 2;
+            return (
+              <button
+                type="button"
+                key={key}
+                className="commit-slot"
+                style={{ minWidth: `${MIN_SLOT_PX}px` }}
+                aria-pressed={key === selectedKey}
+                title={commitTooltip(commit)}
+                onClick={() => onSelect(commit.rootId, commit.commitIndex)}
+              >
+                {labelled ? <span className="commit-slot-label">{reactMs(commit.durationMs)}</span> : null}
+                <span
+                  className={key === selectedKey ? "commit-fill is-selected" : "commit-fill"}
+                  data-over={commit.overBudget ? "yes" : "no"}
+                  data-carded={commit.cardId ? "yes" : "no"}
+                  style={{ height: `${height}px` }}
+                />
+              </button>
+            );
+          })}
+        </div>
+        <div className="commit-bars-axis">
+          {explore.commits.map((commit, index) => (
+            <span key={commitKey(commit)} style={{ minWidth: `${MIN_SLOT_PX}px` }}>
+              {labelled || index % numberEvery === 0 ? `#${commit.commitIndex}` : ""}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The hover text both layouts share: the same commit, described the same way. */
+function commitTooltip(commit: ReactExploreCommit): string {
+  return `Commit ${commit.commitIndex} · ${reactMs(commit.durationMs)}`
+    + ` · ${reactMs(commit.startMs)} into the recording`
+    + `\n${commit.renderedCount} component${commit.renderedCount === 1 ? "" : "s"} rendered`
+    + (commit.topComponent ? `, ${commit.topComponent} heaviest at ${reactMs(commit.topComponentSelfMs)}` : "")
+    + (commit.updaters.length > 0 ? `\nscheduled by ${[...new Set(commit.updaters)].join(", ")}` : "")
+    + (commit.cardId ? "\nthis commit produced a card" : "");
+}
+
+/**
+ * The commit picker, and the frame the bars sit in.
+ *
+ * Separate from `CommitBars` so the legend and the caveat — which describe the
+ * recording rather than the drawing — stay out of the loop that draws bars.
+ */
+function CommitChart({
+  explore,
+  selectedKey,
+  onSelect,
+}: {
+  explore: ReactExplore;
+  selectedKey: string;
+  onSelect: (rootId: number, commitIndex: number) => void;
+}) {
+  if (explore.commits.length === 0) {
+    return <EmptyState title="No commits" description="This recording contains no React commits to lay out." />;
+  }
+
+  return (
+    <div className="timeline commit-strip">
+      <div className="timeline-controls">
+        <span className="timeline-legend">
+          {explore.commits.length} commit{explore.commits.length === 1 ? "" : "s"} across {reactMs(explore.spanMs)}
+          {" · "}{explore.commitsOverBudget} over the {explore.budgetMs} ms budget
+          {explore.omittedCommitCount > 0 ? ` · ${explore.omittedCommitCount} further commits not drawn` : ""}
+        </span>
+      </div>
+
+      <CommitBars explore={explore} selectedKey={selectedKey} onSelect={onSelect} />
+
+      <Text className="explore-caveat">
+        One bar is one commit, in the order React committed them, every bar the same width so that each is as easy to
+        hit as its neighbours. Height is the render duration against the tallest commit here, red is over the budget,
+        and a ringed bar is a commit that produced a card on the results page. Click any bar to drill into it below.
+        The spacing is not time: the bars are in order, but nothing here says whether two commits were a frame or a
+        minute apart. Nor is effect time — a commit that renders in 8 ms and then spends 40 ms in layout effects is a
+        short bar here, and the figure for those effects is in the card&rsquo;s hand-off rather than on this page.
+      </Text>
+    </div>
+  );
+}
+
+
+/**
+ * Every component the commit rendered, ranked by its own time.
+ *
+ * This is the table the card deliberately does not have. A card shows the rows
+ * a reader can act on and hides the three hundred that each cost 0.03 ms;
+ * hiding them is right on a card and wrong here, because the whole question
+ * behind opening a drill-down is what else was in there.
+ */
+function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) {
+  const rows = useMemo(() => flattenCommit(commit), [commit]);
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        title="No components in this commit"
+        description={commit.treeDropped
+          ? "This recording was large enough that the trees were dropped to keep the saved analysis small."
+          : "React recorded no per-component durations for this commit."}
+      />
+    );
+  }
+  const shown = rows.slice(0, MAX_COMPONENT_ROWS);
+  const hidden = rows.length - shown.length;
+  return (
+    <div className="react-components">
+      <table className="react-component-table">
+        <thead>
+          <tr>
+            <th scope="col">Component</th>
+            <th scope="col">Own time</th>
+            <th scope="col">Of commit</th>
+            <th scope="col">With children</th>
+            <th scope="col">Why it rendered</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((node) => (
+            <tr key={node.id} data-class={node.componentClass}>
+              <th scope="row">
+                <span className="react-component-name">{node.name}</span>
+                {node.sourceHint ? <code title={node.sourceHint}>{shortLocationLabel(node.sourceHint)}</code> : null}
+              </th>
+              <td>{reactMs(node.selfMs)}</td>
+              <td>{commit.durationMs > 0 ? `${((node.selfMs / commit.durationMs) * 100).toFixed(1)}%` : "—"}</td>
+              <td>{reactMs(node.actualMs)}</td>
+              <td>
+                {causeDetail(node)}
+                {node.compiledWithForget ? <em> · React Compiler</em> : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {hidden > 0 ? (
+        <Text className="explore-caveat">
+          {hidden} further component{hidden === 1 ? "" : "s"} rendered in this commit, each with less of its own time
+          than the last row above.
+        </Text>
+      ) : null}
+      <Text className="explore-caveat">
+        Own time is React&rsquo;s `selfDuration` and is a true partition of the render phase: these add up, and the
+        remainder is the reconciler&rsquo;s own walk. `With children` is inclusive and overlaps every ancestor, so that
+        column never sums to anything. A fix attaches to own time.
+      </Text>
+    </div>
+  );
+}
+
+/**
+ * The commit as an icicle, with React's own wrappers either drawn or collapsed.
+ *
+ * Collapsed by default, as on the CPU side and for a stronger reason: the
+ * 275.7 ms commit in the checked-in fixture nests 110 deep and its visible rows
+ * are all context providers. `Everything` is one click away for the times a
+ * provider is the finding.
+ */
+function ReactRenderTree({ commit }: { commit: ReactExploreCommit }) {
+  const [mode, setMode] = useState<TreeMode>("focused");
+  const flame = useMemo(() => {
+    if (commit.tree.length === 0) return null;
+    const below = mode === "focused" ? focusedReactTree(commit.tree) : { nodes: commit.tree, strippedMs: 0 };
+    return reactFlameNode(
+      {
+        id: 0,
+        name: `Commit ${commit.commitIndex}`,
+        componentClass: "framework",
+        // The reconciler's own walk, plus whatever the collapse charged
+        // upwards, so the top bar is the commit's duration and every row below
+        // it is a share of that figure rather than of a filtered total.
+        selfMs: commit.unattributedMs + below.strippedMs,
+        actualMs: commit.durationMs,
+        cause: "unknown",
+        changedProps: [],
+        changedHooks: [],
+        compiledWithForget: false,
+        sourceHint: null,
+        children: below.nodes,
+      },
+      "commit",
+    );
+  }, [commit, mode]);
+
+  if (!flame) {
+    return (
+      <EmptyState
+        title="No tree for this commit"
+        description={commit.treeDropped
+          ? "This recording held more components than the drill-down stores, so this commit's tree was dropped. The strip and the figures above are complete."
+          : "React recorded no per-component durations for this commit."}
+      />
+    );
+  }
+
+  return (
+    <>
+      <TreeModeToggle label="show" mode={mode} onChange={setMode} />
+      <FlameLegend what="a component's own render time" />
+      <FlameGraph data={flame} formatValue={reactMs} rowHeight={24} />
+      <Text className="explore-caveat">
+        Width is time including everything a component rendered; the colour is its own time alone. A wide pale box
+        rendered expensive children and cost nothing itself &mdash; memoize it or move the work down. A narrow hot box
+        is the component to go and change. Click a box to zoom into its subtree, Escape to come back out. Nesting is by
+        the nearest component above that also rendered, so a component whose parent bailed out sits under its nearest
+        rendering ancestor rather than at the top.
+        {mode === "focused"
+          ? " A component that burned no measurable time of its own and rendered exactly one child is collapsed away,"
+            + " and whatever it did cost is charged to the nearest component still shown above it. That is most of a"
+            + " React tree: the fixture's longest commit nests 110 deep and reads at 26 once the pass-throughs are"
+            + " gone, with nothing dropped that the rows above and below do not already say."
+          : " Everything React rendered, at its real depth — every context provider and wrapper included, which in the"
+            + " fixture's longest commit is 110 rows."}
+      </Text>
+    </>
+  );
+}
+
+function ReactExplorer({ handoff, initialKey }: { handoff: ReactExploreHandoff; initialKey: string }) {
+  const { explore } = handoff;
+  const byKey = useMemo(
+    () => new Map(explore.commits.map((commit) => [commitKey(commit), commit])),
+    [explore.commits],
+  );
+  // The longest commit is the one a reader came for, and is where the view
+  // opens when the URL names no commit or names one this recording lost.
+  const fallbackKey = useMemo(() => {
+    const longest = [...explore.commits].sort((a, b) => b.durationMs - a.durationMs)[0];
+    return longest ? commitKey(longest) : "";
+  }, [explore.commits]);
+  const [selectedKey, setSelectedKey] = useState(byKey.has(initialKey) ? initialKey : fallbackKey);
+  const commit = byKey.get(selectedKey) ?? null;
+  const card = useMemo(
+    () => (commit ? handoff.cards.find((entry) => entry.id === commit.cardId) ?? null : null),
+    [commit, handoff.cards],
+  );
+  const select = (rootId: number, commitIndex: number) => {
+    const key = `${rootId}.${commitIndex}`;
+    setSelectedKey(key);
+    // Keep the address bar in step, so the view reloads on the commit the
+    // reader navigated to rather than on the one the card opened.
+    const params = new URLSearchParams(window.location.search);
+    params.set("commit", key);
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+  };
+
+  if (!commit) {
+    return <EmptyState title="Nothing to explore" description="This recording contains no React commits." />;
+  }
+
+  return (
+    <>
+      <header className="explore-header">
+        <h1>{card?.insight?.title ?? card?.headline ?? `Commit ${commit.commitIndex} rendered ${commit.renderedCount} components`}</h1>
+        {card?.shapeline ? <p className="explore-shape">{card.shapeline}</p> : null}
+        {/* Two figures only. The reconciler residual is still on the tree's own
+            root row, and the commit's place on the clock and its effect
+            durations are in the hand-off; neither was a number a reader of this
+            page acts on. */}
+        <p className="explore-figures">
+          <strong>{reactMs(commit.durationMs)}</strong> rendering
+          <span>·</span>
+          {commit.renderedCount} component{commit.renderedCount === 1 ? "" : "s"} rendered
+        </p>
+        {!commit.causesRecorded ? (
+          <Text className="explore-caveat">
+            This recording was made without &ldquo;Record why each component rendered&rdquo;, so React captured no
+            render reasons for this commit. Every other figure here is measured; turn that option on in the React
+            DevTools profiler and record again to find out which of these renders changed nothing.
+          </Text>
+        ) : null}
+        {/* Below the measurements, as in the task view above: a reading of the
+            figures should not be read before them. */}
+        {card?.insight ? (
+          <div className="card-insight">
+            <span className="card-insight-label">AI reading</span>
+            <ul>{card.insight.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
+          </div>
+        ) : null}
+      </header>
+
+      <CommitChart explore={explore} selectedKey={selectedKey} onSelect={select} />
+
+      <Tabs className="explore-tabs" defaultValue="tree">
+        <Tabs.List size="sm" aria-label="Views of this commit">
+          <Tabs.Tab value="tree">Render tree</Tabs.Tab>
+          <Tabs.Tab value="components">Components</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="tree" className="explore-panel">
+          <ReactRenderTree commit={commit} />
+        </Tabs.Panel>
+        <Tabs.Panel value="components" className="explore-panel">
+          <ReactComponentTable commit={commit} />
         </Tabs.Panel>
       </Tabs>
     </>

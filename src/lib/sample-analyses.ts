@@ -735,20 +735,444 @@ export const REACT_SAMPLE_ANALYSIS: AnalysisRecord = {
   dir: "",
   totalMs: 172.964,
   hotspots: [],
-  reactIssues: [{
-    id: "react-commit-1-1", summary: "Expensive render work in HeavyActivityHeatmap", severity: "high",
-    evidence: "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.",
-    commit: { rootID: 1, commitIndex: 1, timestampMs: 1737.9347079992294, durationMs: 169.74 },
-    components: [{
-      componentId: "1:728", component: "HeavyActivityHeatmap", severity: "high",
-      evidence: "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.",
-      selfTimeMs: 124.823, percentOfCommit: 73.5,
-    }],
-  }],
-  prompts: {}, usage: { input: 12016, output: 403, cacheRead: 8000, cacheWrite: 0, totalTokens: 20419, costUsd: 0 }, promptUsage: {},
+  // Built by `react-cards.ts` from `sample-profiles/react/react-profile-2.json`.
+  // The model-selected engine reported the same component, the same 124.8 ms
+  // and the same 73.5% for 20,419 tokens; this is the measured pass over the
+  // same recording. Note `causesRecorded: false` — that profile was captured
+  // without "Record why each component rendered", so the sample also shows how
+  // the cards read when render reasons are unavailable.
+  reactCards: {
+    "cards": [
+      {
+        "id": "react-commit-1-1",
+        "rootId": 1,
+        "commitIndex": 1,
+        "startMs": 1737.9,
+        "durationMs": 169.7,
+        "percentOfRender": 98.1,
+        "severity": "high",
+        "shape": "single",
+        "headline": "HeavyActivityHeatmap spent 124.8 ms rendering in a 169.7 ms commit",
+        "shapeline": "74% of the commit in one component · 329 components rendered",
+        "causeline": "why each component rendered was not recorded in this profile",
+        "renderedCount": 329,
+        "summedSelfMs": 146.9,
+        "unattributedMs": 22.8,
+        "effectDurationMs": 0.9,
+        "passiveEffectDurationMs": 0.3,
+        "priority": "Immediate",
+        "updaters": [
+          "BaseNavigationContainer"
+        ],
+        "culprits": [
+          {
+            "componentId": "1:728",
+            "component": "HeavyActivityHeatmap",
+            "componentClass": "app",
+            "selfMs": 124.8,
+            "percentOfCommit": 73.5,
+            "cause": "unknown",
+            "changedProps": [],
+            "changedHooks": [],
+            "compiledWithForget": true,
+            "sourceHint": null,
+            "path": [
+              "DetailsScreen",
+              "…",
+              "View",
+              "ScrollView",
+              "HeavyActivityHeatmap"
+            ],
+            "evidence": "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render."
+          },
+          {
+            "componentId": "1:706",
+            "component": "Route(explore-details)",
+            "componentClass": "library",
+            "selfMs": 2.2,
+            "percentOfCommit": 1.3,
+            "cause": "unknown",
+            "changedProps": [],
+            "changedHooks": [],
+            "compiledWithForget": false,
+            "sourceHint": null,
+            "path": [
+              "DebugContainer",
+              "…",
+              "EnsureSingleNavigator",
+              "StaticContainer",
+              "Route(explore-details)"
+            ],
+            "evidence": "Route(explore-details) used 2.2 ms self time, 1.3% of a 169.7 ms over-budget React render."
+          }
+        ],
+        "culpritTailCount": 327,
+        "culpritTailMs": 19.9,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 329,
+            "selfMs": 146.9
+          }
+        ],
+        "wasted": null,
+        "confidence": "low",
+        "pathline": "DetailsScreen › … › View › ScrollView › HeavyActivityHeatmap",
+        "updaterline": "update scheduled by BaseNavigationContainer"
+      }
+    ],
+    "budgetMs": 16,
+    "roots": [
+      {
+        "rootId": 1,
+        "rootName": "main(RootComponent)",
+        "commitCount": 4,
+        "totalRenderMs": 173,
+        "peakCommitMs": 169.7
+      }
+    ],
+    "commitCount": 4,
+    "commitsOverBudget": 1,
+    "noOverBudgetCommits": false,
+    "totalRenderMs": 173,
+    "peakCommitMs": 169.7,
+    "omittedCardCount": 0,
+    "omittedCardMs": 0,
+    "components": [
+      {
+        "componentId": "1:728",
+        "component": "HeavyActivityHeatmap",
+        "componentClass": "app",
+        "renders": 1,
+        "totalSelfMs": 124.8,
+        "maxSelfMs": 124.8,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 124.8
+          }
+        ]
+      },
+      {
+        "componentId": "1:706",
+        "component": "Route(explore-details)",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 2.2,
+        "maxSelfMs": 2.2,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 2.2
+          }
+        ]
+      },
+      {
+        "componentId": "1:16",
+        "component": "BaseNavigationContainer",
+        "componentClass": "library",
+        "renders": 2,
+        "totalSelfMs": 1.6,
+        "maxSelfMs": 0.8,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 2,
+            "selfMs": 1.6
+          }
+        ]
+      },
+      {
+        "componentId": "1:671",
+        "component": "SceneView",
+        "componentClass": "library",
+        "renders": 2,
+        "totalSelfMs": 1.1,
+        "maxSelfMs": 0.6,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 2,
+            "selfMs": 1.1
+          }
+        ]
+      },
+      {
+        "componentId": "1:80",
+        "component": "NativeStackNavigator",
+        "componentClass": "app",
+        "renders": 1,
+        "totalSelfMs": 0.9,
+        "maxSelfMs": 0.9,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.9
+          }
+        ]
+      },
+      {
+        "componentId": "1:38",
+        "component": "Content",
+        "componentClass": "app",
+        "renders": 1,
+        "totalSelfMs": 0.8,
+        "maxSelfMs": 0.8,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.8
+          }
+        ]
+      },
+      {
+        "componentId": "1:715",
+        "component": "DetailsScreen",
+        "componentClass": "app",
+        "renders": 1,
+        "totalSelfMs": 0.8,
+        "maxSelfMs": 0.8,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.8
+          }
+        ]
+      },
+      {
+        "componentId": "1:100",
+        "component": "SceneView",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.6,
+        "maxSelfMs": 0.6,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.6
+          }
+        ]
+      },
+      {
+        "componentId": "1:574",
+        "component": "SceneView",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.6,
+        "maxSelfMs": 0.6,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.6
+          }
+        ]
+      },
+      {
+        "componentId": "1:676",
+        "component": "ScreenStackItem",
+        "componentClass": "library",
+        "renders": 2,
+        "totalSelfMs": 0.5,
+        "maxSelfMs": 0.3,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 2,
+            "selfMs": 0.5
+          }
+        ]
+      },
+      {
+        "componentId": "1:12",
+        "component": "NavigationContainerInner",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.5,
+        "maxSelfMs": 0.5,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.5
+          }
+        ]
+      },
+      {
+        "componentId": "1:683",
+        "component": "Animated(Anonymous)",
+        "componentClass": "library",
+        "renders": 2,
+        "totalSelfMs": 0.4,
+        "maxSelfMs": 0.2,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 2,
+            "selfMs": 0.4
+          }
+        ]
+      },
+      {
+        "componentId": "1:678",
+        "component": "InnerScreen",
+        "componentClass": "app",
+        "renders": 2,
+        "totalSelfMs": 0.4,
+        "maxSelfMs": 0.2,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 2,
+            "selfMs": 0.4
+          }
+        ]
+      },
+      {
+        "componentId": "1:40",
+        "component": "NavigationContent",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.4,
+        "maxSelfMs": 0.4,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.4
+          }
+        ]
+      },
+      {
+        "componentId": "1:53",
+        "component": "SceneView",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.4,
+        "maxSelfMs": 0.4,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.4
+          }
+        ]
+      },
+      {
+        "componentId": "1:699",
+        "component": "SceneView",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.3,
+        "maxSelfMs": 0.3,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.3
+          }
+        ]
+      },
+      {
+        "componentId": "1:602",
+        "component": "SceneView",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.3,
+        "maxSelfMs": 0.3,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.3
+          }
+        ]
+      },
+      {
+        "componentId": "1:105",
+        "component": "ScreenStackItem",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.3,
+        "maxSelfMs": 0.3,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.3
+          }
+        ]
+      },
+      {
+        "componentId": "1:579",
+        "component": "ScreenStackItem",
+        "componentClass": "library",
+        "renders": 1,
+        "totalSelfMs": 0.3,
+        "maxSelfMs": 0.3,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 1,
+            "selfMs": 0.3
+          }
+        ]
+      },
+      {
+        "componentId": "1:23",
+        "component": "EnsureSingleNavigator",
+        "componentClass": "library",
+        "renders": 2,
+        "totalSelfMs": 0.2,
+        "maxSelfMs": 0.1,
+        "wastedRenders": 0,
+        "causes": [
+          {
+            "cause": "unknown",
+            "count": 2,
+            "selfMs": 0.2
+          }
+        ]
+      }
+    ],
+    "repeats": [],
+    "causesRecorded": false,
+    "unnamedFiberCount": 0
+  },
+  reactIssues: [],
+  prompts: {},
+  // Every figure here resolved from arithmetic over the export, so no model ran
+  // and nothing was spent producing this report.
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 },
+  promptUsage: {},
 };
 
 export const REACT_SAMPLE_SUMMARY = {
-  rootCount: 1, commitCount: 4, totalCommitRenderDurationMs: 172.964, peakCommitDurationMs: 169.74,
+  rootCount: 1, commitCount: 4, totalCommitRenderDurationMs: 173, peakCommitDurationMs: 169.7,
   commitsOverBudget: 1, omittedEvidenceCommitCount: 0, frameBudgetMs: 16,
 };

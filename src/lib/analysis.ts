@@ -8,6 +8,8 @@ import type { Bottleneck } from "./bottlenecks";
 import type { ProfileCard } from "./profile-cards";
 import type { TaskCardSet } from "./task-cards";
 import { normalizeStoredReactIssues, type ReactIssue } from "./react-analyzer.ts";
+import type { ReactCardSet } from "./react-cards";
+import type { ReactExplore } from "./react-explore";
 
 export const MAX_SUMMARY_BULLETS = 3;
 /**
@@ -78,6 +80,22 @@ export interface AnalysisRecord {
   dir: string;
   totalMs: number;
   hotspots: Hotspot[];
+  /**
+   * The React path's measured output: one card per over-budget commit.
+   * `reactIssues` below is the model-selected shape it replaces, kept because
+   * saved analyses hold it and `TRACESIFT_REACT_ENGINE=analyzer` still writes it.
+   */
+  reactCards?: ReactCardSet;
+  /**
+   * Every commit against the clock, and each one's rendered tree, for the
+   * drill-down.
+   *
+   * Kept on the record because the measured engine never writes the upload to
+   * disk: the export is parsed in the request and dropped, so there is nothing
+   * to re-read when a reader opens Explore ten minutes later. Absent on records
+   * from the model path and on anything saved before the drill-down existed.
+   */
+  reactExplore?: ReactExplore;
   reactIssues: ReactIssue[];
   /** Item id -> deterministic diagnostic hand-off cached after first rendering. */
   prompts: Record<string, string>;
@@ -155,15 +173,28 @@ function settingsPath(): string { return path.join(traceSiftHome(), "settings.js
 function recordPath(id: string): string { return path.join(historyDir(), `${id}.json`); }
 function safeId(id: string): boolean { return /^[a-zA-Z0-9-]{1,100}$/.test(id); }
 
-async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+/**
+ * `indent` is for the files a person opens. Settings are two of those; an
+ * analysis is not.
+ *
+ * A React commit tree nests 110 deep, so two-space indentation writes 220
+ * spaces in front of every leaf: the record for the checked-in fixture is 90 KB
+ * of data and was 1.4 MB on disk. Records are written compact for that reason,
+ * and nothing reads them by eye.
+ */
+async function writeJsonAtomic(file: string, value: unknown, indent = 2): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await writeFile(temporary, JSON.stringify(value, null, indent), { mode: 0o600 });
   await rename(temporary, file);
 }
 
+function reactRecord(record: Pick<AnalysisRecord, "reactIssues" | "reactCards">): boolean {
+  return record.reactIssues.length > 0 || Boolean(record.reactCards);
+}
+
 function durableRecord(record: AnalysisRecord): AnalysisRecord {
-  return { ...record, dir: "", saved: true, profileType: record.profileType ?? (record.reactIssues.length ? "react" : "cpu"), title: record.title || "Untitled analysis" };
+  return { ...record, dir: "", saved: true, profileType: record.profileType ?? (reactRecord(record) ? "react" : "cpu"), title: record.title || "Untitled analysis" };
 }
 
 export async function getAnalysisSettings(): Promise<AnalysisSettings> {
@@ -185,7 +216,7 @@ export async function saveAnalysisSettings(settings: Partial<AnalysisSettings>):
 }
 export async function saveAnalysis(record: AnalysisRecord): Promise<AnalysisRecord> {
   const saved = durableRecord(record);
-  await writeJsonAtomic(recordPath(saved.id), saved);
+  await writeJsonAtomic(recordPath(saved.id), saved, 0);
   records.set(saved.id, { ...record, saved: true });
   return saved;
 }
@@ -195,7 +226,7 @@ export async function getSavedAnalysis(id: string): Promise<AnalysisRecord | und
     const parsed = JSON.parse(await readFile(recordPath(id), "utf8")) as AnalysisRecord;
     if (!parsed || parsed.id !== id || !Array.isArray(parsed.hotspots) || !Array.isArray(parsed.reactIssues)) throw new Error("invalid saved analysis");
     const reactIssues = normalizeStoredReactIssues(parsed.reactIssues);
-    const record = { ...parsed, reactIssues, dir: "", saved: true, profileType: parsed.profileType ?? (reactIssues.length ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
+    const record = { ...parsed, reactIssues, dir: "", saved: true, profileType: parsed.profileType ?? (reactRecord({ reactIssues, reactCards: parsed.reactCards }) ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
     records.set(id, record);
     return record;
   } catch (error) {
@@ -208,8 +239,11 @@ export async function listSavedAnalyses(): Promise<AnalysisHistoryItem[]> {
   try { entries = await readdir(historyDir()); } catch { return []; }
   const result = await Promise.all(entries.filter((name) => name.endsWith(".json")).map(async (name) => getSavedAnalysis(name.slice(0, -5))));
   return result.filter((entry): entry is AnalysisRecord => Boolean(entry)).map((entry) => ({
-    id: entry.id, createdAt: entry.createdAt, profileType: entry.profileType ?? (entry.reactIssues.length ? "react" : "cpu"), title: entry.title || "Untitled analysis",
-    totalTokens: entry.usage?.totalTokens ?? 0, issueCount: entry.profileType === "react" ? entry.reactIssues.length : entry.hotspots.length,
+    id: entry.id, createdAt: entry.createdAt, profileType: entry.profileType ?? (reactRecord(entry) ? "react" : "cpu"), title: entry.title || "Untitled analysis",
+    totalTokens: entry.usage?.totalTokens ?? 0,
+    issueCount: entry.profileType === "react"
+      ? entry.reactCards?.cards.length ?? entry.reactIssues.length
+      : entry.hotspots.length,
   })).sort((a, b) => b.createdAt - a.createdAt);
 }
 export async function deleteSavedAnalysis(id: string): Promise<boolean> {

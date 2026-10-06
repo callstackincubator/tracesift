@@ -223,6 +223,18 @@ button, input { font: inherit; }
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
+/*
+ * A sentence under the results heading, as opposed to a row of figures.
+ * `.usage-line` is deliberately `nowrap` so a token count never breaks across
+ * two lines, which clips prose at the edge of the pane instead of wrapping it.
+ */
+.results-note {
+  max-width: 72ch;
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
 .result-model { display: grid; gap: 1px; min-width: 170px; padding: 3px 0 3px 18px; text-align: right; border-left: 1px solid var(--border); }
 .result-model span { color: var(--muted-foreground); font-size: 12px; line-height: 1.4; }
 .result-model strong { color: var(--foreground); font-size: 14px; line-height: 1.4; }
@@ -1856,6 +1868,58 @@ body {
 .zoom-readout { min-width: 4ch; margin-left: 4px; font-variant-numeric: tabular-nums; opacity: 0.75; }
 .flame-scale { min-width: 100%; }
 
+/* Frames are packed edge to edge and the library draws only a faint right edge,
+   so a run of same-coloured boxes reads as one box and a row reads as a band.
+   A full border in the page's own background cuts every cell out of its
+   neighbours and out of the row below, and hovering lifts that border so the
+   box under the pointer is the one being read. Unlayered, so it beats the
+   utility classes the library sets the faint edge with. */
+[data-slot="flame-graph-frame"] {
+  border: 1px solid var(--background);
+  border-radius: 3px;
+}
+[data-slot="flame-graph-frame"]:hover {
+  border-color: var(--foreground);
+  z-index: 1;
+}
+
+/* The "no own time" bucket is muted-on-muted, which at 11px is a box whose name
+   cannot be read at all — and those are most of the boxes in a React commit,
+   where the pass-through wrappers are exactly the frames a reader is trying to
+   name. Same grey, enough of a lift to carry text. */
+[data-slot="flame-graph-frame"].bg-muted { background: color-mix(in srgb, var(--muted) 55%, var(--border)); }
+[data-slot="flame-graph-frame"].bg-muted span { color: var(--foreground); opacity: 0.85; }
+
+/* What the five colours mean, above every graph that uses them. */
+.flame-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.flame-legend-lead { margin-right: 2px; }
+.flame-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.flame-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--background) 60%, transparent);
+}
+.flame-legend-swatch[data-bucket="heaviest"] { background: var(--danger); }
+.flame-legend-swatch[data-bucket="heavy"] { background: var(--warning); }
+.flame-legend-swatch[data-bucket="moderate"] { background: var(--info); }
+.flame-legend-swatch[data-bucket="light"] { background: var(--success); }
+.flame-legend-swatch[data-bucket="none"] { background: color-mix(in srgb, var(--muted) 55%, var(--border)); }
+
 .timeline-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: 10px; }
 .timeline-canvas { position: relative; min-width: 100%; padding: 0 0 8px; }
 
@@ -1920,6 +1984,148 @@ body {
 .timeline-box > span { padding: 0 4px; pointer-events: none; }
 .timeline-box:hover { filter: brightness(1.12); }
 .timeline-box.is-selected { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
+
+/* ── The React commit chart ──────────────────────────────────────────────────
+   One bar per commit, evenly spaced. The plot grows downwards from a baseline
+   at its foot, because bar height is duration against the tallest commit and a
+   reader compares tops. */
+.commit-fill {
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--chart-2, #4ade80) 55%, var(--muted));
+}
+/* Over budget is the whole point of the chart, so it is the one thing the fill
+   carries. The budget line says how far over. */
+.commit-fill[data-over="yes"] { background: var(--chart-1, #f87171); }
+/* A commit that produced a card is a finding the reader has already seen
+   named, so it is ringed rather than recoloured: the fill still has to mean
+   `over budget` alone. */
+.commit-fill[data-carded="yes"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 45%, transparent); }
+.commit-fill.is-selected { outline: 2px solid var(--primary); outline-offset: 1px; z-index: 1; }
+.commit-strip-budget {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--foreground) 45%, transparent);
+  pointer-events: none;
+}
+.commit-strip-budget > span {
+  position: sticky;
+  left: 0;
+  /* Above a bar label's own background, which otherwise paints over the
+     leftmost one. */
+  z-index: 2;
+  display: inline-block;
+  padding: 0 4px;
+  background: var(--background);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  /* Above its own line: below it, the label of a budget that sits low in a
+     recording with one enormous commit lands on the numbers underneath. */
+  transform: translateY(-100%);
+}
+
+/* Every commit gets an equal share of the width, so a recording with one
+   dominant commit still offers its small ones as targets the same size as the
+   big one. Only height carries time here. */
+.commit-bars { min-width: 100%; }
+.commit-bars-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  border-bottom: 1px solid var(--border);
+}
+.commit-slot {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+/* Above the bar, not inside it: the bars worth reading a figure off are the
+   short ones, which have no room inside. The background is load-bearing — a
+   recording with one dominant commit puts the budget line and the labels of
+   every short bar at much the same height, and the label breaks the dashed
+   line rather than being printed across it. */
+.commit-slot-label {
+  position: relative;
+  z-index: 1;
+  background: var(--background);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--muted-foreground);
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.commit-slot:hover .commit-fill { filter: brightness(1.15); }
+/* Matches the plot's `gap` and the slots' `min-width`, or the numbers drift
+   away from the bars they label. */
+.commit-bars-axis {
+  display: flex;
+  gap: 3px;
+  padding-top: 4px;
+}
+.commit-bars-axis > span {
+  flex: 1 1 0;
+  overflow: hidden;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+/* ── Every component in one commit ───────────────────────────────────────────
+   The table the card deliberately does not have: all of it, ranked by own time,
+   including the three hundred rows that each cost a hundredth of a frame. */
+.react-component-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.react-component-table th,
+.react-component-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  vertical-align: baseline;
+}
+.react-component-table thead th {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.react-component-table tbody th { font-weight: 500; }
+.react-component-table td:nth-child(2),
+.react-component-table td:nth-child(3),
+.react-component-table td:nth-child(4) {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.react-component-table td:last-child { color: var(--muted-foreground); }
+/* A host element or a framework wrapper is still a row — its own time is real —
+   but it is not a component anybody wrote, and a reader scanning for something
+   to change should be able to skip it. */
+.react-component-table tr[data-class="host"] .react-component-name,
+.react-component-table tr[data-class="framework"] .react-component-name,
+.react-component-table tr[data-class="unnamed"] .react-component-name {
+  color: var(--muted-foreground);
+}
+.react-component-name { margin-right: 6px; }
+.react-component-table code { font-size: 11px; color: var(--muted-foreground); }
+.react-components .explore-caveat { margin-top: 10px; }
 
 /* ── A task's cost as parts of a whole ────────────────────────────────────────
    The categorical palette the contribution charts paint with. Eight slots in a

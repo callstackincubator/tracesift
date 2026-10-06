@@ -64,10 +64,20 @@ test("bundled CPU sample has stable, sanitized UI metadata", () => {
 test("bundled React sample has stable report metadata and its recorded issue", () => {
   assert.equal(REACT_SAMPLE_ANALYSIS.id, "sample-react-heavy-activity-heatmap");
   assert.equal(REACT_SAMPLE_ANALYSIS.profileType, "react");
-  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues.length, 1);
-  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues[0].commit.durationMs, 169.74);
-  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues[0].components.length, 1);
-  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues[0].components[0].component, "HeavyActivityHeatmap");
+  // The sample is now the measured engine's, so it carries cards and no issues.
+  assert.equal(REACT_SAMPLE_ANALYSIS.reactIssues.length, 0);
+  assert.equal(REACT_SAMPLE_ANALYSIS.usage.totalTokens, 0, "no model ran to produce it");
+  const cards = REACT_SAMPLE_ANALYSIS.reactCards;
+  assert.equal(cards.cards.length, 1);
+  assert.equal(cards.budgetMs, 16);
+  assert.equal(cards.commitsOverBudget, 1);
+  assert.equal(cards.commitCount, 4);
+  assert.equal(cards.causesRecorded, false, "this recording captured no render reasons");
+  const [card] = cards.cards;
+  assert.equal(card.id, "react-commit-1-1");
+  assert.equal(card.durationMs, 169.7);
+  assert.equal(card.culprits[0].component, "HeavyActivityHeatmap");
+  assert.equal(card.culprits[0].selfMs, 124.8);
   assert.equal(REACT_SAMPLE_SUMMARY.frameBudgetMs, 16);
 });
 

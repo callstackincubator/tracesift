@@ -13,6 +13,8 @@
 
 import type { ProfileCard } from "./profile-cards";
 import type { TaskCard } from "./task-cards";
+import type { ReactCard } from "./react-cards";
+import type { ReactExplore } from "./react-explore";
 
 export interface CardHandoff {
   analysisId: string;
@@ -84,4 +86,32 @@ export async function fetchTaskHandoff(analysisId: string, taskIndex: number): P
     throw new Error(body.error ?? "That task could not be loaded.");
   }
   return body as TaskHandoff;
+}
+
+export interface ReactExploreHandoff {
+  analysisId: string;
+  profileTitle?: string;
+  explore: ReactExplore;
+  /** The cards, so the drill-down can name the commits that produced one. */
+  cards: ReactCard[];
+}
+
+/**
+ * The React drill-down opens on one commit of a recording it holds whole.
+ *
+ * `commit` is `<rootId>.<commitIndex>` rather than a card id, because the strip
+ * can reach every commit in the recording and most of them never produced a
+ * card. Nothing is stored on the way out; see `/api/react-commit`.
+ */
+export function reactExploreHref(analysisId: string, rootId: number, commitIndex: number): string {
+  return `/explore?a=${encodeURIComponent(analysisId)}&commit=${rootId}.${commitIndex}`;
+}
+
+export async function fetchReactExplore(analysisId: string): Promise<ReactExploreHandoff> {
+  const response = await fetch(`/api/react-commit?a=${encodeURIComponent(analysisId)}`);
+  const body = (await response.json()) as Partial<ReactExploreHandoff> & { error?: string };
+  if (!response.ok || !body.explore) {
+    throw new Error(body.error ?? "That recording could not be loaded.");
+  }
+  return body as ReactExploreHandoff;
 }
