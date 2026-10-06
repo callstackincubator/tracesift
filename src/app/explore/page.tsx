@@ -15,6 +15,7 @@ import type { CardChildNode, RepeatedFunction } from "@/lib/profile-cards";
 import { focusedTree, type TaskCulprit, type TaskTreeNode } from "@/lib/task-cards";
 import { isShownFrame, SHOWN_CLASSES, type TaskTimeline, type TimelineBox } from "@/lib/task-timeline";
 import { hookLabel, type ReactRenderCause } from "@/lib/react-commit-tree";
+import { isOwnComponent } from "@/lib/react-cards";
 import { focusedReactTree, type ReactExplore, type ReactExploreCommit, type ReactExploreNode } from "@/lib/react-explore";
 
 /**
@@ -1276,16 +1277,41 @@ function CommitChart({
 
 
 /**
- * Every component the commit rendered, ranked by its own time.
+ * Every component the commit rendered, ranked by its own time, with React's own
+ * wrappers and the platform's own views either listed or filtered out.
  *
  * This is the table the card deliberately does not have. A card shows the rows
  * a reader can act on and hides the three hundred that each cost 0.03 ms;
- * hiding them is right on a card and wrong here, because the whole question
- * behind opening a drill-down is what else was in there.
+ * hiding them is right on a card and wrong as a default here, because the whole
+ * question behind opening a drill-down is what else was in there. The toggle is
+ * for the second look, once that question is answered.
+ *
+ * The same toggle as the render tree beside it, but not the same cut, and the
+ * difference is the point. The tree collapses by what a row *answers* — a
+ * component that burned nothing and rendered one child says nothing its child
+ * does not — because in a tree a pass-through is depth to scroll past. A
+ * ranked table has no depth, so what gets in the way here is the opposite
+ * thing: a row with real self time and nowhere to go. `(root)`, a context
+ * provider, a host view — measured, interleaved among the rows that name
+ * something to change, and not openable. So this filter is by whose code it
+ * is, the same cut the cards' culprit rows are chosen by.
+ *
+ * Nothing is recomputed under the filter. A component's self time is React's
+ * own `selfDuration` and does not depend on which other rows are listed, and a
+ * dropped row's time is not charged onward to anything — unlike the tree,
+ * where a collapsed node's time has to go somewhere because its parent's width
+ * still has to account for it. Every figure here reads the same in both modes.
+ *
+ * `Everything` is the default, as on the task side: this table is the measured
+ * partition of the commit, and a reader who opened it asked what React
+ * rendered, not what of it is theirs.
  */
 function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) {
-  const rows = useMemo(() => flattenCommit(commit), [commit]);
-  if (rows.length === 0) {
+  const [mode, setMode] = useState<TreeMode>("full");
+  const all = useMemo(() => flattenCommit(commit), [commit]);
+  const rows = useMemo(() => (mode === "focused" ? all.filter(isOwnComponent) : all), [mode, all]);
+  const filtered = all.length - rows.length;
+  if (all.length === 0) {
     return (
       <EmptyState
         title="No components in this commit"
@@ -1299,45 +1325,65 @@ function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) {
   const hidden = rows.length - shown.length;
   return (
     <div className="react-components">
-      <table className="react-component-table">
-        <thead>
-          <tr>
-            <th scope="col">Component</th>
-            <th scope="col">Own time</th>
-            <th scope="col">Of commit</th>
-            <th scope="col">With children</th>
-            <th scope="col">Why it rendered</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((node) => (
-            <tr key={node.id} data-class={node.componentClass}>
-              <th scope="row">
-                <span className="react-component-name">{node.name}</span>
-                {node.sourceHint ? <code title={node.sourceHint}>{shortLocationLabel(node.sourceHint)}</code> : null}
-              </th>
-              <td>{reactMs(node.selfMs)}</td>
-              <td>{commit.durationMs > 0 ? `${((node.selfMs / commit.durationMs) * 100).toFixed(1)}%` : "—"}</td>
-              <td>{reactMs(node.actualMs)}</td>
-              <td>
-                {causeDetail(node)}
-                {node.compiledWithForget ? <em> · React Compiler</em> : null}
-              </td>
+      <TreeModeToggle label="rows" mode={mode} onChange={setMode} />
+      {shown.length === 0 ? (
+        <EmptyState
+          title="None of these components are yours"
+          description="Every component this commit rendered is React's own or a platform view with no recorded source. Switch to Everything to see them."
+        />
+      ) : (
+        <table className="react-component-table">
+          <thead>
+            <tr>
+              <th scope="col">Component</th>
+              <th scope="col">Own time</th>
+              <th scope="col">Of commit</th>
+              <th scope="col">With children</th>
+              <th scope="col">Why it rendered</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {shown.map((node) => (
+              <tr key={node.id} data-class={node.componentClass}>
+                <th scope="row">
+                  <span className="react-component-name">{node.name}</span>
+                  {node.sourceHint ? <code title={node.sourceHint}>{shortLocationLabel(node.sourceHint)}</code> : null}
+                </th>
+                <td>{reactMs(node.selfMs)}</td>
+                <td>{commit.durationMs > 0 ? `${((node.selfMs / commit.durationMs) * 100).toFixed(1)}%` : "—"}</td>
+                <td>{reactMs(node.actualMs)}</td>
+                <td>
+                  {causeDetail(node)}
+                  {node.compiledWithForget ? <em> · React Compiler</em> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       {hidden > 0 ? (
         <Text className="explore-caveat">
-          {hidden} further component{hidden === 1 ? "" : "s"} rendered in this commit, each with less of its own time
-          than the last row above.
+          {hidden} further component{hidden === 1 ? "" : "s"} {mode === "focused" ? "of yours " : ""}rendered in this
+          commit, each with less of its own time than the last row above.
         </Text>
       ) : null}
-      <Text className="explore-caveat">
-        Own time is React&rsquo;s `selfDuration` and is a true partition of the render phase: these add up, and the
-        remainder is the reconciler&rsquo;s own walk. `With children` is inclusive and overlaps every ancestor, so that
-        column never sums to anything. A fix attaches to own time.
-      </Text>
+      {mode === "focused" && filtered > 0 ? (
+        <Text className="explore-caveat">
+          {filtered === 1
+            ? "One component that is React\u2019s own, or a platform view with no recorded source, is"
+            : `${filtered} components that are React\u2019s own, or platform views with no recorded source, are`}
+          {" "}hidden. Every figure above is unchanged: own time is measured per component, so hiding a row neither
+          moves time onto another row nor takes it off this one &mdash; which is why the percentages no longer add up
+          to the commit here.
+        </Text>
+      ) : null}
+      {shown.length > 0 ? (
+        <Text className="explore-caveat">
+          Own time is React&rsquo;s `selfDuration` and is a true partition of the render phase: over every component
+          React rendered they add up, and the remainder is the reconciler&rsquo;s own walk. `With children` is
+          inclusive and overlaps every ancestor, so that column never sums to anything. A fix attaches to own time.
+        </Text>
+      ) : null}
     </div>
   );
 }

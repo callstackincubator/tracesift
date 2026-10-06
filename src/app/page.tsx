@@ -16,7 +16,9 @@ import {
 
 import { HowToUseGuide } from "@/app/how-to-use";
 import { ThemeGate } from "@/app/theme-gate";
-import { TaskContribution, type ContributionChartKind } from "@/app/task-contribution";
+import { TaskContribution } from "@/app/task-contribution";
+import { ReactContribution, reactCulpritShape } from "@/app/react-contribution";
+import { type ContributionChartKind } from "@/app/contribution-chart";
 import type { Hotspot } from "@/lib/analysis";
 import type { ProfileCard } from "@/lib/profile-cards";
 import { reactExploreHref, storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
@@ -29,7 +31,7 @@ import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
 import type { ReactCard, ReactCardSet } from "@/lib/react-cards";
-import { hookLabel } from "@/lib/react-commit-tree";
+import { reactCommitSlices } from "@/lib/react-contribution";
 
 type ProfileType = "javascript" | "react";
 type UploadKind = "cpu" | "reactProfile";
@@ -423,6 +425,35 @@ function taskFallbackRows(card: TaskCard, onFocus: (nodeId: string) => void): Ho
    the evidence in a form you could not click. The heading now stops at the
    shape. */
 
+/**
+ * Which drawing the cards below are read as. One control for both families: a
+ * reader who prefers one reading of a part-of-whole prefers it on a commit for
+ * the same reason they prefer it on a task.
+ */
+function ChartSwitch({
+  kind,
+  onChange,
+}: {
+  kind: ContributionChartKind;
+  onChange: (kind: ContributionChartKind) => void;
+}) {
+  return (
+    <div className="chart-switch">
+      <span className="chart-switch-label">contribution</span>
+      {(["bar", "treemap"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={kind === option ? "timeline-zoom is-current" : "timeline-zoom"}
+          onClick={() => onChange(option)}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** The second line of a card: how often this frame ran. */
 function cardSubtitle(card: ProfileCard, callCountIsExact: boolean): string | undefined {
   const count = callCountIsExact ? card.invocations ?? card.callSites : card.callSites;
@@ -433,10 +464,15 @@ function cardSubtitle(card: ProfileCard, callCountIsExact: boolean): string | un
 /**
  * A React card's rows: the components that burned the commit's own time.
  *
+ * The fallback the chart leaves behind. A commit whose components are all under
+ * the culprit floor — three hundred fibers at 0.1 ms each on a 20 ms commit —
+ * divides into nothing but residuals, so the chart could only say that none of
+ * it was any one component's fault. Its heaviest component is still a name, and
+ * these rows are where it is printed.
+ *
  * `percentOfCommit` rather than a share of the summed self time, because the
  * commit's duration is the figure the heading claims and the one a reader can
- * check against the recording. The bar is the same number, so the rows read as
- * parts of the block rather than parts of each other.
+ * check against the recording.
  */
 function reactCardRows(card: ReactCard): HotPathCard {
   // The top culprit is always shown, however small: a card exists because its
@@ -459,25 +495,6 @@ function reactCardRows(card: ReactCard): HotPathCard {
      reader cannot act on. They are still in the record, and still in the
      hand-off, where an agent that can read the repo can use them. */
   return { rows, footnotes: [] };
-}
-
-/**
- * Why React rendered this component, on the row it belongs to.
- *
- * The single most actionable line on a React card, in the same slot the task
- * cards use for a call shape: `142 ms in one render` and `142 ms over 54
- * renders that changed nothing` are the same number and different bugs.
- */
-function reactCulpritShape(culprit: ReactCard["culprits"][number]): string | undefined {
-  const changed = culprit.changedProps.length > 0
-    ? ` · props ${culprit.changedProps.slice(0, 3).join(", ")}`
-    : culprit.changedHooks.length > 0 ? ` · hooks ${culprit.changedHooks.slice(0, 3).map(hookLabel).join(", ")}` : "";
-  const forget = culprit.compiledWithForget ? " · React Compiler" : "";
-  if (culprit.cause === "unknown") return `render reason not recorded${forget}` ;
-  const cause = culprit.cause === "nothing-changed" ? "re-rendered with nothing changed"
-    : culprit.cause === "first-mount" ? "first mount"
-      : `${culprit.cause} changed`;
-  return `${cause}${changed}${forget}`;
 }
 
 function reactIssueRows(issue: ReactIssue): HotPathCard {
@@ -1673,6 +1690,7 @@ function InspectorApp() {
                 )}
               </div>
               <div className="result-actions">
+                {reactCards ? <ChartSwitch kind={chartKind} onChange={setChartKind} /> : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
@@ -1680,7 +1698,10 @@ function InspectorApp() {
 
             <div className="hotspot-list">
               {reactCards ? cardList.map((card, index) => {
-                const { rows, footnotes } = reactCardRows(card);
+                // No component cleared the floor, so there is nothing for the
+                // chart to divide the commit into; the rows still name one.
+                const drawable = reactCommitSlices(card).some((slice) => slice.kind === "component");
+                const { rows, footnotes } = drawable ? { rows: [], footnotes: [] } : reactCardRows(card);
                 return (
                   <AnalysisResultCard
                     key={card.id}
@@ -1688,6 +1709,15 @@ function InspectorApp() {
                     title={card.insight?.title ?? card.headline}
                     shape={card.shapeline}
                     timeLabel={formatMs(card.durationMs)}
+                    chart={drawable
+                      ? (
+                        <ReactContribution
+                          card={card}
+                          kind={chartKind}
+                          onExplore={analysisId && !isSample ? () => exploreReactCommit(card) : undefined}
+                        />
+                      )
+                      : undefined}
                     insight={card.insight?.findings}
                     onExplain={aiAssisted && modelStatus?.configured && analysisId && !isSample ? () => void explainReactCard(card) : undefined}
                     explaining={explainingId === card.id}
@@ -1752,21 +1782,7 @@ function InspectorApp() {
                 )}
               </div>
               <div className="result-actions">
-                {taskCards ? (
-                  <div className="chart-switch">
-                    <span className="chart-switch-label">contribution</span>
-                    {(["bar", "treemap"] as const).map((kind) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        className={chartKind === kind ? "timeline-zoom is-current" : "timeline-zoom"}
-                        onClick={() => setChartKind(kind)}
-                      >
-                        {kind}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                {taskCards ? <ChartSwitch kind={chartKind} onChange={setChartKind} /> : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>

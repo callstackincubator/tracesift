@@ -51,7 +51,7 @@ export const CHART_SLICES = 8;
  * reads as a seam between its neighbours rather than as a part. They fold into
  * the level's residual, which is where the reader's eye goes for "and the rest".
  */
-const MIN_SLICE_SHARE = 0.005;
+export const MIN_SLICE_SHARE = 0.005;
 
 /**
  * What a slice stands for. Only `boundary` and `culprit` are frames that ran;

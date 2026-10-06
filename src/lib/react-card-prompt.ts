@@ -15,16 +15,11 @@
  * recorded, and then get out of the way.
  */
 
-import type { ReactCard, ReactCardSet, ReactComponentAggregate } from "./react-cards.ts";
+import { isActionableCulprit, type ReactCard, type ReactCardSet } from "./react-cards.ts";
 import { hookLabel } from "./react-commit-tree.ts";
-
-const round1 = (value: number) => Math.round(value * 10) / 10;
 
 /** Culprits the hand-off names. The card shows the same list; past this it is a log. */
 const MAX_PROMPT_CULPRITS = 15;
-
-/** Aggregate rows quoted for the components this card named. */
-const MAX_PROMPT_AGGREGATES = 6;
 
 /** Wasted renders worth a bullet of their own, matching the card's own cut. */
 const WASTED_MIN_COUNT = 3;
@@ -58,17 +53,10 @@ function culpritLine(card: ReactCard, culprit: ReactCard["culprits"][number]): s
   return `- \`${culprit.component}\`${where} — ${culprit.selfMs} ms of its own render time, ${culprit.percentOfCommit}% of the commit${cause}.${changed}${path}${forget}`;
 }
 
-function aggregateLine(row: ReactComponentAggregate): string {
-  const wasted = row.wastedRenders > 0
-    ? `, ${row.wastedRenders} of them with nothing changed`
-    : "";
-  return `- \`${row.component}\` rendered ${row.renders} time${row.renders === 1 ? "" : "s"} in this recording for ${row.totalSelfMs} ms of its own time in total, worst single render ${row.maxSelfMs} ms${wasted}.`;
-}
-
 export function buildReactCardPrompt(card: ReactCard, set?: ReactCardSet): string {
   const sections: string[] = [];
 
-  sections.push(`Use the evidence below to investigate the root cause of this ${card.durationMs} ms React commit in the code it names. It was measured from a React DevTools profiling recording of a running build, so it reports which components burned the time and why React re-rendered them — not what inside those components is slow. A component's self time is one opaque figure covering its whole render body; read the source of the components it names to establish what that body does.`);
+  sections.push(`Use the evidence below to investigate the root cause of this ${card.durationMs} ms React commit in the code it names. It was measured from a React DevTools profiling recording of a running build, so it reports which components burned the time and why React re-rendered them — not what inside those components is slow.`);
 
   // The one inferred thing in an otherwise measured hand-off, fenced off as
   // one and placed above the evidence it was read from.
@@ -77,37 +65,14 @@ export function buildReactCardPrompt(card: ReactCard, set?: ReactCardSet): strin
     sections.push(`## What this looks like\n**${card.insight.title}**\n\n${bullets}\n\nThis section is a model's reading of the measurements below, not a measurement, and no source file was opened to write it. Treat it as a lead to verify against the evidence that follows.`);
   }
 
-  const commit: string[] = [
-    `- ${card.durationMs} ms of render work${card.percentOfRender >= 1 ? `, ${card.percentOfRender}% of all the render time in the recording` : ""}, at ${card.startMs} ms into the recording${card.priority ? ` at ${card.priority} priority` : ""}.`,
-    `- ${card.renderedCount} component${card.renderedCount === 1 ? "" : "s"} re-rendered in it. ${card.summedSelfMs} ms is attributed to components; the remaining ${card.unattributedMs} ms is React walking the tree and committing it, which no component change can remove.`,
-  ];
-  if (card.updaters.length > 0) {
-    commit.push(`- The update was scheduled by ${[...new Set(card.updaters)].map((name) => `\`${name}\``).join(", ")}. That is where the state change originated, which is not necessarily where the cost is.`);
-  }
-  if (card.effectDurationMs + card.passiveEffectDurationMs >= 1) {
-    commit.push(`- After the render, ${card.effectDurationMs} ms went to layout effects and ${card.passiveEffectDurationMs} ms to passive effects. Those are not part of the ${card.durationMs} ms above and are not attributed to any component.`);
-  }
-  if (card.shape === "cascade") {
-    commit.push(`- No single component holds much of this commit: the cost is ${card.renderedCount} components rendering, each cheaply. That shape is usually fixed at the boundary that re-rendered them — memoizing a subtree or narrowing what a provider publishes — rather than inside any one of them.`);
-  }
-  if (card.confidence === "low") {
-    commit.push(`- Treat this card as a lead rather than a measurement: ${set && !set.causesRecorded ? "the recording did not capture render reasons" : "some of the heaviest components could not be named"}.`);
-  }
-  sections.push(`## The commit\n${commit.join("\n")}`);
-
-  const listed = card.culprits.slice(0, MAX_PROMPT_CULPRITS);
+  const listed = card.culprits.filter(isActionableCulprit).slice(0, MAX_PROMPT_CULPRITS);
   if (listed.length > 0) {
-    const named = round1(listed.reduce((total, culprit) => total + culprit.selfMs, 0));
     const lines = listed.map((culprit) => culpritLine(card, culprit));
-    // Self time inside a commit is a partition, so this remainder is exact.
-    if (card.culpritTailCount > 0 && card.culpritTailMs >= 1) {
-      lines.push(`- ${card.culpritTailMs} ms is spread across ${card.culpritTailCount} further components, none of them large enough on its own to list.`);
-    }
-    sections.push(`## Which components burned it\nRanked by each component's own render time, which is a true partition of the ${card.summedSelfMs} ms attributed above — these figures do not overlap and are not inclusive of children. The ${listed.length} listed here account for ${named} ms.\n${lines.join("\n")}`);
+    sections.push(`## Which components burned it\n${lines.join("\n")}`);
   }
 
   if (set && !set.causesRecorded) {
-    sections.push(`## Why React rendered them\nNot recorded. This profile was captured without React DevTools' "Record why each component rendered" setting, so every render reason above is unavailable rather than absent. If the distinction matters — and for a re-render it usually decides the fix — re-record with that setting on.`);
+    sections.push(`## Why React rendered them\nNot available. The profile was recorded without React DevTools' "Record why each component rendered" option.`);
   } else {
     const why: string[] = [];
     const phrase = causePhrase(card);
@@ -124,28 +89,13 @@ export function buildReactCardPrompt(card: ReactCard, set?: ReactCardSet): strin
     if (why.length > 0) sections.push(`## Why React rendered them\nAs recorded by React, not inferred.\n${why.join("\n")}`);
   }
 
-  if (set) {
-    const named = new Set(card.culprits.map((culprit) => culprit.componentId));
-    const rows = set.components.filter((row) => named.has(row.componentId)).slice(0, MAX_PROMPT_AGGREGATES);
-    const repeats = set.repeats.slice(0, 2);
-    const lines = [...rows.map(aggregateLine)];
-    for (const repeat of repeats) {
-      lines.push(`- ${repeat.commitIndexes.length} commits in this recording re-rendered the same ${repeat.renderedCount} components${repeat.updaters.length > 0 ? ` behind ${repeat.updaters.map((name) => `\`${name}\``).join(", ")}` : ""}, ${repeat.totalMs} ms in total. Each one fits a frame on its own; together they may not.`);
-    }
-    if (lines.length > 0) {
-      sections.push(`## Across the whole recording\nThe same components, outside this one commit. ${set.commitsOverBudget} of ${set.commitCount} commits ran longer than the ${set.budgetMs} ms budget.\n${lines.join("\n")}`);
-    }
-  }
-
   const caveats = [
     "- This report has component display names, render timings and recorded render reasons. It has not read any source file, and a React profile contains no call stack below a component, so what makes a component's own render body expensive is not in here. Read the source before changing it.",
-    "- A component's self time is its own render body only. Inclusive time is not reported here on purpose: it overlaps every ancestor, so it cannot be added up or compared between components.",
-    "- Render time is not paint time. A long commit does not by itself establish a delayed first paint, a dropped frame, or an unresponsive screen; it establishes that React spent that long rendering.",
   ];
-  if (card.culprits.some((culprit) => !culprit.sourceHint)) {
+  if (listed.some((culprit) => !culprit.sourceHint)) {
     caveats.push("- A display name is not a file. Where a module path appears in parentheses it was recorded by the build; where none appears, locate the component by name.");
   }
-  if (card.culprits.some((culprit) => culprit.changedProps.length > 0 || culprit.changedHooks.length > 0)) {
+  if (listed.some((culprit) => culprit.changedProps.length > 0 || culprit.changedHooks.length > 0)) {
     caveats.push("- Changed props and hooks are recorded as names and indices, never values. They say which prop changed between renders, not what it changed from or to, and a name appearing here is not proof of an unstable reference.");
   }
   sections.push(`## How to read these numbers\n${caveats.join("\n")}`);

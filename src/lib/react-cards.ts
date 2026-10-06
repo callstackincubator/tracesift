@@ -29,7 +29,7 @@
  * tasks have, labelled as an inference, below the measurements it reads.
  */
 
-import { formatMs } from "./format.ts";
+import { formatReactMs as ms } from "./format.ts";
 import { splitSourceHint, unwrapWrappers } from "./react-commit-tree.ts";
 import type { TaskInsight } from "./task-insight.ts";
 import type {
@@ -124,22 +124,6 @@ const MIN_REPEAT_COMMITS = 3;
  */
 const EFFECT_MIN_SHARE = 0.1;
 
-/**
- * Durations as React records them.
- *
- * `formatMs` rounds to whole milliseconds, which is the right width for a CPU
- * task measured in seconds and the wrong one here: a frame is 16 ms, the
- * evidence strings the current analyzer writes carry tenths, and the median self
- * time in a cascade is 0.03 ms — which `formatMs` prints as `0 ms`, turning the
- * most load-bearing figure on the card into a zero.
- */
-function ms(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0 ms";
-  if (value < 1) return `${Number(value.toFixed(2))} ms`;
-  if (value < 1000) return `${Number(value.toFixed(1))} ms`;
-  return formatMs(value);
-}
-
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
 /**
@@ -207,6 +191,39 @@ export interface ReactCardCulprit {
   path: string[];
   /** `HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.` */
   evidence: string;
+}
+
+/**
+ * Whether a culprit row is worth a line in a prompt.
+ *
+ * A row for something that is not the app's own code and carries no recorded
+ * module path — `Route(explore-details)`, a provider, a host view — is a name
+ * and two numbers with nowhere to go: neither a reader nor an agent can open
+ * it, and no render reason is usually recorded against it either. The app's own
+ * components always stay, as does anything the build recorded a file for.
+ */
+export function isActionableCulprit(culprit: ReactCardCulprit): boolean {
+  return isOwnComponent(culprit);
+}
+
+/**
+ * Whether a component is one the reader can go and open.
+ *
+ * The app's own components always are. So is anything the build recorded a
+ * module for, whatever its class: a `library` row with a file behind it is a
+ * component in the reader's own `node_modules`, and the file is where a fix
+ * for it starts. What this leaves out is React's own wrappers and the
+ * platform's own views with no recorded source — a name and two numbers with
+ * nowhere to go.
+ *
+ * The same cut the culprit rows are filtered by and the Components table's
+ * `Your code only` toggle draws by, so a component missing from one is missing
+ * from the other for the same reason.
+ */
+export function isOwnComponent(
+  component: { componentClass: ReactComponentClass; sourceHint: string | null },
+): boolean {
+  return component.componentClass === "app" || component.sourceHint !== null;
 }
 
 export interface ReactCauseBreakdown {

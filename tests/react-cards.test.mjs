@@ -241,12 +241,11 @@ test('the hand-off names the components, the trigger and what it cannot know', (
   const prompt = buildReactCardPrompt(sampleSet.cards[0], sampleSet);
   assert.match(prompt, /investigate the root cause of this 275\.7 ms React commit/);
   assert.match(prompt, /`MerchantLeaderboard`.+142 ms of its own render time, 51\.5% of the commit/);
-  assert.match(prompt, /scheduled by `BaseNavigationContainer`/);
   assert.match(prompt, /153 mounted for the first time/);
   // The limits that decide what the receiving agent does next.
   assert.match(prompt, /no call stack below a component/);
-  assert.match(prompt, /Render time is not paint time/);
-  assert.match(prompt, /Inclusive time is not reported here on purpose/);
+  // A row the receiving agent cannot open is left out rather than listed.
+  assert.doesNotMatch(prompt, /^- `Route\(/m);
   assert.doesNotMatch(prompt, /\bconsider\b/i, 'the hand-off states evidence, it does not advise');
 });
 
@@ -254,7 +253,7 @@ test('a hand-off for a profile with no render reasons says so instead of guessin
   const set = buildReactCards(parseReactExport(JSON.parse(
     await readFile(path.resolve('sample-profiles/react/react-profile-2.json'), 'utf8'))), 16);
   const prompt = buildReactCardPrompt(set.cards[0], set);
-  assert.match(prompt, /## Why React rendered them\nNot recorded\./);
+  assert.match(prompt, /## Why React rendered them\nNot available\./);
   assert.match(prompt, /Record why each component rendered/);
   assert.doesNotMatch(prompt, /with nothing changed/);
 });
@@ -262,15 +261,20 @@ test('a hand-off for a profile with no render reasons says so instead of guessin
 test('an AI reading is labelled as one in the hand-off, above the evidence', () => {
   const card = { ...sampleSet.cards[0], insight: { title: 'Two cards rebuilt on mount', findings: ['A finding.'] } };
   const prompt = buildReactCardPrompt(card, sampleSet);
-  assert.ok(prompt.indexOf('## What this looks like') < prompt.indexOf('## The commit'));
+  assert.ok(prompt.indexOf('## What this looks like') < prompt.indexOf('## Which components burned it'));
   assert.match(prompt, /not a measurement, and no source file was opened/);
 });
 
 test('the inference prompt carries measurements and refuses to carry a call stack', () => {
   const prompt = reactInsightPrompt(sampleSet.cards[0], sampleSet);
-  assert.match(prompt, /React spent 275\.7 ms rendering/);
   assert.match(prompt, /`MerchantLeaderboard` \(\.\/.+\)|`MerchantLeaderboard` \[app\]/);
-  assert.match(prompt, /true partition/);
+  assert.match(prompt, /51\.5% of the commit; first mount/);
+  assert.doesNotMatch(prompt, /^- `Route\(/m);
+  // Where no render reason was recorded, the render count is what separates one
+  // expensive render from a re-render problem. The hand-off does not carry it.
+  assert.match(prompt, /`MerchantLeaderboard` rendered 1 time across the recording/);
+  assert.doesNotMatch(buildReactCardPrompt(sampleSet.cards[0], sampleSet), /across the recording/);
+  assert.match(REACT_INSIGHT_SYSTEM_PROMPT, /not given it\b/);
   assert.match(REACT_INSIGHT_SYSTEM_PROMPT, /must not pretend to have/);
   assert.match(REACT_INSIGHT_SYSTEM_PROMPT, /A first mount is not a wasted render/);
 });
