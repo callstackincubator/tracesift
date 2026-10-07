@@ -189,10 +189,8 @@ button, input { font: inherit; }
   font-weight: 650;
 }
 
-.action-row { justify-content: space-between; gap: 24px; margin-top: 22px; }
-.action-row p { margin: 0; color: var(--muted-foreground); font-size: 13px; }
+.action-row { justify-content: flex-end; gap: 24px; margin-top: 22px; }
 
-.key-field { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
 
 .error-detail-wrap { margin-top: 10px; }
 .error-detail-wrap summary { cursor: pointer; font-size: 12.5px; font-weight: 650; user-select: none; }
@@ -537,6 +535,10 @@ button, input { font: inherit; }
   background: color-mix(in srgb, var(--primary) 8%, transparent);
   border-color: color-mix(in srgb, var(--primary) 32%, transparent);
 }
+/* Carries the tooltip for the disabled button, which takes no pointer events
+   of its own, so it must not swallow the cursor itself. */
+.explain-action-wrap { display: inline-flex; }
+.explain-action-button:disabled { opacity: 0.55; }
 .explain-action-button:hover:not(:disabled) {
   color: var(--primary);
   background: color-mix(in srgb, var(--primary) 14%, transparent);
@@ -576,7 +578,6 @@ button, input { font: inherit; }
   .section-heading p { margin-top: 6px; text-align: right; }
   .upload-pane { min-height: 190px; }
   .action-row { align-items: stretch; flex-direction: column; }
-  .action-row p { text-align: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -986,77 +987,36 @@ body { background: var(--background, #151419); }
 .settings-privacy { margin: 11px 2px 0; color: var(--muted-foreground); font-size: 11px; }
 
 .workspace { width: min(1220px, calc(100% - 40px)); padding: 42px 0 70px; }
-.hero-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(320px, .9fr) minmax(560px, 1.1fr);
-  align-items: center;
-  gap: clamp(32px, 4vw, 70px);
-  min-height: 510px;
-  padding: clamp(30px, 3.5vw, 52px);
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 12% -10%, color-mix(in srgb, var(--primary) 19%, transparent), transparent 42%),
-    linear-gradient(135deg, color-mix(in srgb, var(--card) 96%, var(--primary)) 0%, var(--card) 60%, color-mix(in srgb, var(--card) 91%, #071635) 100%);
-  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
-  border-radius: 14px;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, .2), 0 1px 0 rgba(255,255,255,.04) inset;
-  isolation: isolate;
+/*
+ * The landing page: what the two profiles are, what each one's analysis says,
+ * and a way into either. One slide per profile rather than a pair swapping
+ * under a headline — the choice is the page's actual question, so it is put to
+ * the reader directly instead of animated past them.
+ */
+.landing { padding: 0 0 8px; }
+.landing-head {
+  max-width: 760px;
+  margin-inline: auto;
+  text-align: center;
+  animation: landing-head-enter 620ms cubic-bezier(.16, 1, .3, 1) both;
 }
-.hero-stage::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  opacity: .16;
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(90deg, transparent 12%, black 72%, transparent);
-}
-.hero-stage::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  right: -150px;
-  bottom: -210px;
-  width: 460px;
-  height: 460px;
-  background: color-mix(in srgb, var(--primary) 20%, transparent);
-  border-radius: 50%;
-  filter: blur(90px);
-}
-.intro-copy {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-}
-.intro .eyebrow {
-  padding: 6px 10px;
-  color: color-mix(in srgb, var(--primary) 86%, white);
-  background: color-mix(in srgb, var(--primary) 11%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
-  border-radius: 999px;
-  font-size: 11px;
-  letter-spacing: .14em;
-}
-.intro h1 {
-  max-width: 650px;
-  margin: 14px 0 10px;
-  font-size: clamp(40px, 4.75vw, 62px);
-  line-height: .94;
-  letter-spacing: -.065em;
+.landing-head h1 {
+  margin: 0;
+  font-size: clamp(30px, 3.6vw, 44px);
+  font-weight: 470;
+  line-height: 1.02;
+  letter-spacing: -.055em;
   text-wrap: balance;
 }
-.intro p { max-width: 480px; font-size: 16px; line-height: 1.6; }
-.intro-actions {
-  width: fit-content;
-  max-width: 100%;
-  margin-top: auto;
+.landing-head p {
+  margin: 12px auto 0;
+  max-width: 520px;
+  color: var(--muted-foreground);
+  font-size: 16px;
+  line-height: 1.55;
 }
-.platform-list { display: flex; flex-wrap: wrap; gap: 0; margin-top: 22px; }
+.platform-list { display: flex; flex-wrap: wrap; gap: 0; margin-top: 16px; }
+.landing-head .platform-list { justify-content: center; }
 .platform-list span {
   display: inline-flex;
   align-items: center;
@@ -1072,77 +1032,192 @@ body { background: var(--background, #151419); }
 }
 .platform-list span:first-child { padding-left: 0; border-left: 0; }
 .platform-list svg { width: 14px; height: 14px; fill: none; stroke: var(--primary); stroke-width: 1.65; }
-.intro-copy .get-started-button {
-  width: 100%;
+
+/*
+ * One slide centred in the strip with a shoulder of the slides either side of
+ * it, which run off the edges. Every slide stays in the track, so its height
+ * is the tallest of them and the swap cannot resize the page. The strip is
+ * wider than the column it sits in, pulled out by equal negative margins, and
+ * the vertical padding leaves the shrunk slides' shadows room.
+ */
+.landing-carousel {
+  --carousel-width: min(1440px, calc(100vw - 40px));
+  --carousel-gap: 24px;
+  /* The scale the slides either side are shrunk to; the one on show is the
+     full width of a cell, so it reads as the larger card of the three. */
+  --carousel-aside-scale: .86;
+  width: var(--carousel-width);
+  margin-block: 24px 0;
+  margin-inline: calc((100% - var(--carousel-width)) / 2);
+  padding: 6px 0 12px;
+  overflow: hidden;
 }
-.signal-snapshot-gallery { position: relative; min-width: 0; min-height: 460px; }
-.signal-snapshot {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 1;
+.carousel-track {
+  display: flex;
+  align-items: stretch;
+  gap: var(--carousel-gap);
+  transition: transform 620ms cubic-bezier(.22, 1, .36, 1);
+}
+.carousel-cell {
+  flex: 0 0 74%;
   min-width: 0;
-  padding: clamp(18px, 2vw, 28px);
-  color: #f7f6fb;
-  background: #1d1c22;
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 14px;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, .2), 0 1px 0 rgba(255,255,255,.03) inset;
-  transform: translateY(18px) scale(.955);
-  transform-origin: center bottom;
-  transition: transform 560ms cubic-bezier(.22, 1, .36, 1), box-shadow 560ms cubic-bezier(.22, 1, .36, 1);
-  will-change: transform;
+  display: grid;
+  /* The slides either side are shrunk and held well back, so the row reads as
+     one card in front and the rest behind it rather than slides of equal
+     standing. The cell keeps its laid-out width whatever the scale, so the
+     step from one slide to the next stays the same. */
+  opacity: .22;
+  transform: scale(var(--carousel-aside-scale));
+  cursor: pointer;
+  transition: opacity 420ms ease, transform 620ms cubic-bezier(.22, 1, .36, 1);
 }
-.signal-snapshot.is-active { z-index: 2; transform: translateY(0) scale(1); box-shadow: 0 24px 54px rgba(0, 0, 0, .3), 0 1px 0 rgba(255,255,255,.04) inset; }
-.signal-snapshot h2 { margin: 0; font-size: clamp(26px, 3vw, 40px); font-weight: 470; letter-spacing: -.055em; line-height: 1.02; }
-.snapshot-kicker { display: inline-flex; margin-bottom: 10px; padding: 5px 9px; color: #9b62ff; background: rgba(120, 62, 230, .14); border: 1px solid rgba(137, 75, 255, .28); border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.snapshot-summary { margin: 10px 0 0; color: rgba(241, 239, 248, .68); font-size: 12px; line-height: 1.45; }
-.snapshot-usage { margin: 4px 0 0; color: rgba(241, 239, 248, .66); font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; }
-.snapshot-divider { height: 1px; margin: 22px 0; background: rgba(255, 255, 255, .12); }
-.snapshot-issue { overflow: hidden; border: 1px solid rgba(130, 67, 242, .48); border-radius: 12px; }
-.snapshot-issue-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 15px 17px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
-.snapshot-rank { display: grid; width: 31px; height: 31px; place-items: center; color: #ded4ff; border: 1px solid rgba(132, 75, 239, .44); border-radius: 9px; font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 800; }
-.snapshot-issue-head strong { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 650; letter-spacing: -.02em; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.snapshot-budget { padding: 6px 8px; color: rgba(246,245,250,.78); border: 1px solid rgba(255,255,255,.13); border-radius: 7px; font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 700; white-space: nowrap; }
-.snapshot-issue-body { padding: 17px; }
-.snapshot-time-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #8f4dff; font-family: var(--font-mono, monospace); font-size: 14px; font-weight: 800; }
-.snapshot-time-line small { padding: 4px 7px; color: rgba(240,238,246,.62); background: rgba(255,255,255,.045); border-radius: 999px; font-size: 10px; font-weight: 650; }
-.snapshot-meter { height: 7px; margin-top: 9px; overflow: hidden; background: rgba(255,255,255,.055); border-radius: 999px; }
-.snapshot-meter span { display: block; width: 97%; height: 100%; background: rgba(239,238,243,.62); border-radius: inherit; }
-.signal-snapshot-react .snapshot-meter span { width: 74%; }
-.snapshot-issue-body p { margin: 14px 0 0; padding: 12px; color: rgba(244,242,248,.75); background: rgba(255,255,255,.045); border-radius: 8px; font-size: 11px; line-height: 1.45; }
-.get-started-button {
+.carousel-cell.is-current { opacity: 1; transform: scale(1); cursor: default; }
+/* The frame the loop snaps home on: the move, the fade and the shrink all
+   arrive at once and uncushioned, so the strip is left looking exactly as it
+   did a frame earlier — the slide it snaps to is the same card in the same
+   place as the clone it snaps off. */
+.carousel-track.is-snapping,
+.carousel-track.is-snapping .carousel-cell { transition: none; }
+/* Below this, a slide that leaves room for its neighbours is too narrow to
+   read, so it takes the whole strip and they wait off the edges. */
+@media (max-width: 1080px) {
+  .carousel-cell { flex-basis: 100%; }
+}
+.landing-dots { display: flex; justify-content: center; gap: 9px; margin-top: 2px; }
+.landing-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  background: color-mix(in srgb, var(--foreground) 24%, transparent);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: width 260ms ease, background 200ms ease;
+}
+.landing-dot:hover { background: color-mix(in srgb, var(--foreground) 42%, transparent); }
+.landing-dot.is-current { width: 28px; background: var(--primary); }
+.landing-dot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.profile-slide {
   position: relative;
-  min-width: 188px;
-  height: 52px;
+  display: grid;
+  /* The previews are not the same height — one headline wraps, the other does
+     not — so the row stretches them and the button stays on the baseline. */
+  grid-template-rows: auto auto 1fr auto;
+  gap: 14px;
+  padding: 20px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 10% -12%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 46%),
+    color-mix(in srgb, var(--card) 94%, var(--background));
+  border: 1px solid color-mix(in srgb, var(--primary) 16%, var(--border));
+  border-radius: 16px;
+  /* The slide is the button's hit area, so it carries the cursor too. */
+  cursor: pointer;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .14);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.profile-slide:hover {
+  border-color: color-mix(in srgb, var(--primary) 38%, var(--border));
+  box-shadow: 0 24px 56px rgba(0, 0, 0, .2);
+}
+/* The slide's own grid lines, behind everything, same device as the old hero. */
+.profile-slide::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  opacity: .13;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: linear-gradient(170deg, black, transparent 58%);
+  pointer-events: none;
+}
+.profile-slide > * { position: relative; z-index: 1; }
+.slide-head { display: flex; align-items: center; gap: 12px; pointer-events: none; }
+.slide-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
+  border-radius: 10px;
+}
+.slide-icon svg { width: 20px; height: 20px; fill: none; stroke: var(--primary); stroke-width: 1.65; }
+.slide-head > div { display: grid; gap: 2px; min-width: 0; }
+.slide-head strong { font-size: 17px; letter-spacing: -.015em; }
+.slide-head small {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+/* The preview is a drawing of the results screen, so nothing in it takes a
+   cursor: the slide is the control, and the pseudo-element on its button
+   covers the lot. */
+.slide-preview {
+  align-self: start;
+  padding: 12px;
+  background: color-mix(in srgb, var(--background) 55%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 12px;
+  pointer-events: none;
+}
+.slide-preview-head { display: grid; gap: 4px; padding: 0 2px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.slide-preview-head .eyebrow { font-size: 9px; letter-spacing: .14em; }
+.slide-preview-head strong { font-size: 17px; font-weight: 500; letter-spacing: -.03em; }
+.slide-preview-head small { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
+/* The real card, at the spacing a column this narrow can afford. */
+.slide-preview .hotspot-card {
+  margin-top: 10px;
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+  box-shadow: none;
+}
+.slide-preview .hotspot-head { padding: 12px 13px; gap: 10px; }
+.slide-preview .hotspot-head .hotspot-heading-copy strong { font-size: 13.5px; }
+.slide-preview .hotspot-rank { width: 28px; height: 28px; }
+.slide-preview .hotspot-shape { font-size: 11px; }
+.slide-preview .hotspot-time { font-size: 12px; }
+.slide-preview .contribution { gap: 10px; padding: 12px 13px; }
+.slide-preview .contribution-bar { height: 24px; }
+.slide-preview .contribution-detail { gap: 5px; min-height: 0; padding: 10px 12px; }
+.slide-preview .contribution-detail-name { font-size: 13px; }
+.slide-preview .contribution-detail-ms { font-size: 16px; }
+
+.slide-cta {
+  position: relative;
+  justify-self: center;
   justify-content: center;
   gap: 10px;
+  width: fit-content;
+  min-width: 196px;
+  height: 44px;
+  padding-inline: 26px;
   margin: 0;
-  overflow: hidden;
   color: #fff;
   background: var(--primary);
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  box-shadow: 0 10px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .18);
   font-family: var(--font-mono, monospace);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
-  transition: transform 170ms ease, box-shadow 170ms ease, filter 170ms ease;
+  transition: filter 170ms ease;
 }
-.get-started-button:hover {
-  transform: translateY(-2px) scale(1.01);
-  filter: saturate(1.08) brightness(1.04);
-}
+.profile-slide:hover .slide-cta { filter: saturate(1.08) brightness(1.06); }
+.slide-cta:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, white); outline-offset: 3px; }
+.slide-cta .ui-icon { width: 17px; height: 17px; transition: transform 170ms ease; }
+.profile-slide:hover .slide-cta .ui-icon { transform: translateX(3px); }
 
-.intro-copy { animation: hero-copy-enter 620ms cubic-bezier(.16, 1, .3, 1) both; }
-.signal-snapshot-gallery { animation: hero-preview-enter 760ms 100ms cubic-bezier(.16, 1, .3, 1) both; }
-@keyframes hero-copy-enter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes hero-preview-enter { from { opacity: 0; transform: translateY(22px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-.get-started-button:active { transform: translateY(0); }
-.get-started-button:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 40%, white); outline-offset: 4px; }
-.get-started-button .ui-icon { position: relative; width: 17px; height: 17px; transition: transform 170ms ease; }
-.get-started-button:hover .ui-icon { transform: translateX(3px); }
+@keyframes landing-head-enter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.landing-carousel { animation: landing-carousel-enter 700ms 110ms cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes landing-carousel-enter { from { opacity: 0; transform: translateY(24px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .workflow-label {
   display: flex;
   align-items: center;
@@ -1232,7 +1307,6 @@ body { background: var(--background, #151419); }
 .upload-pane { min-height: 200px; border-radius: 12px; }
 .upload-pane:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent); }
 .browse-button { border-radius: 7px; }
-.key-field { color: var(--muted-foreground); font-size: 12px; }
 
 .drawer-overlay { position: fixed; z-index: 90; inset: 0; }
 .drawer-backdrop {
@@ -1302,14 +1376,7 @@ body { background: var(--background, #151419); }
 @keyframes drawer-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popover-enter { from { opacity: 0; transform: translateY(-5px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-@media (max-width: 980px) {
-  .hero-stage { grid-template-columns: 1fr; min-height: 0; }
-  .intro-copy { text-align: center; }
-  .intro p { margin-inline: auto; }
-  .intro-actions { margin-inline: auto; }
-  .platform-list { justify-content: center; }
-  .signal-snapshot-gallery { width: min(100%, 720px); min-height: 500px; margin-inline: auto; }
-}
+
 
 @media (max-width: 760px) {
   [data-slot="plugin-header"] { padding-inline: 14px; }
@@ -1320,36 +1387,41 @@ body { background: var(--background, #151419); }
   .settings-popover { right: -44px; }
   .popover-arrow { right: 57px; }
   .workspace { width: min(100% - 24px, 560px); padding-top: 20px; }
-  .hero-stage { grid-template-columns: 1fr; gap: 28px; min-height: 0; padding: 30px 24px; border-radius: 20px; }
-  .hero-stage::before { background-size: 34px 34px; }
-  .intro-copy { align-items: center; text-align: center; }
-  .intro h1 { margin-top: 18px; font-size: clamp(36px, 11vw, 50px); }
-  .intro p { margin-inline: auto; }
-  .platform-list { justify-content: center; }
-  .signal-snapshot-gallery { width: min(100%, 560px); min-height: 500px; margin-inline: auto; }
+  .landing-head h1 { font-size: clamp(30px, 9vw, 42px); }
+  .landing-head p { font-size: 15px; }
+  .landing-carousel { margin-block-start: 22px; --carousel-gap: 14px; }
+  .profile-slide { padding: 18px; border-radius: 14px; }
+  .profile-slide::before { background-size: 32px 32px; }
+  /* A phone reads the two slides as a column twice as long, so each preview
+     keeps the card and the bar and drops the slice it had opened. */
+  .slide-preview .contribution-detail { display: none; }
   .profile-options { grid-template-columns: 1fr; }
   .profile-option { min-height: 106px; }
   .sample-callout { flex-wrap: wrap; }
 }
 
 @media (max-width: 420px) {
-  .hero-stage { padding-inline: 20px; }
   .platform-list { display: grid; grid-template-columns: 1fr 1fr; }
   .platform-list span { justify-content: center; padding-inline: 8px; font-size: 12px; }
+  /* Two to a row, so the divider belongs to the second of each pair only. */
+  .platform-list span:nth-child(odd) { border-left: 0; }
   .platform-list span:last-child { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .intro-copy,
-  .signal-snapshot-gallery,
+  .landing-head,
+  .landing-carousel,
   .analysis-drawer,
   .drawer-backdrop,
   .settings-popover { animation: none; }
-  .get-started-button,
-  .get-started-button .ui-icon,
-  .signal-snapshot { transition: none; }
-  .get-started-button:hover,
-  .get-started-button:hover .ui-icon { transform: none; }
+  .carousel-track,
+  /* The shrink stays — it is what tells the slides apart — but it arrives
+     without a transition, like the move itself. */
+  .carousel-cell,
+  .landing-dot,
+  .slide-cta,
+  .slide-cta .ui-icon { transition: none; }
+  .profile-slide:hover .slide-cta .ui-icon { transform: none; }
 }
 
 /* Results: stronger hierarchy, denser evidence, clearer navigation */
@@ -1420,7 +1492,9 @@ body { background: var(--background, #151419); }
 .hotspot-rank {
   width: 34px;
   height: 34px;
-  color: var(--primary-foreground);
+  /* Not `--primary-foreground`: the chip's fill is `--muted`, which in the
+     light theme is all but white, and white on white is no rank at all. */
+  color: var(--foreground);
   border-color: color-mix(in srgb, var(--primary) 30%, transparent);
   border-radius: 10px;
   font-family: var(--font-mono, monospace);
@@ -1611,7 +1685,6 @@ body {
 .option-copy small,
 .section-heading small,
 .upload-detail,
-.action-row p,
 .react-budget-field p {
   font-size: 14px;
   line-height: 1.5;
@@ -1619,7 +1692,6 @@ body {
 .option-copy em { font-size: 12px; line-height: 1.45; }
 .sample-callout { font-size: 14px; }
 .section-heading h2 { font-size: 18px; }
-.key-field { font-size: 14px; line-height: 1.5; }
 
 .settings-popover-head small,
 .toggle-copy small,

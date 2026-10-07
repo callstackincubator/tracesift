@@ -11,7 +11,6 @@ import {
   PluginHeader,
   PluginShell,
   RozeniteLoader,
-  Text,
 } from "@rozenite/ui";
 
 import { HowToUseGuide } from "@/app/how-to-use";
@@ -149,65 +148,352 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
   return <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]}</svg>;
 }
 
-function ProfileSnapshot({ type, active }: { type: "cpu" | "react"; active: boolean }) {
-  const isCpu = type === "cpu";
-  const title = isCpu ? "Bottlenecks, slowest first" : "React issues";
-  const summary = isCpu
-    ? "2 bottlenecks · 8.13 s total"
-    : "1 issue · 16 ms budget · 4 commits · 169.74 ms peak · 1 over budget";
-  const usage = isCpu
-    ? "analyzer · 2.3k tokens · 1.3k in · 975 out"
-    : "analyzer · 2.6k tokens · 1.9k in · 752 out";
-  const issueTitle = isCpu
-    ? "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus"
-    : "Expensive render work in HeavyActivityHeatmap";
-  const time = isCpu ? "2.05 s" : "125 ms";
-  const share = isCpu ? "97% of group" : "74% of commit";
-  const detail = isCpu
-    ? "Native datePrototypeToLocaleStringHelper costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch."
-    : "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.";
+/**
+ * The landing page's two slides: one per profile a recording can be, each
+ * showing what the analysis of that kind actually looks like and starting the
+ * run for it. The previews borrow the app's own classes — `hotspot-card`, the
+ * contribution chart — so a change to the card is a change to the landing page,
+ * and the page cannot go on advertising a card the app no longer draws.
+ */
+type SlideBand = {
+  name: string;
+  ms: string;
+  share: string;
+  percent: number;
+  color: string;
+  outside?: boolean;
+};
 
+type SlideSpec = {
+  /** What this profile is called where the user captured it. */
+  label: string;
+  source: string;
+  resultsTitle: string;
+  summary: string;
+  headline: string;
+  shape: string;
+  timeLabel: string;
+  bands: SlideBand[];
+  detail: {
+    share: string;
+    ms: string;
+    secondary?: string;
+    lineLabel: string;
+    line: string;
+    lineIsCode?: boolean;
+    shape: string;
+  };
+};
+
+const SLIDES: Record<ProfileType, SlideSpec> = {
+  javascript: {
+    label: "JavaScript CPU",
+    source: "Chrome Performance · Hermes",
+    resultsTitle: "Tasks, longest first",
+    summary: "2 long tasks of 2 · 8.13 s total",
+    headline: "_onFocus › getUserByUserName › _compareUsers",
+    shape: "74% in datePrototypeToLocaleStringHelper · 8 calls",
+    timeLabel: "2.11 s",
+    bands: [
+      { name: "_compareUsers", ms: "1.56 s", share: "74%", percent: 73.9, color: "var(--series-1)" },
+      { name: "getUserByUserName", ms: "295 ms", share: "14%", percent: 13.9, color: "var(--series-2)" },
+      { name: "12 smaller frames", ms: "258 ms", share: "12%", percent: 12.2, color: "var(--series-tail)" },
+    ],
+    detail: {
+      share: "74% of task",
+      ms: "1.56 s",
+      secondary: "none of it in its own body",
+      lineLabel: "file",
+      line: "app/screens/UserList.js:142:1",
+      lineIsCode: true,
+      shape: "ran 8 times in this task · longest 196 ms",
+    },
+  },
+  react: {
+    label: "React components",
+    source: "React DevTools profiling",
+    resultsTitle: "Commits, longest first",
+    summary: "1 commit over the 16 ms budget, of 4 · 173 ms rendering",
+    headline: "HeavyActivityHeatmap spent 124.8 ms rendering in a 169.7 ms commit",
+    shape: "74% of the commit in one component · 329 rendered",
+    timeLabel: "170 ms",
+    bands: [
+      { name: "HeavyActivityHeatmap", ms: "124.8 ms", share: "74%", percent: 73.5, color: "var(--series-1)" },
+      { name: "Route(explore-details)", ms: "2.2 ms", share: "1%", percent: 1.3, color: "var(--series-2)" },
+      { name: "327 smaller components", ms: "19.9 ms", share: "12%", percent: 11.7, color: "var(--series-tail)" },
+      { name: "React itself, no component", ms: "22.8 ms", share: "13%", percent: 13.4, color: "var(--series-outside)", outside: true },
+    ],
+    detail: {
+      share: "74% of commit",
+      ms: "124.8 ms",
+      lineLabel: "via",
+      line: "DetailsScreen › … › View › ScrollView",
+      shape: "render reason not recorded · React Compiler",
+    },
+  },
+};
+
+/**
+ * A slide's preview: the results screen at one card, trimmed to the bar and
+ * the slice it opens on. The lede and the legend are the two blocks that only
+ * repeat what the drawing already says, so a column this narrow drops them.
+ */
+function SlidePreview({ spec }: { spec: SlideSpec }) {
+  const [lead] = spec.bands;
+
+  /* Spans and divs rather than the card's own buttons: the whole slide is one
+     control, and nothing inside the drawing is separately clickable. */
   return (
-    <article className={`signal-snapshot signal-snapshot-${type}${active ? " is-active" : ""}`} aria-label={`${title} example`}>
-      {isCpu ? null : <span className="snapshot-kicker">Analysis results</span>}
-      <h2>{title}</h2>
-      <p className="snapshot-summary">{summary}</p>
-      <p className="snapshot-usage">{usage}</p>
-      <div className="snapshot-divider" />
-      <section className="snapshot-issue">
-        <div className="snapshot-issue-head">
-          <span className="snapshot-rank">#1</span>
-          <strong>{issueTitle}</strong>
-          <span className="snapshot-budget">{isCpu ? "2.11 s" : "high · commit 170 ms"}</span>
-        </div>
-        <div className="snapshot-issue-body">
-          <div className="snapshot-time-line">
-            <span>{time}</span>
-            <small>{share}</small>
+    <div className="slide-preview" aria-hidden="true">
+      <div className="slide-preview-head">
+        <span className="eyebrow">Analysis results</span>
+        <strong>{spec.resultsTitle}</strong>
+        <small>{spec.summary}</small>
+      </div>
+      <div className="hotspot-card">
+        <div className="hotspot-head">
+          <span className="hotspot-rank">#1</span>
+          <div className="hotspot-heading-copy">
+            <strong>{spec.headline}</strong>
+            <span className="hotspot-shape">{spec.shape}</span>
           </div>
-          <div className="snapshot-meter" aria-hidden="true"><span /></div>
-          <p>{detail}</p>
+          <span className="hotspot-time">{spec.timeLabel}</span>
         </div>
-      </section>
+        <div className="contribution" data-kind="bar">
+          <div className="contribution-bar">
+            {spec.bands.map((band) => (
+              <span
+                key={band.name}
+                className={`contribution-band${band.outside ? " is-outside" : ""}${band === lead ? " is-active" : ""}`}
+                style={{ width: `${band.percent}%`, background: band.color }}
+              />
+            ))}
+          </div>
+          <div className="contribution-detail">
+            <div className="contribution-detail-head">
+              <span className="contribution-swatch" style={{ background: lead.color }} />
+              <span className="contribution-detail-name">{lead.name}</span>
+              <span className="contribution-detail-share">{spec.detail.share}</span>
+            </div>
+            <div className="contribution-detail-figures">
+              <span className="contribution-detail-ms">{spec.detail.ms}</span>
+              {spec.detail.secondary ? <span className="contribution-detail-secondary">{spec.detail.secondary}</span> : null}
+            </div>
+            <p className="contribution-detail-line">
+              <span className="contribution-detail-label">{spec.detail.lineLabel}</span>
+              {spec.detail.lineIsCode ? <code>{spec.detail.line}</code> : spec.detail.line}
+            </p>
+            <p className="contribution-detail-shape">{spec.detail.shape}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileSlide({
+  type,
+  active,
+  onStart,
+}: {
+  type: ProfileType;
+  active: boolean;
+  onStart: (type: ProfileType) => void;
+}) {
+  const spec = SLIDES[type];
+
+  /*
+   * The click lands on the slide, with the button inside it for the keyboard
+   * and for anything reading the page out: the whole card is the target, and
+   * a stretched overlay on the button cannot be trusted to cover it — the
+   * button's own hover `filter` makes it the containing block.
+   */
+  return (
+    <article
+      className={`profile-slide profile-slide-${type}`}
+      /* Inert while it is the slide waiting beside the current one: the click
+         then lands on the cell around it, which brings this slide in rather
+         than starting a run the reader cannot even read yet. */
+      inert={!active}
+      onClick={() => onStart(type)}
+    >
+      <div className="slide-head">
+        <span className="slide-icon"><ProfileIcon type={type} /></span>
+        <div>
+          <strong>{spec.label}</strong>
+          <small>{spec.source}</small>
+        </div>
+      </div>
+      <SlidePreview spec={spec} />
+      <Button className="slide-cta" size="lg" onClick={() => onStart(type)}>
+        Get started <HeaderIcon type="arrow" />
+      </Button>
     </article>
   );
 }
 
-function ProfileSnapshotGallery() {
-  const [activeSnapshot, setActiveSnapshot] = useState<"cpu" | "react">("cpu");
+const SLIDE_ORDER: ProfileType[] = ["javascript", "react"];
+/*
+ * The strip carries three copies of the slides and runs through the middle
+ * one, so there is always a slide either side of the one on show — no edge of
+ * the row is ever in view — and the move past the last slide lands on a clone
+ * rather than on nothing. Once that move has finished the index drops back to
+ * the matching slide in the middle copy with the transition off; the reader
+ * cannot see the jump, because the cell it jumps to shows the same card in the
+ * same place.
+ */
+const SLIDE_CELLS: ProfileType[] = [...SLIDE_ORDER, ...SLIDE_ORDER, ...SLIDE_ORDER];
+/** Where the middle copy — the one the index runs through — starts. */
+const SLIDE_OFFSET = SLIDE_ORDER.length;
+/** The middle copy is the row the reader is given; the others are its clones. */
+const isRealSlide = (index: number) => index >= SLIDE_OFFSET && index < SLIDE_OFFSET + SLIDE_ORDER.length;
+/* Measured from the start of one move to the start of the next, so the row
+   comes to rest for the remainder after the slide itself has landed. */
+const SLIDE_INTERVAL_MS = 3000;
+/** The track's own transition, in `.carousel-track`; the snap waits it out. */
+const SLIDE_SHIFT_MS = 620;
+
+function ProfileLanding({ onStart }: { onStart: (type: ProfileType) => void }) {
+  const [current, setCurrent] = useState(SLIDE_OFFSET);
+  /* Off for the one frame the loop snaps back on, so the return to the first
+     slide is a cut and not a long slide backwards — and so the slide the
+     class moves off does not fade and shrink out over the one it moves onto,
+     which is the same card in the same place and dips as they cross. */
+  const [animate, setAnimate] = useState(true);
+  /* Two reasons to stop advancing: the reader is on the slide (hover or focus),
+     or they have picked one themselves, which settles the question the
+     rotation was asking. */
+  const [held, setHeld] = useState(false);
+  const [picked, setPicked] = useState(false);
 
   useEffect(() => {
+    if (held || picked) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const interval = window.setInterval(() => {
-      setActiveSnapshot((current) => current === "cpu" ? "react" : "cpu");
-    }, 2000);
-
+      /* Counts up through the clones rather than wrapping, so every move is
+         forwards; the snap below brings the index home. */
+      setCurrent((index) => index + 1);
+    }, SLIDE_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [held, picked]);
+
+  useEffect(() => {
+    if (current < SLIDE_OFFSET + SLIDE_ORDER.length) return;
+    const timer = window.setTimeout(() => {
+      setAnimate(false);
+      setCurrent(SLIDE_OFFSET + (current % SLIDE_ORDER.length));
+    }, SLIDE_SHIFT_MS);
+    return () => window.clearTimeout(timer);
+  }, [current]);
+
+  /* Two frames: the first paints the snapped-back position with the transition
+     off, the second puts the transition back for the move after it. */
+  useEffect(() => {
+    if (animate) return;
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => setAnimate(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(first);
+      window.cancelAnimationFrame(second);
+    };
+  }, [animate]);
+
+  const show = (index: number) => {
+    setCurrent(SLIDE_OFFSET + index);
+    setPicked(true);
+  };
+
+  /*
+   * The shift is read off the cell itself rather than computed from a width
+   * this file also has to know: the slide width and the gap are the
+   * stylesheet's to set, and they change with the breakpoint. It brings the
+   * cell's centre to the strip's centre, so the slide on show sits in the
+   * middle with a shoulder of the slides either side of it; it is negative
+   * for the first cell, which the strip is happy to be pushed by. No cap,
+   * because the clones mean there is always another slide past the
+   * current one.
+   */
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    const viewport = track?.parentElement;
+    if (!track || !viewport) return;
+    const measure = () => {
+      const cell = track.children[current] as HTMLElement | undefined;
+      if (!cell) return;
+      setShift(cell.offsetLeft + cell.offsetWidth / 2 - viewport.clientWidth / 2);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [current]);
 
   return (
-    <div className="signal-snapshot-gallery" aria-label="Example CPU and React analysis results">
-      <ProfileSnapshot type="cpu" active={activeSnapshot === "cpu"} />
-      <ProfileSnapshot type="react" active={activeSnapshot === "react"} />
+    <div className="landing">
+      <div className="landing-head">
+        <h1>Find the code that makes your app feel slow</h1>
+        <p>Turn profiler traces into a focused list of bottlenecks</p>
+        <div className="platform-list" aria-label="Supported platforms">
+          <span><ProfileIcon type="react" />React</span>
+          <span><ProfileIcon type="javascript" />JavaScript</span>
+          <span><ProfileIcon type="react" />React Native</span>
+        </div>
+      </div>
+      <div
+        className="landing-carousel"
+        aria-roledescription="carousel"
+        aria-label="What an analysis of each profile looks like"
+        onMouseEnter={() => setHeld(true)}
+        onMouseLeave={() => setHeld(false)}
+        onFocus={() => setHeld(true)}
+        onBlur={() => setHeld(false)}
+      >
+        {/* Every slide stays in the track, so its height is the tallest of
+            them and the card does not resize under the reader mid-swap. */}
+        {/* The current slide centred, with the slides either side of it
+            shrunk and held back to a fraction of their opacity: the strip
+            reads as a row that moves rather than a card that is replaced. */}
+        <div
+          className={`carousel-track${animate ? "" : " is-snapping"}`}
+          ref={trackRef}
+          style={{ transform: `translateX(${-shift}px)` }}
+        >
+          {SLIDE_CELLS.map((type, index) => (
+            <div
+              key={index}
+              className={`carousel-cell${index === current ? " is-current" : ""}`}
+              role="group"
+              aria-roledescription="slide"
+              /* The copies either side repeat slides the reader has already
+                 been given, so they are not announced a second time — unless
+                 the loop has come to rest on one, when it is the slide on
+                 show. */
+              aria-hidden={(!isRealSlide(index) && index !== current) || undefined}
+              aria-label={`${SLIDES[type].label} — ${(index % SLIDE_ORDER.length) + 1} of ${SLIDE_ORDER.length}`}
+              onClick={index === current ? undefined : () => show(index % SLIDE_ORDER.length)}
+            >
+              <ProfileSlide type={type} active={index === current} onStart={onStart} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="landing-dots">
+        {SLIDE_ORDER.map((type, index) => (
+          <button
+            key={type}
+            type="button"
+            className={`landing-dot${index === current % SLIDE_ORDER.length ? " is-current" : ""}`}
+            aria-label={`Show ${SLIDES[type].label}`}
+            aria-current={index === current % SLIDE_ORDER.length}
+            onClick={() => show(index)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -573,6 +859,7 @@ function AnalysisResultCard({
   timeLabel,
   insight,
   onExplain,
+  explainDisabledReason,
   explaining,
   insightError,
   chart,
@@ -604,6 +891,13 @@ function AnalysisResultCard({
   insight?: string[];
   /** Asks a model to read this task. Absent where no inference is on offer. */
   onExplain?: () => void;
+  /**
+   * Why the reading cannot be asked for yet, which is only ever a missing
+   * model. The button stays on the card and carries this as its tooltip: the
+   * reading is the one thing here a model is needed for, so the card is where
+   * that is worth saying.
+   */
+  explainDisabledReason?: string;
   explaining?: boolean;
   insightError?: string;
   /**
@@ -707,17 +1001,22 @@ function AnalysisResultCard({
                 {readingOpen ? "Hide AI reading" : "Show AI reading"}
               </Button>
             ) : onExplain ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="prompt-action-button explain-action-button"
-                disabled={explaining}
-                onClick={onExplain}
-                title="Have a model read this task's timeline and name the issue and where it starts."
-              >
-                {explaining ? <RozeniteLoader size={14} label="" /> : <HeaderIcon type="sparkle" />}
-                {explaining ? "Reading…" : "Explain with AI"}
-              </Button>
+              // The tooltip sits on the wrapper, not the button: a disabled
+              // button takes `pointer-events: none`, so its own `title` never
+              // surfaces.
+              <span className="explain-action-wrap" title={explainDisabledReason
+                ?? "Have a model read this task's timeline and name the issue and where it starts."}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="prompt-action-button explain-action-button"
+                  disabled={explaining || Boolean(explainDisabledReason)}
+                  onClick={onExplain}
+                >
+                  {explaining ? <RozeniteLoader size={14} label="" /> : <HeaderIcon type="sparkle" />}
+                  {explaining ? "Reading…" : "Explain with AI"}
+                </Button>
+              </span>
             ) : null}
           </div>
           <div className="hotspot-actions">
@@ -834,6 +1133,12 @@ function InspectorApp() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [showWelcome, setShowWelcome] = useState(true);
+  /* A slide is a choice of profile, not just a way past the landing page: it
+     leaves the reader on the upload step for the kind they clicked. */
+  const startWith = (type: ProfileType) => {
+    setProfileType(type);
+    setShowWelcome(false);
+  };
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
   const [modelStatus, setModelStatus] = useState<ModelSettings | null>(null);
   const [selectedProvider, setSelectedProvider] = useState("");
@@ -1569,25 +1874,7 @@ function InspectorApp() {
         {(phase === "upload" || phase === "analyzing") && (
           <>
             {showWelcome ? (
-              <>
-            <div className="hero-stage">
-              <div className="intro intro-copy">
-                <h1>Find the code that makes your app feel slow</h1>
-                <p>Turn profiler traces into a focused list of bottlenecks</p>
-                <div className="intro-actions">
-                  <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
-                    Get Started <HeaderIcon type="arrow" />
-                  </Button>
-                  <div className="platform-list" aria-label="Supported platforms">
-                    <span><ProfileIcon type="react" />React</span>
-                    <span><ProfileIcon type="javascript" />JavaScript</span>
-                    <span><ProfileIcon type="react" />React Native</span>
-                  </div>
-                </div>
-              </div>
-              <ProfileSnapshotGallery />
-            </div>
-              </>
+              <ProfileLanding onStart={startWith} />
             ) : (
               <>
 
@@ -1632,19 +1919,10 @@ function InspectorApp() {
                     disabled={analyzing}
                     aria-invalid={!validBudget} aria-describedby="react-budget-help"
                     onChange={event => setFrameBudget(event.target.value)} />
-                  <p id="react-budget-help">Defaults to 16 ms. Use a lower budget, such as 8.33 ms, for a higher refresh-rate target.</p>
+                  <p id="react-budget-help">Defaults to 16 ms.</p>
                 </div>
               )}
 
-              <div className="key-field">
-                <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
-                  ? `Model: ${modelStatus.provider} / ${modelStatus.model}`
-                  : modelStatus.error || "No model configured — measured analysis only."}</Text>
-                  <br />
-                <Text className="italic text-muted-foreground">{modelStatus?.configured
-                  ? "Change the provider or model from Analysis settings."
-                  : "Analysis needs no model. Add one in Analysis settings to ask a card for an AI reading."}</Text>
-              </div>
             </section>
 
             {error && (
@@ -1662,11 +1940,6 @@ function InspectorApp() {
             )}
 
             <div className="action-row">
-              <p>{profileType === "react"
-                ? "Your profile stays on this device. React commits are analyzed by measurement alone, so nothing leaves it unless you ask a card for an AI reading."
-                : modelStatus?.configured
-                  ? "Your profile stays on this device and is analyzed via your configured model."
-                  : "Your profile stays on this device, and with no model configured nothing leaves it."}</p>
               <Button className="analyze-profile-button" size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
@@ -1748,7 +2021,8 @@ function InspectorApp() {
                       )
                       : undefined}
                     insight={card.insight?.findings}
-                    onExplain={modelStatus?.configured && analysisId && !isSample ? () => void explainReactCard(card) : undefined}
+                    onExplain={analysisId && !isSample ? () => void explainReactCard(card) : undefined}
+                    explainDisabledReason={modelStatus?.configured ? undefined : "Configure the model from settings"}
                     explaining={explainingId === card.id}
                     insightError={insightErrors[card.id]}
                     rows={rows}
@@ -1839,7 +2113,8 @@ function InspectorApp() {
                       ? <TaskContribution card={card} kind={chartKind} onFocus={(nodeId) => exploreTask(card, nodeId)} />
                       : undefined}
                     insight={card.insight?.findings}
-                    onExplain={modelStatus?.configured && analysisId && !isSample ? () => void explainTask(card) : undefined}
+                    onExplain={analysisId && !isSample ? () => void explainTask(card) : undefined}
+                    explainDisabledReason={modelStatus?.configured ? undefined : "Configure the model from settings"}
                     explaining={explainingId === card.id}
                     insightError={insightErrors[card.id]}
                     rows={rows}
