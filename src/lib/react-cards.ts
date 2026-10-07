@@ -283,7 +283,7 @@ export interface ReactCard {
   /** Low when render reasons are missing or the hot components could not be named. */
   confidence: "ok" | "low";
   /**
-   * The model's reading of this commit, when AI assist is on. Everything else
+   * The model's reading of this commit, once asked for. Everything else
    * on the card is measured; this is the one field that is inferred, so the
    * view labels it and the hand-off says so in as many words.
    */

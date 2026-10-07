@@ -320,7 +320,7 @@ export interface TaskCard {
   subtreeFunctionCount: number;
   confidence: "ok" | "low";
   /**
-   * The model's reading of this task, when AI assist is on. Everything else on
+   * The model's reading of this task, once asked for. Everything else on
    * the card is measured; this is the one field that is inferred, so the view
    * labels it and the hand-off says so in as many words.
    */
@@ -838,8 +838,8 @@ export function pathlineFor(card: Pick<TaskCard, "culprits" | "boundaryFrames" |
  * Row two: the measured shape of the cost.
  *
  * One of several readings, each a claim the card's own figures carry — no
- * inference, so this line is identical with AI assist off and is the same
- * sentence for the bundled samples as for an upload.
+ * inference, so this line is the same sentence for the bundled samples as for
+ * an upload.
  *
  * The share is what makes it a finding rather than a label: `64% in
  * intlDateTimeFormatFormat` says the card is about one frame, and `heaviest 9%

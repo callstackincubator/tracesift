@@ -66,12 +66,6 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       catch { throw new ReactProfileError(400, "Expected a multipart form containing the profile file."); }
       const profile = form.get("profile");
       if (!(profile instanceof File) || !profile.size) throw new ReactProfileError(400, "A React profile file is required.");
-      // Only the model path needs a provider. The measured path is arithmetic
-      // over the export, so React profiles now analyze with AI assist off —
-      // which is what the upload pane's React option used to be disabled for.
-      if (modelEngine && !(await getAnalysisSettings()).aiAssisted) {
-        throw new ReactProfileError(409, "The React analyzer engine needs AI assist. Turn it on in Analysis settings, or unset TRACESIFT_REACT_ENGINE to use the measured engine.");
-      }
       if (profile.size > maxUploadBytes()) throw new ReactProfileError(413, uploadTooLargeMessage());
       const options = parseReactProfileOptions(form);
       const frameBudgetMs = parseFrameBudget(form);

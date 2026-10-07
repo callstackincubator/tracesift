@@ -171,10 +171,10 @@ function request(profile, options = {}, signal) {
 const handler = createReactAnalysisHandler({ parse: parseReactExport });
 
 test('the measured engine answers over HTTP with no model and no temporary files', async t => {
-  await saveAnalysisSettings({ aiAssisted: false, autoSave: false });
+  await saveAnalysisSettings({ autoSave: false });
   const profile = await readFile(path.resolve('sample-profiles/react/react-profile-2.json'));
   const response = await handler(request(profile));
-  assert.equal(response.status, 200, 'React profiles analyze with AI assist off');
+  assert.equal(response.status, 200, 'React profiles analyze without a model');
   const body = await response.json();
   t.after(() => destroyRecord(body.analysisId));
   assert.equal(body.profileType, 'react');

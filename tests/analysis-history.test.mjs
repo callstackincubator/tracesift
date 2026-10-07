@@ -16,7 +16,7 @@ const record = {
 };
 
 test("local history defaults to auto-save and persists safe report data", async () => {
-  assert.deepEqual(await store.getAnalysisSettings(), { autoSave: true, aiAssisted: true });
+  assert.deepEqual(await store.getAnalysisSettings(), { autoSave: true });
   await store.saveAnalysis(record);
   const loaded = await store.getSavedAnalysis(record.id);
   assert.equal(loaded?.dir, "");
@@ -27,12 +27,9 @@ test("local history defaults to auto-save and persists safe report data", async 
 });
 
 test("history settings and deletion are durable", async () => {
-  assert.deepEqual(await store.saveAnalysisSettings({ autoSave: false }), { autoSave: false, aiAssisted: true });
-  assert.deepEqual(await store.getAnalysisSettings(), { autoSave: false, aiAssisted: true });
-  // Each toggle is written on its own, so saving one leaves the other where it was.
-  assert.deepEqual(await store.saveAnalysisSettings({ aiAssisted: false }), { autoSave: false, aiAssisted: false });
-  assert.deepEqual(await store.getAnalysisSettings(), { autoSave: false, aiAssisted: false });
-  assert.deepEqual(await store.saveAnalysisSettings({ autoSave: true }), { autoSave: true, aiAssisted: false });
+  assert.deepEqual(await store.saveAnalysisSettings({ autoSave: false }), { autoSave: false });
+  assert.deepEqual(await store.getAnalysisSettings(), { autoSave: false });
+  assert.deepEqual(await store.saveAnalysisSettings({ autoSave: true }), { autoSave: true });
   assert.equal(await store.deleteSavedAnalysis(record.id), true);
   assert.equal(await store.getSavedAnalysis(record.id), undefined);
 });

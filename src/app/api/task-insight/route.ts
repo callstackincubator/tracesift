@@ -14,7 +14,6 @@
 import { tmpdir } from "node:os";
 
 import { getRecord, getSavedAnalysis, updateSavedAnalysis } from "@/lib/analysis";
-import { getAnalysisSettings } from "@/lib/analysis";
 import { inferTaskInsights } from "@/lib/task-insight";
 import { debugLog } from "@/lib/debug-log";
 
@@ -34,10 +33,6 @@ export async function POST(request: Request): Promise<Response> {
   const analysisId = typeof body?.analysisId === "string" ? body.analysisId : "";
   const cardId = typeof body?.cardId === "string" ? body.cardId : "";
   if (!analysisId || !cardId) return json({ error: "analysisId and cardId are required." }, 400);
-
-  if (!(await getAnalysisSettings()).aiAssisted) {
-    return json({ error: "AI assist is off. Turn it on in Analysis settings to have a model read this task." }, 409);
-  }
 
   const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
   if (!record) {

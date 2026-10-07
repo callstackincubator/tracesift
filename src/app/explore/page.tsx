@@ -5,6 +5,7 @@ import { Button, EmptyState, FlameGraph, PluginHeader, PluginShell, Tabs, Text }
 import type { FlameGraphNode } from "@rozenite/ui";
 
 import { ThemeGate } from "@/app/theme-gate";
+import { ChartNotes, STRETCH_ZOOM_NOTE, ZOOM_HINT } from "./chart-notes";
 import { useStretchZoom, ZoomControls } from "./stretch-zoom";
 import { fetchReactExplore, fetchTaskHandoff, readCardHandoff, type CardHandoff, type ReactExploreHandoff, type TaskHandoff } from "@/lib/card-handoff";
 import { formatMs } from "@/lib/format";
@@ -304,17 +305,30 @@ function TaskTimelineChart({
           </div>
         </div>
       </div>
-      <Text className="explore-caveat">
-        Zoom stretches the chart and scrolls it sideways, so a short call widens where it sits rather than being
-        re-drawn on its own; &#8984;/Ctrl with the scroll wheel zooms about the pointer.
-        React frames, and engine frames that name nothing, are collapsed away, so a box&rsquo;s row is its depth on
-        this chart rather than its real stack depth. A built-in the code called by name &mdash; a date formatter, a
-        locale comparison, a sort &mdash; is kept and drawn in a paler fill, because it is engine code and still a
-        cost the code above it controls. A box is one call, at the moment it ran, drawn at sample resolution — two calls closer
-        together than one sample merge, and one shorter than a sample may not appear. Its span is wall clock, so it
-        covers the framework work the call delegated to and any collection pause that fell inside it; the card&rsquo;s
-        longest-call figure counts neither, which is why a box can read slightly wider.
-      </Text>
+      <ChartNotes
+        reading={<>One box is one call, drawn where it ran. Width is how long it took.</>}
+        controls={ZOOM_HINT}
+        caveats={[
+          STRETCH_ZOOM_NOTE,
+          <>
+            <strong>Rows are not stack depth.</strong> React frames, and engine frames that name nothing, are
+            collapsed away, so a box&rsquo;s row is its depth on this chart.
+          </>,
+          <>
+            A built-in the code called by name &mdash; a date formatter, a locale comparison, a sort &mdash; is kept
+            and drawn in a paler fill: it is engine code, and still a cost the code above it controls.
+          </>,
+          <>
+            <strong>Drawn at sample resolution.</strong> Two calls closer together than one sample merge, and one
+            shorter than a sample may not appear.
+          </>,
+          <>
+            <strong>Spans are wall clock.</strong> A box covers the framework work its call delegated to and any
+            collection pause that fell inside it. The card&rsquo;s longest-call figure counts neither, which is why a
+            box can read slightly wider.
+          </>,
+        ]}
+      />
     </div>
   );
 }
@@ -673,18 +687,21 @@ function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
         </div>
       </div>
 
-      <Text className="explore-caveat">
-        Click a frame to zoom into its subtree, Escape to come back out. The zoom stretches the whole graph instead,
-        so thin frames widen in place and the view scrolls sideways; &#8984;/Ctrl with the scroll wheel zooms about
-        the pointer.
-        {mode === "focused" ? (
-          <>
-            {" "}React and engine frames are collapsed away, the same cut the Timeline draws by, so a box&rsquo;s row
-            is its depth here rather than its real stack depth. The time a dropped frame burned in its own body is
-            charged to the nearest frame above it that was kept.
-          </>
-        ) : null}
-      </Text>
+      <ChartNotes
+        controls={`Click a frame to zoom into its subtree \u00B7 Esc to go back \u00B7 ${ZOOM_HINT}`}
+        caveats={[
+          STRETCH_ZOOM_NOTE,
+          mode === "focused" ? (
+            <>
+              <strong>Rows are not stack depth.</strong> React and engine frames are collapsed away, the same cut the
+              Timeline draws by, so a box&rsquo;s row is its depth here.
+            </>
+          ) : null,
+          mode === "focused"
+            ? "The time a dropped frame burned in its own body is charged to the nearest frame above it that was kept."
+            : null,
+        ]}
+      />
     </>
   );
 }
@@ -718,12 +735,18 @@ function TaskCallTree({ focus, taskMs, onFocus, locations }: { focus: TaskTreeNo
         <TaskTreeRow key={mode} node={tree} taskMs={taskMs} depth={0} onFocus={onFocus} locations={locations} />
       </ul>
       {mode === "focused" ? (
-        <Text className="explore-caveat">
-          React and engine frames are collapsed away, the same cut the Timeline draws by, so a row&rsquo;s indent is
-          its depth here rather than its real stack depth. The time a dropped frame burned in its own body is charged
-          to the nearest frame above it that was kept, which is why a row can read more self time here than on the
-          full tree.
-        </Text>
+        <ChartNotes
+          caveats={[
+            <>
+              <strong>Indent is not stack depth.</strong> React and engine frames are collapsed away, the same cut the
+              Timeline draws by, so a row&rsquo;s indent is its depth here.
+            </>,
+            <>
+              The time a dropped frame burned in its own body is charged to the nearest frame above it that was kept,
+              which is why a row can read more self time here than on the full tree.
+            </>,
+          ]}
+        />
       ) : null}
     </>
   );
@@ -1064,6 +1087,20 @@ function causeDetail(node: ReactExploreNode): string {
  * this commit at all — and a parent drawn narrower than the children inside it
  * is not a chart. The recorded figure is the one the tooltip quotes.
  */
+/**
+ * How many rows deep the tree runs.
+ *
+ * The note under the render tree used to quote the checked-in fixture — "nests
+ * 110 deep and reads at 26" — at a reader looking at their own recording. The
+ * point it was making is a good one and it is cheap to make truthfully, so the
+ * figures are measured from the open commit instead.
+ */
+function reactTreeDepth(nodes: ReactExploreNode[]): number {
+  let deepest = 0;
+  for (const node of nodes) deepest = Math.max(deepest, 1 + reactTreeDepth(node.children));
+  return deepest;
+}
+
 function reactFlameNode(node: ReactExploreNode, path: string): FlameGraphNode {
   const children = node.children.map((child, index) => reactFlameNode(child, `${path}.${index}`));
   const inside = children.reduce((total, child) => total + child.value, 0);
@@ -1263,14 +1300,29 @@ function CommitChart({
 
       <CommitBars explore={explore} selectedKey={selectedKey} onSelect={onSelect} />
 
-      <Text className="explore-caveat">
-        One bar is one commit, in the order React committed them, every bar the same width so that each is as easy to
-        hit as its neighbours. Height is the render duration against the tallest commit here, red is over the budget,
-        and a ringed bar is a commit that produced a card on the results page. Click any bar to drill into it below.
-        The spacing is not time: the bars are in order, but nothing here says whether two commits were a frame or a
-        minute apart. Nor is effect time — a commit that renders in 8 ms and then spends 40 ms in layout effects is a
-        short bar here, and the figure for those effects is in the card&rsquo;s hand-off rather than on this page.
-      </Text>
+      <ChartNotes
+        reading={
+          <>
+            One bar is one commit, in the order React committed them. Height is the render duration against the
+            tallest commit here, red is over the budget, and a ringed bar produced a card on the results page.
+          </>
+        }
+        controls="Click any bar to drill into it below"
+        caveats={[
+          <>
+            <strong>Width is not time.</strong> Every bar is the same width, so each is as easy to hit as its
+            neighbours.
+          </>,
+          <>
+            <strong>Spacing is not time.</strong> The bars are in order, but nothing here says whether two commits
+            were a frame or a minute apart.
+          </>,
+          <>
+            <strong>Height is not effect time.</strong> A commit that renders in 8 ms and then spends 40 ms in layout
+            effects is a short bar here. That figure is in the card&rsquo;s hand-off rather than on this page.
+          </>,
+        ]}
+      />
     </div>
   );
 }
@@ -1361,28 +1413,37 @@ function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) {
           </tbody>
         </table>
       )}
-      {hidden > 0 ? (
-        <Text className="explore-caveat">
-          {hidden} further component{hidden === 1 ? "" : "s"} {mode === "focused" ? "of yours " : ""}rendered in this
-          commit, each with less of its own time than the last row above.
-        </Text>
-      ) : null}
-      {mode === "focused" && filtered > 0 ? (
-        <Text className="explore-caveat">
-          {filtered === 1
-            ? "One component that is React\u2019s own, or a platform view with no recorded source, is"
-            : `${filtered} components that are React\u2019s own, or platform views with no recorded source, are`}
-          {" "}hidden. Every figure above is unchanged: own time is measured per component, so hiding a row neither
-          moves time onto another row nor takes it off this one &mdash; which is why the percentages no longer add up
-          to the commit here.
-        </Text>
-      ) : null}
       {shown.length > 0 ? (
-        <Text className="explore-caveat">
-          Own time is React&rsquo;s `selfDuration` and is a true partition of the render phase: over every component
-          React rendered they add up, and the remainder is the reconciler&rsquo;s own walk. `With children` is
-          inclusive and overlaps every ancestor, so that column never sums to anything. A fix attaches to own time.
-        </Text>
+        <ChartNotes
+          reading={
+            <>
+              <strong>Own time</strong> is React&rsquo;s <code>selfDuration</code> and is what a fix attaches to.
+              <strong> With children</strong> is inclusive, and overlaps every ancestor.
+            </>
+          }
+          caveats={[
+            <>
+              Own time is a true partition of the render phase: over every component React rendered they add up, and
+              the remainder is the reconciler&rsquo;s own walk. <code>With children</code> never sums to anything.
+            </>,
+            hidden > 0 ? (
+              <>
+                {hidden} further component{hidden === 1 ? "" : "s"} {mode === "focused" ? "of yours " : ""}rendered in
+                this commit, each with less of its own time than the last row above.
+              </>
+            ) : null,
+            mode === "focused" && filtered > 0 ? (
+              <>
+                {filtered === 1
+                  ? "One component that is React\u2019s own, or a platform view with no recorded source, is"
+                  : `${filtered} components that are React\u2019s own, or platform views with no recorded source, are`}
+                {" "}hidden &mdash; which is why the percentages no longer add up to the commit. Every figure above is
+                unchanged: own time is measured per component, so hiding a row neither moves time onto another row nor
+                takes it off this one.
+              </>
+            ) : null,
+          ]}
+        />
       ) : null}
     </div>
   );
@@ -1398,6 +1459,12 @@ function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) {
  */
 function ReactRenderTree({ commit }: { commit: ReactExploreCommit }) {
   const [mode, setMode] = useState<TreeMode>("focused");
+  // Both depths, in both modes: the note compares them, so it needs the one the
+  // reader is not looking at as much as the one they are.
+  const depth = useMemo(() => ({
+    full: reactTreeDepth(commit.tree),
+    focused: reactTreeDepth(focusedReactTree(commit.tree).nodes),
+  }), [commit.tree]);
   const flame = useMemo(() => {
     if (commit.tree.length === 0) return null;
     const below = mode === "focused" ? focusedReactTree(commit.tree) : { nodes: commit.tree, strippedMs: 0 };
@@ -1438,20 +1505,37 @@ function ReactRenderTree({ commit }: { commit: ReactExploreCommit }) {
       <TreeModeToggle label="show" mode={mode} onChange={setMode} />
       <FlameLegend what="a component's own render time" />
       <FlameGraph data={flame} formatValue={reactMs} rowHeight={24} />
-      <Text className="explore-caveat">
-        Width is time including everything a component rendered; the colour is its own time alone. A wide pale box
-        rendered expensive children and cost nothing itself &mdash; memoize it or move the work down. A narrow hot box
-        is the component to go and change. Click a box to zoom into its subtree, Escape to come back out. Nesting is by
-        the nearest component above that also rendered, so a component whose parent bailed out sits under its nearest
-        rendering ancestor rather than at the top.
-        {mode === "focused"
-          ? " A component that burned no measurable time of its own and rendered exactly one child is collapsed away,"
-            + " and whatever it did cost is charged to the nearest component still shown above it. That is most of a"
-            + " React tree: the fixture's longest commit nests 110 deep and reads at 26 once the pass-throughs are"
-            + " gone, with nothing dropped that the rows above and below do not already say."
-          : " Everything React rendered, at its real depth — every context provider and wrapper included, which in the"
-            + " fixture's longest commit is 110 rows."}
-      </Text>
+      <ChartNotes
+        reading={
+          <>
+            Width is time including everything a component rendered. The colour is its own time alone.
+          </>
+        }
+        controls={`Click a box to zoom into its subtree \u00B7 Esc to go back \u00B7 ${ZOOM_HINT}`}
+        caveats={[
+          <>
+            A wide pale box rendered expensive children and cost nothing itself &mdash; memoize it, or move the work
+            down. A narrow hot box is the component to go and change.
+          </>,
+          <>
+            <strong>Nesting is by the nearest ancestor that also rendered</strong>, so a component whose parent bailed
+            out sits higher here than it does in your source.
+          </>,
+          mode === "focused" ? (
+            <>
+              A component that burned no measurable time of its own and rendered exactly one child is collapsed away,
+              and whatever it did cost is charged to the nearest component still shown above it. That is most of a
+              React tree: this commit nests {depth.full} deep and reads at {depth.focused} once the pass-throughs are
+              gone, with nothing dropped that the rows above and below do not already say.
+            </>
+          ) : (
+            <>
+              Everything React rendered, at its real depth &mdash; every context provider and wrapper included, which
+              in this commit is {depth.full} rows.
+            </>
+          ),
+        ]}
+      />
     </>
   );
 }

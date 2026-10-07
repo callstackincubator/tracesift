@@ -11,6 +11,7 @@ import {
   getAnalysisSettings,
   saveAnalysis,
 } from "@/lib/analysis";
+import { getModelSettings } from "@callstack/tracesift/runtime";
 import { summarizeCpuProfile } from "@/lib/js-profile";
 import { CpuAnalysisError } from "@/lib/cpu-analyzer";
 import { legacyEngineRequested, nodeCardEngineRequested, runLegacyCpuAnalysis } from "@/lib/legacy-cpu-analysis";
@@ -86,10 +87,11 @@ export async function POST(request: Request): Promise<Response> {
   // One classification pass over the distinct frames of the upload, cached by
   // name and url. Everything a task card says about which code is whose is a
   // lookup in this table, so the same file always produces the same cards.
-  // With AI assist off it is the rule table, which is the same fallback a
-  // failed or unconfigured model already produced.
+  // With no model configured it is the rule table rather than a provider call
+  // that can only fail — the same fallback a failed model already produced.
   const settings = await getAnalysisSettings();
-  const classes = nodeCardEngineRequested() || !settings.aiAssisted ? ruleClassTable() : await classifyFrames(
+  const modelConfigured = (await getModelSettings()).configured;
+  const classes = nodeCardEngineRequested() || !modelConfigured ? ruleClassTable() : await classifyFrames(
     parsedProfile.nodes.map((node) => node.callFrame), dir,
   );
   const taskCards = nodeCardEngineRequested()

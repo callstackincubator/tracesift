@@ -132,7 +132,7 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" | "sparkle" | "chevron-up" | "chevron-down" }) {
+function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" | "sparkle" | "bulb" | "chevron-up" | "chevron-down" }) {
   const paths = {
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.65 1 .3.27.68.41 1.08.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -142,6 +142,7 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
     back: <path d="M19 12H5m6 6-6-6 6-6" />,
     explore: <><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
     sparkle: <><path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3Z" /><path d="M18 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7Z" /></>,
+    bulb: <><path d="M9.5 18h5M10 21h4" /><path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.7l.1.5h5.2l.1-.5c.1-.7.4-1.3.9-1.7A6 6 0 0 0 12 3Z" /></>,
     "chevron-up": <path d="m6 14 6-6 6 6" />,
     "chevron-down": <path d="m6 10 6 6 6-6" />,
   };
@@ -430,6 +431,58 @@ function taskFallbackRows(card: TaskCard, onFocus: (nodeId: string) => void): Ho
  * reader who prefers one reading of a part-of-whole prefers it on a commit for
  * the same reason they prefer it on a task.
  */
+/*
+ * Missing render reasons are a property of the recording, not of any one
+ * commit, so this is said once for the whole run. It is a light rather than a
+ * paragraph: most recordings have nothing to say here, and the sentence only
+ * matters to someone who noticed a card saying "render reason not recorded"
+ * and went looking for why.
+ */
+function CausesNotice() {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="causes-notice" ref={containerRef}>
+      <button
+        type="button"
+        className={open ? "causes-notice-button is-open" : "causes-notice-button"}
+        aria-expanded={open}
+        aria-label="Why some render reasons are missing"
+        title="Why some render reasons are missing"
+        onClick={() => setOpen(value => !value)}
+      >
+        <HeaderIcon type="bulb" />
+      </button>
+      {open ? (
+        <div className="causes-notice-popover" role="dialog" aria-label="Render reasons not recorded">
+          <strong>Render reasons not recorded</strong>
+          <p>
+            This recording does not say why each component rendered. Re-record with React DevTools&rsquo;
+            &ldquo;Record why each component rendered&rdquo; setting on to get render causes.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ChartSwitch({
   kind,
   onChange,
@@ -439,7 +492,6 @@ function ChartSwitch({
 }) {
   return (
     <div className="chart-switch">
-      <span className="chart-switch-label">contribution</span>
       {(["bar", "treemap"] as const).map((option) => (
         <button
           key={option}
@@ -544,7 +596,7 @@ function AnalysisResultCard({
   subtitle?: string;
   timeLabel: string;
   /**
-   * The model's reading of this finding, when AI assist is on. Labelled on the
+   * The model's reading of this finding, once asked for. Labelled on the
    * card because it is the only thing there that was not measured, and placed
    * below the rows: the reading is the conclusion the evidence above leads to,
    * and it lands next to the button that asked for it.
@@ -779,7 +831,6 @@ function InspectorApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const [autoSave, setAutoSave] = useState(true);
-  const [aiAssisted, setAiAssisted] = useState(true);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [showWelcome, setShowWelcome] = useState(true);
@@ -815,7 +866,6 @@ function InspectorApp() {
     void refreshHistory();
     fetch("/api/analysis-settings", { cache: "no-store" }).then(r => r.json()).then(data => {
       setAutoSave(data.autoSave !== false);
-      setAiAssisted(data.aiAssisted !== false);
     }).catch(() => undefined);
   }, []);
 
@@ -874,9 +924,10 @@ function InspectorApp() {
   };
 
   const validBudget = frameBudget.trim() !== "" && Number.isFinite(Number(frameBudget)) && Number(frameBudget) > 0;
+  // A model is not part of this: every card an analysis produces is measured,
+  // and the model is only ever asked to read one afterwards.
   const isReady = Boolean(
     (profileType === "javascript" ? files.cpu : files.reactProfile)
-    && (!aiAssisted || modelStatus?.configured)
     && (profileType !== "react" || validBudget),
   );
 
@@ -884,11 +935,6 @@ function InspectorApp() {
     const file = profileType === "javascript" ? files.cpu : files.reactProfile;
     if (!file) {
       setError(profileType === "javascript" ? "Add a CPU profile file first." : "Add a React profile file first.");
-      setErrorDetail(null);
-      return;
-    }
-    if (aiAssisted && !modelStatus?.configured) {
-      setError("Choose a provider and model in Analysis settings first.");
       setErrorDetail(null);
       return;
     }
@@ -1230,10 +1276,6 @@ function InspectorApp() {
     setAutoSave(enabled);
     await fetch("/api/analysis-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoSave: enabled }) });
   };
-  const updateAiAssisted = async (enabled: boolean) => {
-    setAiAssisted(enabled);
-    await fetch("/api/analysis-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiAssisted: enabled }) });
-  };
   const providerModels = modelStatus?.providers.find(provider => provider.id === selectedProvider)?.models ?? [];
   const selectedProviderSettings = modelStatus?.providers.find(provider => provider.id === selectedProvider);
   const selectedAuthMethod = selectedProviderSettings?.authMethods.find(method => method.type === selectedAuthMode);
@@ -1387,12 +1429,6 @@ function InspectorApp() {
                   <div><strong>Analysis settings</strong><small>Preferences are saved on this device.</small></div>
                   <button className="icon-button" aria-label="Close analysis settings" onClick={() => setSettingsOpen(false)}><HeaderIcon type="close" /></button>
                 </div>
-                <label className="autosave-toggle ai-assist-toggle">
-                  <span className="toggle-copy"><strong>AI assisted</strong><small>Let a model name what each task got wrong and where it starts. Off, TraceSift reports only what it measured and never contacts a provider.</small></span>
-                  <input type="checkbox" checked={aiAssisted} onChange={event => void updateAiAssisted(event.target.checked)} />
-                  <span className="toggle-control" aria-hidden="true"><span /></span>
-                </label>
-                {aiAssisted ? (
                 <div className="model-settings-form">
                   <label htmlFor="analysis-provider">Provider</label>
                   <select id="analysis-provider" value={selectedProvider} onChange={event => updateProvider(event.target.value)} disabled={!modelStatus || modelSaving}>
@@ -1485,9 +1521,6 @@ function InspectorApp() {
                     </button>
                   )}
                 </div>
-                ) : (
-                  <p className="ai-assist-off-note">Saved credentials are kept but unused. Both profile types still produce full measured cards; what turns off is the per-card reading of them.</p>
-                )}
                 <label className="autosave-toggle">
                   <span className="toggle-copy"><strong>Save analyses automatically</strong><small>Keep completed reports in your local analysis history.</small></span>
                   <input type="checkbox" checked={autoSave} onChange={event => void updateAutoSave(event.target.checked)} />
@@ -1604,11 +1637,13 @@ function InspectorApp() {
               )}
 
               <div className="key-field">
-                <Text>{!aiAssisted ? "AI assist is off — measured analysis only." : modelStatus === null ? "Loading model…" : modelStatus.configured
+                <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
                   ? `Model: ${modelStatus.provider} / ${modelStatus.model}`
-                  : modelStatus.error || "Choose a model in Analysis settings."}</Text>
+                  : modelStatus.error || "No model configured — measured analysis only."}</Text>
                   <br />
-                <Text className="italic text-muted-foreground">{aiAssisted ? "Change the provider or model from Analysis settings." : "Turn AI assist on in Analysis settings to have a model name each task's issue."}</Text>
+                <Text className="italic text-muted-foreground">{modelStatus?.configured
+                  ? "Change the provider or model from Analysis settings."
+                  : "Analysis needs no model. Add one in Analysis settings to ask a card for an AI reading."}</Text>
               </div>
             </section>
 
@@ -1629,7 +1664,9 @@ function InspectorApp() {
             <div className="action-row">
               <p>{profileType === "react"
                 ? "Your profile stays on this device. React commits are analyzed by measurement alone, so nothing leaves it unless you ask a card for an AI reading."
-                : aiAssisted ? "Your profile stays on this device and is analyzed via your configured model." : "Your profile stays on this device, and with AI assist off nothing leaves it."}</p>
+                : modelStatus?.configured
+                  ? "Your profile stays on this device and is analyzed via your configured model."
+                  : "Your profile stays on this device, and with no model configured nothing leaves it."}</p>
               <Button className="analyze-profile-button" size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
@@ -1674,15 +1711,6 @@ function InspectorApp() {
                 <span className="eyebrow">Analysis results</span>
                 <h1 className="results-title">{reactCards ? "Commits, longest first" : "React issues"}</h1>
                 <p>{summaryLine}</p>
-                {/* Said once, at the top: every render reason on every card
-                    below is unavailable rather than absent, and the fix is a
-                    setting in the recorder rather than anything here. */}
-                {reactCards && !reactCards.causesRecorded ? (
-                  <p className="results-note">
-                    This recording does not say why each component rendered. Re-record with React DevTools&rsquo;
-                    &ldquo;Record why each component rendered&rdquo; setting on to get render causes.
-                  </p>
-                ) : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
@@ -1692,6 +1720,7 @@ function InspectorApp() {
               <div className="result-actions">
                 {reactCards ? <ChartSwitch kind={chartKind} onChange={setChartKind} /> : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {reactCards && !reactCards.causesRecorded ? <CausesNotice /> : null}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
             </div>
@@ -1719,7 +1748,7 @@ function InspectorApp() {
                       )
                       : undefined}
                     insight={card.insight?.findings}
-                    onExplain={aiAssisted && modelStatus?.configured && analysisId && !isSample ? () => void explainReactCard(card) : undefined}
+                    onExplain={modelStatus?.configured && analysisId && !isSample ? () => void explainReactCard(card) : undefined}
                     explaining={explainingId === card.id}
                     insightError={insightErrors[card.id]}
                     rows={rows}
@@ -1806,7 +1835,7 @@ function InspectorApp() {
                       ? <TaskContribution card={card} kind={chartKind} onFocus={(nodeId) => exploreTask(card, nodeId)} />
                       : undefined}
                     insight={card.insight?.findings}
-                    onExplain={aiAssisted && modelStatus?.configured && analysisId && !isSample ? () => void explainTask(card) : undefined}
+                    onExplain={modelStatus?.configured && analysisId && !isSample ? () => void explainTask(card) : undefined}
                     explaining={explainingId === card.id}
                     insightError={insightErrors[card.id]}
                     rows={rows}

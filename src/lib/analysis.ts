@@ -124,18 +124,6 @@ export interface AnalysisRecord {
 
 export interface AnalysisSettings {
   autoSave: boolean;
-  /**
-   * Whether this install may call a model at all.
-   *
-   * Off, nothing here talks to a provider: frame classification falls back to
-   * its rules, no task inference runs, the React path is unavailable because
-   * its analyzer is entirely model-driven, and the settings panel hides the
-   * provider and credential fields rather than offering configuration that
-   * nothing would use. The cards a CPU profile produces with it off are the
-   * measured ones — every number on them was arithmetic over the samples, not
-   * a model's reading of them.
-   */
-  aiAssisted: boolean;
 }
 export interface AnalysisHistoryItem {
   id: string; createdAt: number; profileType: "cpu" | "react"; title: string;
@@ -200,16 +188,15 @@ function durableRecord(record: AnalysisRecord): AnalysisRecord {
 export async function getAnalysisSettings(): Promise<AnalysisSettings> {
   try {
     const parsed = JSON.parse(await readFile(settingsPath(), "utf8")) as Partial<AnalysisSettings>;
-    // Both default on, so an install that predates either setting keeps the
-    // behaviour it had: analyses saved, and a configured model used.
-    return { autoSave: parsed.autoSave !== false, aiAssisted: parsed.aiAssisted !== false };
-  } catch { return { autoSave: true, aiAssisted: true }; }
+    // Defaults on, so an install that predates the setting keeps the behaviour
+    // it had: analyses saved.
+    return { autoSave: parsed.autoSave !== false };
+  } catch { return { autoSave: true }; }
 }
 export async function saveAnalysisSettings(settings: Partial<AnalysisSettings>): Promise<AnalysisSettings> {
   const current = await getAnalysisSettings();
   const next: AnalysisSettings = {
     autoSave: settings.autoSave ?? current.autoSave,
-    aiAssisted: settings.aiAssisted ?? current.aiAssisted,
   };
   await writeJsonAtomic(settingsPath(), next);
   return next;

@@ -211,7 +211,7 @@ button, input { font: inherit; }
 }
 
 .results-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
-.result-actions { display: flex; align-items: flex-end; flex-direction: column; gap: 10px; flex: 0 0 auto; }
+.result-actions { position: relative; display: flex; align-items: flex-end; flex-direction: column; gap: 10px; flex: 0 0 auto; }
 .results-header .intro { text-align: left; }
 .results-title { margin: 13px 0 12px; font-size: clamp(26px, 4vw, 34px); line-height: 1.12; letter-spacing: -0.04em; }
 .usage-line {
@@ -224,18 +224,51 @@ button, input { font: inherit; }
   white-space: nowrap;
 }
 /*
- * A sentence under the results heading, as opposed to a row of figures.
- * `.usage-line` is deliberately `nowrap` so a token count never breaks across
- * two lines, which clips prose at the edge of the pane instead of wrapping it.
+ * A caveat about the recording itself, not about any one commit, so it is said
+ * once here rather than on every card. The light carries it at a glance; the
+ * sentence is a click away, because most runs have nothing to say here.
  */
-.results-note {
-  max-width: 72ch;
-  margin: 8px 0 0;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  line-height: 1.5;
+/*
+ * The popover hangs off the actions column, not off the button: the button is
+ * 26px wide and sits well inside the pane, so anchoring a fixed-width panel to
+ * it pushes the panel past the left edge. The column always ends at the pane
+ * edge.
+ */
+.causes-notice { display: flex; }
+.causes-notice-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 11%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 32%, transparent);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 150ms ease;
 }
-.result-model { display: grid; gap: 1px; min-width: 170px; padding: 3px 0 3px 18px; text-align: right; border-left: 1px solid var(--border); }
+.causes-notice-button:hover,
+.causes-notice-button.is-open { background: color-mix(in srgb, #f59e0b 22%, transparent); }
+.causes-notice-button .ui-icon { width: 15px; }
+.causes-notice-popover {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 5px;
+  width: min(290px, calc(100vw - 48px));
+  padding: 11px 13px;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .38);
+}
+.causes-notice-popover strong { color: var(--foreground); font-size: 12.5px; }
+.causes-notice-popover p { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.result-model { display: grid; gap: 1px; min-width: 170px; padding: 3px 0; text-align: right; }
 .result-model span { color: var(--muted-foreground); font-size: 12px; line-height: 1.4; }
 .result-model strong { color: var(--foreground); font-size: 14px; line-height: 1.4; }
 
@@ -950,17 +983,6 @@ body { background: var(--background, #151419); }
 .autosave-toggle input:checked + .toggle-control { background: var(--primary); }
 .autosave-toggle input:checked + .toggle-control span { transform: translateX(16px); }
 .autosave-toggle:focus-within .toggle-control { outline: 2px solid var(--ring); outline-offset: 2px; }
-.settings-popover .ai-assist-toggle { margin-top: 0; margin-bottom: 18px; }
-.ai-assist-off-note {
-  margin: 0;
-  padding: 13px 14px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.5;
-  background: var(--muted);
-  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 10px;
-}
 .settings-privacy { margin: 11px 2px 0; color: var(--muted-foreground); font-size: 11px; }
 
 .workspace { width: min(1220px, calc(100% - 40px)); padding: 42px 0 70px; }
@@ -1351,7 +1373,30 @@ body { background: var(--background, #151419); }
 .results-header { align-items: center; padding-bottom: 27px; border-bottom: 1px solid var(--border); }
 .results-header .intro { min-width: 0; }
 .results-header .eyebrow { font-size: 10px; }
-.results-title { margin: 10px 0 10px; font-size: clamp(30px, 4vw, 42px); }
+/*
+ * Scoped to the header so it outweighs `.intro h1`, which the results heading
+ * otherwise inherits its display size from. The title is a fixed label — the
+ * summary line under it carries the figures — so it reads as a heading, not as
+ * the page's largest element.
+ */
+.results-header .results-title {
+  max-width: none;
+  margin: 8px 0 10px;
+  font-size: clamp(23px, 2.6vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+/*
+ * Also scoped past `.intro p`, which otherwise sets these to the landing
+ * page's 16px body size and caps them at 480px. They are a caption under the
+ * heading, and `.usage-line` needs to outweigh both to keep its own size.
+ */
+.results-header .intro p {
+  max-width: none;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.results-header .intro .usage-line { font-size: 12px; }
 .hotspot-list { gap: 18px; margin-top: 24px; }
 .hotspot-card {
   gap: 0;
@@ -1533,7 +1578,12 @@ body { background: var(--background, #151419); }
 @media (max-width: 680px) {
   .workspace.results { width: min(100% - 24px, 560px); padding-top: 24px; }
   .results-back { margin-bottom: 20px; }
-  .results-header { align-items: flex-start; }
+  /*
+   * The controls do not fit beside the heading here, and crowding them in
+   * breaks the title to one word per line: give them their own row.
+   */
+  .results-header { align-items: flex-start; flex-wrap: wrap; }
+  .result-actions { flex-basis: 100%; }
   .hotspot-head { grid-template-columns: auto minmax(0,1fr); }
   .hotspot-time { grid-column: 2; width: fit-content; }
   .hot-path-rows { padding-inline: 16px; }
@@ -1645,7 +1695,78 @@ body {
 }
 .explore-figures strong { font-size: 18px; color: var(--primary); }
 .explore-figures span { opacity: 0.5; }
-.explore-caveat { font-size: 12px; color: var(--muted-foreground); }
+/* A note under a chart or a table. Capped at a readable measure rather than
+   taking the container's: these sit under charts that run the width of the
+   page, and at 12px an uncapped line ran past 150 characters. Italic stays,
+   because what is left under this class is the one-line aside it suits; the
+   multi-line notes moved to `.chart-notes` below. */
+.explore-caveat {
+  max-width: 72ch;
+  font-size: 12px;
+  line-height: 1.55;
+  font-style: italic;
+  color: var(--muted-foreground);
+}
+
+/* ── The notes under a chart ──────────────────────────────────────────────────
+   Three jobs that used to share one paragraph, now stacked in the order they
+   are read: the reading key on arrival, the controls when a reader wants to
+   move, and the caveats folded away until a figure looks wrong. The key is
+   upright and at the body colour because it is the one line here that is not
+   an aside. */
+.chart-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 72ch;
+  margin-top: 10px;
+}
+.chart-notes-reading {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+.chart-notes-controls {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
+.chart-notes-caveats { font-size: 12px; color: var(--muted-foreground); }
+.chart-notes-caveats > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.chart-notes-caveats > summary::-webkit-details-marker { display: none; }
+.chart-notes-caveats > summary::before {
+  content: "\25B8";
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+.chart-notes-caveats[open] > summary::before { transform: rotate(90deg); }
+.chart-notes-caveats > summary:hover { opacity: 1; color: var(--foreground); }
+/* Block, not flex: a flex container drops the list markers, and the markers are
+   most of what makes these read as a list rather than as the paragraph they
+   used to be. */
+.chart-notes-caveats ul {
+  margin: 7px 0 0;
+  padding-left: 1.2em;
+  list-style: disc;
+  line-height: 1.55;
+}
+.chart-notes-caveats li { margin: 0 0 5px; }
+.chart-notes-caveats li:last-child { margin-bottom: 0; }
+.chart-notes-caveats li::marker { opacity: 0.6; }
+.chart-notes-caveats strong { color: var(--foreground); font-weight: 600; }
+.chart-notes-caveats code,
+.chart-notes-reading code { font-family: var(--font-mono, monospace); font-size: 11.5px; }
 .explore-path {
   display: flex;
   flex-wrap: wrap;
@@ -1658,7 +1779,6 @@ body {
 }
 .explore-path-label { text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
 .explore-path-frame + .explore-path-frame::before { content: "→ "; opacity: 0.5; }
-.explore-caveat { font-style: italic; }
 
 /* A segmented control rather than four boxes in a row. The component ships one
    already, but the app sets `--radius: 0` and a 16px body size, which squares
@@ -2126,6 +2246,7 @@ body {
 .react-component-name { margin-right: 6px; }
 .react-component-table code { font-size: 11px; color: var(--muted-foreground); }
 .react-components .explore-caveat { margin-top: 10px; }
+.react-components .chart-notes { margin-top: 12px; }
 
 /* ── A task's cost as parts of a whole ────────────────────────────────────────
    The categorical palette the contribution charts paint with. Eight slots in a
@@ -2437,12 +2558,6 @@ body {
 
 /* Which drawing the cards carry, while both are on offer. */
 .chart-switch { display: inline-flex; align-items: center; gap: 6px; }
-.chart-switch-label {
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-
 @media (max-width: 640px) {
   .contribution { padding-inline: 14px; }
   .contribution-legend { grid-template-columns: 1fr; }
