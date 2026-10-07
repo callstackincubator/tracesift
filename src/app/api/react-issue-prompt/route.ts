@@ -1,4 +1,4 @@
-import { getRecord, getSavedAnalysis, updateSavedAnalysis } from "@/lib/analysis";
+import { findAnalysis, updateSavedAnalysis } from "@/lib/analysis";
 import { debugLog } from "@/lib/debug-log";
 import { ZERO_REACT_USAGE } from "@/lib/react-analyzer";
 import { buildReactFixPrompt } from "@/lib/prompts";
@@ -31,7 +31,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!analysisId || !issueId) {
     return json({ error: "analysisId and issueId are required." }, 400);
   }
-  const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
+  const record = await findAnalysis(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
   }

@@ -10,6 +10,7 @@ import type { TaskCardSet } from "./task-cards";
 import { normalizeStoredReactIssues, type ReactIssue } from "./react-analyzer.ts";
 import type { ReactCardSet } from "./react-cards";
 import type { ReactExplore } from "./react-explore";
+import { sampleAnalysis } from "./sample-analyses.ts";
 
 export const MAX_SUMMARY_BULLETS = 3;
 /**
@@ -230,7 +231,9 @@ export async function listSavedAnalyses(): Promise<AnalysisHistoryItem[]> {
     totalTokens: entry.usage?.totalTokens ?? 0,
     issueCount: entry.profileType === "react"
       ? entry.reactCards?.cards.length ?? entry.reactIssues.length
-      : entry.hotspots.length,
+      // The CPU path's cards live in `taskCards`; `cards` and `hotspots` are
+      // the two engines it replaces, only populated under `TRACESIFT_CPU_ENGINE`.
+      : entry.taskCards?.cards.length ?? entry.cards?.length ?? entry.hotspots.length,
   })).sort((a, b) => b.createdAt - a.createdAt);
 }
 export async function deleteSavedAnalysis(id: string): Promise<boolean> {
@@ -267,6 +270,32 @@ function pruneExpired(): void {
 export function getRecord(id: string): AnalysisRecord | undefined {
   pruneExpired();
   return records.get(id);
+}
+
+/**
+ * The record behind an analysis id, wherever that record lives: in memory for
+ * one still being read, in `~/.tracesift` for one the user saved, or in the
+ * bundle for one of the two samples.
+ *
+ * Every route that serves a card, a drill-down or a reading of one resolves an
+ * id this way, so a sample opens as far as an upload does. Before this, the
+ * samples were handed to the browser and never registered anywhere, and every
+ * link out of a sample report — Explore, an AI reading, a copied prompt — asked
+ * for a record the server had no idea about and was told the analysis had
+ * expired.
+ */
+export async function findAnalysis(id: string): Promise<AnalysisRecord | undefined> {
+  const live = getRecord(id);
+  if (live) return live;
+  const sample = sampleAnalysis(id);
+  // Seeded like a saved analysis is, so a reading written onto one card is
+  // there for the next request rather than inferred again, and so the copy
+  // this request got is the copy the next one reads.
+  if (sample) {
+    records.set(id, sample);
+    return sample;
+  }
+  return getSavedAnalysis(id);
 }
 
 export function putRecord(record: AnalysisRecord): void {

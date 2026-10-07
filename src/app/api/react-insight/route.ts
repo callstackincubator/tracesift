@@ -10,7 +10,7 @@
 
 import { tmpdir } from "node:os";
 
-import { getRecord, getSavedAnalysis, updateSavedAnalysis } from "@/lib/analysis";
+import { findAnalysis, updateSavedAnalysis } from "@/lib/analysis";
 import { inferReactCardInsight } from "@/lib/react-insight";
 import { debugLog } from "@/lib/debug-log";
 
@@ -31,7 +31,7 @@ export async function POST(request: Request): Promise<Response> {
   const cardId = typeof body?.cardId === "string" ? body.cardId : "";
   if (!analysisId || !cardId) return json({ error: "analysisId and cardId are required." }, 400);
 
-  const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
+  const record = await findAnalysis(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
   }

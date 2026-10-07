@@ -9,7 +9,7 @@
  * then local, which is the whole point of a strip.
  */
 
-import { getRecord, getSavedAnalysis } from "@/lib/analysis";
+import { findAnalysis } from "@/lib/analysis";
 
 export const runtime = "nodejs";
 
@@ -18,9 +18,7 @@ export async function GET(request: Request): Promise<Response> {
   const id = params.get("a") ?? "";
   if (!id) return Response.json({ error: "An analysis id is required." }, { status: 400 });
 
-  // The in-memory record first: an analysis is written to disk only when it was
-  // saved, and Explore is normally opened on one that is still fresh.
-  const record = getRecord(id) ?? (await getSavedAnalysis(id));
+  const record = await findAnalysis(id);
   if (!record?.reactExplore) {
     return Response.json({
       error: record

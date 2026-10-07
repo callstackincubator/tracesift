@@ -1,4 +1,4 @@
-import { getRecord, getSavedAnalysis, updateSavedAnalysis, type TokenUsage } from "@/lib/analysis";
+import { findAnalysis, type TokenUsage, updateSavedAnalysis } from "@/lib/analysis";
 import { debugLog } from "@/lib/debug-log";
 import { buildCardPrompt, buildTaskPrompt } from "@/lib/card-prompt";
 import { buildCpuFixPrompt } from "@/lib/prompts";
@@ -29,7 +29,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!analysisId || !hotspotId) {
     return json({ error: "analysisId and hotspotId are required." }, 400);
   }
-  const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
+  const record = await findAnalysis(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
   }

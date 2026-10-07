@@ -1,4 +1,5 @@
 import type { AnalysisRecord } from "./analysis";
+import { SAMPLE_REACT_EXPLORE } from "./sample-react-explore.ts";
 
 /**
  * Bundled reports are static, sanitized UI data — never an uploaded profile.
@@ -1164,6 +1165,11 @@ export const REACT_SAMPLE_ANALYSIS: AnalysisRecord = {
     "causesRecorded": false,
     "unnamedFiberCount": 0
   },
+  // The drill-down's data, from `react-explore.ts` over the same recording the
+  // cards above came from, so the strip and the cards cannot disagree about a
+  // commit. Generated — `scripts/build-sample-react-explore.mjs` writes it and
+  // `tests/analysis-history.test.mjs` rebuilds it to prove it has not drifted.
+  reactExplore: SAMPLE_REACT_EXPLORE,
   reactIssues: [],
   prompts: {},
   // Every figure here resolved from arithmetic over the export, so no model ran
@@ -1176,3 +1182,36 @@ export const REACT_SAMPLE_SUMMARY = {
   rootCount: 1, commitCount: 4, totalCommitRenderDurationMs: 173, peakCommitDurationMs: 169.7,
   commitsOverBudget: 1, omittedEvidenceCommitCount: 0, frameBudgetMs: 16,
 };
+
+/**
+ * The bundled samples, by the id their cards, hand-offs and Explore links carry.
+ *
+ * A sample is served from here rather than from the analysis store because it
+ * was never uploaded: nothing put it in the store, and nothing wrote it to
+ * history. `/api/samples/*` hands the report to the browser, and every route
+ * the report then links to — a task's drill-down, a commit's, an AI reading of
+ * either — asks the server for the record by id and used to be told the
+ * analysis did not exist.
+ */
+const SAMPLES: Record<string, AnalysisRecord> = {
+  [CPU_SAMPLE_ANALYSIS.id]: CPU_SAMPLE_ANALYSIS,
+  [REACT_SAMPLE_ANALYSIS.id]: REACT_SAMPLE_ANALYSIS,
+};
+
+/**
+ * One bundled sample, as a copy the caller may write to.
+ *
+ * The routes that read a record also write to it — an insight onto a card, a
+ * cached prompt dropped, tokens added to the total — and these two records are
+ * module constants shared by every request this process serves. A copy keeps a
+ * reading of a sample from leaking into the next reader's.
+ *
+ * `createdAt` is 0 on the constant, so a sample never claims to be recent. The
+ * copy needs a real one, because the store prunes anything older than its TTL
+ * and would drop this between the request that seeded it and the next.
+ */
+export function sampleAnalysis(id: string): AnalysisRecord | undefined {
+  const sample = SAMPLES[id];
+  if (!sample) return undefined;
+  return { ...structuredClone(sample), createdAt: Date.now() };
+}

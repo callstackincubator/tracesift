@@ -1743,7 +1743,7 @@ function InspectorApp() {
                         <ReactContribution
                           card={card}
                           kind={chartKind}
-                          onExplore={analysisId && !isSample ? () => exploreReactCommit(card) : undefined}
+                          onExplore={analysisId ? () => exploreReactCommit(card) : undefined}
                         />
                       )
                       : undefined}
@@ -1758,7 +1758,11 @@ function InspectorApp() {
                     copied={copiedId === card.id}
                     busy={isSample || promptLoadingId !== null}
                     onCopy={() => void copyHandoff(card.id)}
-                    onExplore={analysisId && !isSample ? () => exploreReactCommit(card) : undefined}
+                    // Open on a sample too, as a task card does. The sample
+                    // used to be the one React report with no commit timeline
+                    // behind it, so this was the one card whose drill-down
+                    // could only have opened on an error.
+                    onExplore={analysisId ? () => exploreReactCommit(card) : undefined}
                   />
                 );
               }) : null}

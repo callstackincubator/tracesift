@@ -10,7 +10,7 @@
  * opening. The analysis already lives on the server, so the tab asks for it.
  */
 
-import { getRecord, getSavedAnalysis } from "@/lib/analysis";
+import { findAnalysis } from "@/lib/analysis";
 
 export const runtime = "nodejs";
 
@@ -22,9 +22,7 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ error: "An analysis id and a task index are required." }, { status: 400 });
   }
 
-  // The in-memory record first: an analysis is only written to disk when the
-  // user saved it, and Explore is normally opened on one that is still fresh.
-  const record = getRecord(id) ?? (await getSavedAnalysis(id));
+  const record = await findAnalysis(id);
   const card = record?.taskCards?.cards.find((entry) => entry.taskIndex === taskIndex);
   if (!record || !card) {
     return Response.json({ error: "That task is not part of this analysis." }, { status: 404 });
