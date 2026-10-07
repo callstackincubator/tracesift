@@ -852,10 +852,10 @@ function pathTo(root: TaskTreeNode, id: string): TaskTreeNode[] {
  * The view holds the whole task and shows a slice of it. Rooting it at the top
  * of the task makes a terrible first screen — a wall of `Function call`,
  * `(anonymous)`, `performWorkOnRoot`, `beginWork` and ten more React frames
- * before any product code appears — but a view that only ever holds the focused
- * subtree can never answer "how did we get here, and what else ran beside
- * this", which is the second question every single time. So the ancestors fold
- * into a breadcrumb that expands, and the siblings stay one click away.
+ * before any product code appears — so it opens on the focused frame, with one
+ * way back out to the whole task. The context a reader wants from there — what
+ * ran above and beside this frame — is the task's own views a click away, not
+ * two more rows of links crowding the header.
  */
 function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initialFocus: string }) {
   const { card } = handoff;
@@ -865,8 +865,6 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
   // culprit table and the hand-off the developer copies from this page.
   const locations = useMemo(() => taskCardLocations(card), [card]);
   const focus = path[path.length - 1];
-  const parent = path.length > 1 ? path[path.length - 2] : null;
-  const siblings = parent ? parent.children.filter((child) => child.id !== focus.id) : [];
   const refocus = (id: string) => {
     setFocusId(id);
     // Keep the address bar in step so the view can be reloaded or shared at the
@@ -910,33 +908,8 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
       </header>
 
       {path.length > 1 ? (
-        <nav className="explore-breadcrumb" aria-label="Frames above the focused one">
-          <details>
-            <summary>
-              <span className="explore-path-label">above</span>
-              {path.length - 1} frame{path.length === 2 ? "" : "s"} up to the task root
-            </summary>
-            <ol>
-              {path.slice(0, -1).map((node) => (
-                <li key={node.id}>
-                  <button type="button" className="explore-tree-focus" onClick={() => refocus(node.id)}>{node.name}</button>
-                  <em>{formatMs(node.totalMs)}</em>
-                </li>
-              ))}
-            </ol>
-          </details>
+        <nav className="explore-breadcrumb" aria-label="Leave the focused frame">
           <Button size="sm" variant="outline" onClick={() => refocus(card.tree.id)}>Show the whole task</Button>
-        </nav>
-      ) : null}
-
-      {siblings.length > 0 ? (
-        <nav className="explore-siblings" aria-label="Frames beside the focused one">
-          <span className="explore-path-label">beside</span>
-          {siblings.map((sibling) => (
-            <button type="button" key={sibling.id} className="explore-tree-focus" onClick={() => refocus(sibling.id)}>
-              {sibling.name} <em>{formatMs(sibling.totalMs)}</em>
-            </button>
-          ))}
         </nav>
       ) : null}
 

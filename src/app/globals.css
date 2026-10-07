@@ -1984,27 +1984,10 @@ body {
 }
 .explore-tree-focus:hover { color: var(--primary); }
 .explore-tree-focus em { color: var(--muted-foreground); font-style: normal; }
-/* The ancestors of the focused frame, folded away until they are asked for. */
+/* The one way back out of a focused frame, to the whole task. */
 .explore-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.explore-breadcrumb summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
-.explore-breadcrumb ol {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0 0 0 4px;
-  border-left: 1px solid var(--border);
-}
-.explore-breadcrumb li { display: flex; gap: 8px; padding: 3px 0 3px 10px; }
-.explore-breadcrumb li em { color: var(--muted-foreground); font-style: normal; font-variant-numeric: tabular-nums; }
-.explore-siblings {
-  display: flex;
-  align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12px;
