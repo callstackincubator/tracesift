@@ -10,14 +10,33 @@ import { getConfiguredRuntime } from "@callstack/tracesift/runtime";
 import type { AnalysisModel, TokenUsage } from "./analysis";
 import { debugLog } from "./debug-log.ts";
 
+/**
+ * Reasoning tokens are billed against the same output budget as the answer, so a
+ * tight cap can be spent entirely on thinking and return no report at all. Leave
+ * enough room for both; `maxTokens` is still clamped to what the model allows.
+ */
+export const ANALYSIS_MAX_OUTPUT_TOKENS = 16_384;
+
+/** No text at all means reasoning consumed the whole budget, which needs a different remedy. */
+export function truncationMessage(finalText: string): string {
+  return finalText
+    ? "The agent's response was cut off at the model's output token limit before it finished. Try again."
+    : "The model used its entire output budget on reasoning and returned no report. Try again, or choose a different model in Analysis settings.";
+}
+
+/** The SDK reports truncation as "length"; "max_tokens" is a provider-level name it never emits. */
+const TRUNCATED = "length";
+
 /** Error with an HTTP status so route handlers can map failures 1:1. */
 export class AgentError extends Error {
   readonly status: number;
+  readonly code?: "reasoning_budget_exhausted";
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: "reasoning_budget_exhausted") {
     super(message);
     this.name = "AgentError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -120,7 +139,7 @@ export interface RunAgentResult {
   turns: number;
   /** Names of the tools the agent called, in order. */
   toolCalls: string[];
-  /** How the final assistant message ended (end_turn | max_tokens | error | …). */
+  /** How the final assistant message ended (stop | length | toolUse | error | …). */
   lastStopReason: string | undefined;
   /** Token usage summed over all assistant messages of the run. */
   usage: TokenUsage;
@@ -316,7 +335,7 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
             if (message.stopReason === "error" || message.stopReason === "aborted") {
               lastError = message.errorMessage ?? lastError;
             }
-            if (message.stopReason === "max_tokens") {
+            if (message.stopReason === TRUNCATED) {
               log(logPrefix, "WARNING: assistant message was cut off at the model's max output tokens");
             }
           } else if (message.role === "toolResult") {
@@ -371,10 +390,11 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       }
       throw new AgentError(502, "The analysis agent failed. Check provider access and try again.");
     }
-    if (lastStopReason === "max_tokens") {
+    if (lastStopReason === TRUNCATED) {
       throw new AgentError(
         502,
-        "The agent's response was cut off at the model's output token limit before it finished. Try again."
+        truncationMessage(finalText),
+        finalText ? undefined : "reasoning_budget_exhausted",
       );
     }
 

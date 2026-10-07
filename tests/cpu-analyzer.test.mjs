@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { groupBottlenecks } from '../src/lib/bottlenecks.ts';
 import { analyzeCpuBottlenecks, CpuAnalysisError, parseCpuHotspotReport } from '../src/lib/cpu-analyzer.ts';
+import { ANALYSIS_MAX_OUTPUT_TOKENS, truncationMessage } from '../src/lib/pi-agent.ts';
 
 const usage = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, costUsd: 0 };
 const model = { provider: "Anthropic", model: "Claude test" };
@@ -24,7 +25,7 @@ test('CPU analyzer requests one bounded JSON response with no tools', async () =
     calls += 1;
     assert.deepEqual(options.builtinTools, []);
     assert.deepEqual(options.customTools, []);
-    assert.equal(options.maxOutputTokens, 4096);
+    assert.equal(options.maxOutputTokens, ANALYSIS_MAX_OUTPUT_TOKENS);
     assert.deepEqual(options.inputBreakdown, { fixture: true });
     assert.match(options.systemPrompt, /Return exactly one JSON object/);
     assert.doesNotMatch(options.systemPrompt, /report_hotspots/);
@@ -34,8 +35,7 @@ test('CPU analyzer requests one bounded JSON response with no tools', async () =
       finalText: JSON.stringify({ hotspots: [{
         id: groups[0].id,
         title: 'Expensive markdown tokenization',
-        summary: ['tokenizeMarkdown accounts for the measured self time.'],
-        supportingFunctionIds: [groups[0].functions[0].id],
+        functions: [{ id: groups[0].functions[0].id, evidence: 'tokenizeMarkdown accounts for the measured self time.' }],
       }] }),
       turns: 1, toolCalls: [], lastStopReason: 'stop', usage, model,
     };
@@ -63,4 +63,12 @@ test('CPU analyzer fails once when the final response has no usable report', asy
     })),
     (error) => error instanceof CpuAnalysisError && error.status === 502,
   );
+});
+
+test('the output budget leaves room for reasoning tokens, which are billed against it', () => {
+  // A reasoning model can spend the whole budget thinking and return no text at
+  // all, so the cap has to exceed what a report alone would need.
+  assert.ok(ANALYSIS_MAX_OUTPUT_TOKENS > 4096, 'budget must exceed the reasoning burst that exhausted it');
+  assert.match(truncationMessage(''), /entire output budget on reasoning/);
+  assert.match(truncationMessage('{"hotspots":'), /cut off at the model's output token limit/);
 });

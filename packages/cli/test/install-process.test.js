@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
 import { downloadArtifact, install, validateRelease, verifyInstallation } from '../src/install.js';
 import { acquireLock, launch, alive, run } from '../src/process.js';
-import { parsePort, assertPortAvailable, waitForReady, openBrowser } from '../src/start.js';
+import { parsePort, assertPortAvailable, waitForReady, openBrowser, heapLimitMb, serverNodeArgs } from '../src/start.js';
 
 async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const bytes = Buffer.from('fake artifact');
@@ -183,4 +183,17 @@ test('browser launch detaches and handles opening failures without stopping the 
   });
   assert(detached);
   assert.doesNotThrow(() => browser.emit('error', new Error('missing opener')));
+});
+
+test('the server heap is sized from physical memory and yields to an explicit NODE_OPTIONS', () => {
+  const gb = 1024 ** 3;
+  assert.equal(heapLimitMb(4 * gb), 2048, 'small machines keep the floor rather than half of 4 GB');
+  assert.equal(heapLimitMb(16 * gb), 8192);
+  assert.equal(heapLimitMb(48 * gb), 8192, 'large machines are capped, not given half of 48 GB');
+  assert.ok(heapLimitMb(2 * gb) <= 2048 * 2);
+
+  assert.deepEqual(serverNodeArgs({}), [`--max-old-space-size=${heapLimitMb()}`]);
+  assert.deepEqual(serverNodeArgs({ NODE_OPTIONS: '--max-old-space-size=2048' }), []);
+  assert.deepEqual(serverNodeArgs({ NODE_OPTIONS: '--max_old_space_size=2048' }), [], 'node accepts underscores too');
+  assert.deepEqual(serverNodeArgs({ NODE_OPTIONS: '--trace-warnings' }), [`--max-old-space-size=${heapLimitMb()}`]);
 });

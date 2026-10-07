@@ -1,4 +1,4 @@
-import { isReadableSourcePath } from "./source-location.ts";
+import { isSourceLabel } from "./source-location.ts";
 import type { Bottleneck } from "./bottlenecks";
 import type { ReactIssue } from "./react-analyzer";
 
@@ -10,14 +10,18 @@ function compactText(text: string): string {
   return text.length <= 200 ? text : `${text.slice(0, 140)}…${text.slice(-59)}`;
 }
 
-/** Keep names from URL-backed frames, but never present a URL as a source file. */
+/**
+ * Keep names from URL-backed frames, but never present a URL as a source file.
+ * The labels parsed here are `nodeLabel`'s, so the position in one is already
+ * compacted and `isSourceLabel` is the test that holds for that shape.
+ */
 function sourceFrame(label: string): { name: string; location?: string } {
   const match = /^(.*) \((.*):\d+:\d+\)$/.exec(label);
   if (!match) return { name: label };
   const [, name, location] = match;
   return {
     name,
-    location: isReadableSourcePath(location) ? label.slice(name.length + 2, -1) : undefined,
+    location: isSourceLabel(location) ? label.slice(name.length + 2, -1) : undefined,
   };
 }
 

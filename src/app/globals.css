@@ -189,10 +189,8 @@ button, input { font: inherit; }
   font-weight: 650;
 }
 
-.action-row { justify-content: space-between; gap: 24px; margin-top: 22px; }
-.action-row p { margin: 0; color: var(--muted-foreground); font-size: 13px; }
+.action-row { justify-content: flex-end; gap: 24px; margin-top: 22px; }
 
-.key-field { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
 
 .error-detail-wrap { margin-top: 10px; }
 .error-detail-wrap summary { cursor: pointer; font-size: 12.5px; font-weight: 650; user-select: none; }
@@ -211,7 +209,7 @@ button, input { font: inherit; }
 }
 
 .results-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
-.result-actions { display: flex; align-items: flex-end; flex-direction: column; gap: 10px; flex: 0 0 auto; }
+.result-actions { position: relative; display: flex; align-items: flex-end; flex-direction: column; gap: 10px; flex: 0 0 auto; }
 .results-header .intro { text-align: left; }
 .results-title { margin: 13px 0 12px; font-size: clamp(26px, 4vw, 34px); line-height: 1.12; letter-spacing: -0.04em; }
 .usage-line {
@@ -223,7 +221,52 @@ button, input { font: inherit; }
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
-.result-model { display: grid; gap: 1px; min-width: 170px; padding: 3px 0 3px 18px; text-align: right; border-left: 1px solid var(--border); }
+/*
+ * A caveat about the recording itself, not about any one commit, so it is said
+ * once here rather than on every card. The light carries it at a glance; the
+ * sentence is a click away, because most runs have nothing to say here.
+ */
+/*
+ * The popover hangs off the actions column, not off the button: the button is
+ * 26px wide and sits well inside the pane, so anchoring a fixed-width panel to
+ * it pushes the panel past the left edge. The column always ends at the pane
+ * edge.
+ */
+.causes-notice { display: flex; }
+.causes-notice-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 11%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 32%, transparent);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.causes-notice-button:hover,
+.causes-notice-button.is-open { background: color-mix(in srgb, #f59e0b 22%, transparent); }
+.causes-notice-button .ui-icon { width: 15px; }
+.causes-notice-popover {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 5px;
+  width: min(290px, calc(100vw - 48px));
+  padding: 11px 13px;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .38);
+}
+.causes-notice-popover strong { color: var(--foreground); font-size: 12.5px; }
+.causes-notice-popover p { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.result-model { display: grid; gap: 1px; min-width: 170px; padding: 3px 0; text-align: right; }
 .result-model span { color: var(--muted-foreground); font-size: 12px; line-height: 1.4; }
 .result-model strong { color: var(--foreground); font-size: 14px; line-height: 1.4; }
 
@@ -321,6 +364,31 @@ button, input { font: inherit; }
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+/* The callers that reached this row's frame. Sits between the title and the
+   figures because it finishes the row's name: `isReceiptBeingScanned` alone is
+   a function, and `via reportMatchesTodoBucket › isApproveAction` is a finding. */
+.row-callers {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 9px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.row-callers-label {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
 .row-figure-line {
   display: flex;
   align-items: baseline;
@@ -335,6 +403,15 @@ button, input { font: inherit; }
   font-weight: 700;
   line-height: 1;
 }
+/* The second of a row's two figures: self time beside total time. */
+.row-secondary {
+  flex: 1 1 auto;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .row-share {
   flex: 0 0 auto;
   color: var(--muted-foreground);
@@ -345,12 +422,37 @@ button, input { font: inherit; }
 }
 .row-bar-track { height: 4px; background: var(--muted); overflow: hidden; border-radius: 999px; }
 .row-bar-fill { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
+/* A culprit's name doubles as the way into Explore focused on that frame. */
+.row-title-link {
+  align-self: flex-start;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  text-underline-offset: 3px;
+}
+.row-title-link:hover { color: var(--primary); }
+/* How a row's time split across separate calls: counts, total, worst single call. */
+.row-shape {
+  margin: 7px 0 0;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .row-caption {
   margin: 7px 0 0;
   color: var(--muted-foreground);
   font-size: 13px;
   line-height: 1.45;
-  overflow-wrap: anywhere;
+  /* overflow-wrap: anywhere; */
   white-space: pre-line;
   margin-top: 20px;
 }
@@ -362,16 +464,85 @@ button, input { font: inherit; }
   opacity: 0.75;
 }
 
+/* The one inferred block on an otherwise measured card, so it is set apart
+   rather than blended in: a reader has to be able to see where the arithmetic
+   stops and the model's reading begins. */
+.card-insight {
+  margin: 0 20px 16px;
+  padding: 13px 15px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 10px;
+}
+.card-insight-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.card-insight ul { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; list-style: none; }
+.card-insight li {
+  position: relative;
+  padding-left: 15px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.card-insight li::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 75%, transparent);
+}
+.explore-header .card-insight { margin: 14px 0 0; }
+.card-insight-error { margin: 0 20px 14px; text-align: left; }
+
 .hotspot-footer {
   display: grid;
-  justify-items: end;
+  justify-items: stretch;
   gap: 8px;
   margin-top: 4px;
 }
+/* The footer carries two kinds of action: asking for a reading on the left,
+   and taking the finding elsewhere on the right. */
+.hotspot-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.hotspot-footer-lead { display: flex; align-items: center; gap: 8px; }
 .hotspot-actions {
-  display: grid;
-  justify-items: end;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+/* Tinted so the one action that produces something new reads differently from
+   the two that only carry the card away. */
+.explain-action-button {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 32%, transparent);
+}
+/* Carries the tooltip for the disabled button, which takes no pointer events
+   of its own, so it must not swallow the cursor itself. */
+.explain-action-wrap { display: inline-flex; }
+.explain-action-button:disabled { opacity: 0.55; }
+.explain-action-button:hover:not(:disabled) {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 46%, transparent);
 }
 .prompt-action-button {
   height: auto;
@@ -380,6 +551,9 @@ button, input { font: inherit; }
   color: var(--muted-foreground);
   border-color: var(--border);
 }
+/* The base Button ships no pointer cursor, so every clickable one here says so
+   for itself. */
+.prompt-action-button:not(:disabled) { cursor: pointer; }
 .prompt-action-button svg {
   width: 13px;
   height: 13px;
@@ -404,7 +578,6 @@ button, input { font: inherit; }
   .section-heading p { margin-top: 6px; text-align: right; }
   .upload-pane { min-height: 190px; }
   .action-row { align-items: stretch; flex-direction: column; }
-  .action-row p { text-align: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -814,77 +987,36 @@ body { background: var(--background, #151419); }
 .settings-privacy { margin: 11px 2px 0; color: var(--muted-foreground); font-size: 11px; }
 
 .workspace { width: min(1220px, calc(100% - 40px)); padding: 42px 0 70px; }
-.hero-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(320px, .9fr) minmax(560px, 1.1fr);
-  align-items: center;
-  gap: clamp(32px, 4vw, 70px);
-  min-height: 510px;
-  padding: clamp(30px, 3.5vw, 52px);
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 12% -10%, color-mix(in srgb, var(--primary) 19%, transparent), transparent 42%),
-    linear-gradient(135deg, color-mix(in srgb, var(--card) 96%, var(--primary)) 0%, var(--card) 60%, color-mix(in srgb, var(--card) 91%, #071635) 100%);
-  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
-  border-radius: 14px;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, .2), 0 1px 0 rgba(255,255,255,.04) inset;
-  isolation: isolate;
+/*
+ * The landing page: what the two profiles are, what each one's analysis says,
+ * and a way into either. One slide per profile rather than a pair swapping
+ * under a headline — the choice is the page's actual question, so it is put to
+ * the reader directly instead of animated past them.
+ */
+.landing { padding: 0 0 8px; }
+.landing-head {
+  max-width: 760px;
+  margin-inline: auto;
+  text-align: center;
+  animation: landing-head-enter 620ms cubic-bezier(.16, 1, .3, 1) both;
 }
-.hero-stage::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  opacity: .16;
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(90deg, transparent 12%, black 72%, transparent);
-}
-.hero-stage::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  right: -150px;
-  bottom: -210px;
-  width: 460px;
-  height: 460px;
-  background: color-mix(in srgb, var(--primary) 20%, transparent);
-  border-radius: 50%;
-  filter: blur(90px);
-}
-.intro-copy {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-}
-.intro .eyebrow {
-  padding: 6px 10px;
-  color: color-mix(in srgb, var(--primary) 86%, white);
-  background: color-mix(in srgb, var(--primary) 11%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
-  border-radius: 999px;
-  font-size: 11px;
-  letter-spacing: .14em;
-}
-.intro h1 {
-  max-width: 650px;
-  margin: 14px 0 10px;
-  font-size: clamp(40px, 4.75vw, 62px);
-  line-height: .94;
-  letter-spacing: -.065em;
+.landing-head h1 {
+  margin: 0;
+  font-size: clamp(30px, 3.6vw, 44px);
+  font-weight: 470;
+  line-height: 1.02;
+  letter-spacing: -.055em;
   text-wrap: balance;
 }
-.intro p { max-width: 480px; font-size: 16px; line-height: 1.6; }
-.intro-actions {
-  width: fit-content;
-  max-width: 100%;
-  margin-top: auto;
+.landing-head p {
+  margin: 12px auto 0;
+  max-width: 520px;
+  color: var(--muted-foreground);
+  font-size: 16px;
+  line-height: 1.55;
 }
-.platform-list { display: flex; flex-wrap: wrap; gap: 0; margin-top: 22px; }
+.platform-list { display: flex; flex-wrap: wrap; gap: 0; margin-top: 16px; }
+.landing-head .platform-list { justify-content: center; }
 .platform-list span {
   display: inline-flex;
   align-items: center;
@@ -900,77 +1032,192 @@ body { background: var(--background, #151419); }
 }
 .platform-list span:first-child { padding-left: 0; border-left: 0; }
 .platform-list svg { width: 14px; height: 14px; fill: none; stroke: var(--primary); stroke-width: 1.65; }
-.intro-copy .get-started-button {
-  width: 100%;
+
+/*
+ * One slide centred in the strip with a shoulder of the slides either side of
+ * it, which run off the edges. Every slide stays in the track, so its height
+ * is the tallest of them and the swap cannot resize the page. The strip is
+ * wider than the column it sits in, pulled out by equal negative margins, and
+ * the vertical padding leaves the shrunk slides' shadows room.
+ */
+.landing-carousel {
+  --carousel-width: min(1440px, calc(100vw - 40px));
+  --carousel-gap: 24px;
+  /* The scale the slides either side are shrunk to; the one on show is the
+     full width of a cell, so it reads as the larger card of the three. */
+  --carousel-aside-scale: .86;
+  width: var(--carousel-width);
+  margin-block: 24px 0;
+  margin-inline: calc((100% - var(--carousel-width)) / 2);
+  padding: 6px 0 12px;
+  overflow: hidden;
 }
-.signal-snapshot-gallery { position: relative; min-width: 0; min-height: 460px; }
-.signal-snapshot {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 1;
+.carousel-track {
+  display: flex;
+  align-items: stretch;
+  gap: var(--carousel-gap);
+  transition: transform 620ms cubic-bezier(.22, 1, .36, 1);
+}
+.carousel-cell {
+  flex: 0 0 74%;
   min-width: 0;
-  padding: clamp(18px, 2vw, 28px);
-  color: #f7f6fb;
-  background: #1d1c22;
-  border: 1px solid rgba(255, 255, 255, .13);
-  border-radius: 14px;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, .2), 0 1px 0 rgba(255,255,255,.03) inset;
-  transform: translateY(18px) scale(.955);
-  transform-origin: center bottom;
-  transition: transform 560ms cubic-bezier(.22, 1, .36, 1), box-shadow 560ms cubic-bezier(.22, 1, .36, 1);
-  will-change: transform;
+  display: grid;
+  /* The slides either side are shrunk and held well back, so the row reads as
+     one card in front and the rest behind it rather than slides of equal
+     standing. The cell keeps its laid-out width whatever the scale, so the
+     step from one slide to the next stays the same. */
+  opacity: .22;
+  transform: scale(var(--carousel-aside-scale));
+  cursor: pointer;
+  transition: opacity 420ms ease, transform 620ms cubic-bezier(.22, 1, .36, 1);
 }
-.signal-snapshot.is-active { z-index: 2; transform: translateY(0) scale(1); box-shadow: 0 24px 54px rgba(0, 0, 0, .3), 0 1px 0 rgba(255,255,255,.04) inset; }
-.signal-snapshot h2 { margin: 0; font-size: clamp(26px, 3vw, 40px); font-weight: 470; letter-spacing: -.055em; line-height: 1.02; }
-.snapshot-kicker { display: inline-flex; margin-bottom: 10px; padding: 5px 9px; color: #9b62ff; background: rgba(120, 62, 230, .14); border: 1px solid rgba(137, 75, 255, .28); border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.snapshot-summary { margin: 10px 0 0; color: rgba(241, 239, 248, .68); font-size: 12px; line-height: 1.45; }
-.snapshot-usage { margin: 4px 0 0; color: rgba(241, 239, 248, .66); font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; }
-.snapshot-divider { height: 1px; margin: 22px 0; background: rgba(255, 255, 255, .12); }
-.snapshot-issue { overflow: hidden; border: 1px solid rgba(130, 67, 242, .48); border-radius: 12px; }
-.snapshot-issue-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 15px 17px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
-.snapshot-rank { display: grid; width: 31px; height: 31px; place-items: center; color: #ded4ff; border: 1px solid rgba(132, 75, 239, .44); border-radius: 9px; font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 800; }
-.snapshot-issue-head strong { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 650; letter-spacing: -.02em; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.snapshot-budget { padding: 6px 8px; color: rgba(246,245,250,.78); border: 1px solid rgba(255,255,255,.13); border-radius: 7px; font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 700; white-space: nowrap; }
-.snapshot-issue-body { padding: 17px; }
-.snapshot-time-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #8f4dff; font-family: var(--font-mono, monospace); font-size: 14px; font-weight: 800; }
-.snapshot-time-line small { padding: 4px 7px; color: rgba(240,238,246,.62); background: rgba(255,255,255,.045); border-radius: 999px; font-size: 10px; font-weight: 650; }
-.snapshot-meter { height: 7px; margin-top: 9px; overflow: hidden; background: rgba(255,255,255,.055); border-radius: 999px; }
-.snapshot-meter span { display: block; width: 97%; height: 100%; background: rgba(239,238,243,.62); border-radius: inherit; }
-.signal-snapshot-react .snapshot-meter span { width: 74%; }
-.snapshot-issue-body p { margin: 14px 0 0; padding: 12px; color: rgba(244,242,248,.75); background: rgba(255,255,255,.045); border-radius: 8px; font-size: 11px; line-height: 1.45; }
-.get-started-button {
+.carousel-cell.is-current { opacity: 1; transform: scale(1); cursor: default; }
+/* The frame the loop snaps home on: the move, the fade and the shrink all
+   arrive at once and uncushioned, so the strip is left looking exactly as it
+   did a frame earlier — the slide it snaps to is the same card in the same
+   place as the clone it snaps off. */
+.carousel-track.is-snapping,
+.carousel-track.is-snapping .carousel-cell { transition: none; }
+/* Below this, a slide that leaves room for its neighbours is too narrow to
+   read, so it takes the whole strip and they wait off the edges. */
+@media (max-width: 1080px) {
+  .carousel-cell { flex-basis: 100%; }
+}
+.landing-dots { display: flex; justify-content: center; gap: 9px; margin-top: 2px; }
+.landing-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  background: color-mix(in srgb, var(--foreground) 24%, transparent);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: width 260ms ease, background 200ms ease;
+}
+.landing-dot:hover { background: color-mix(in srgb, var(--foreground) 42%, transparent); }
+.landing-dot.is-current { width: 28px; background: var(--primary); }
+.landing-dot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.profile-slide {
   position: relative;
-  min-width: 188px;
-  height: 52px;
+  display: grid;
+  /* The previews are not the same height — one headline wraps, the other does
+     not — so the row stretches them and the button stays on the baseline. */
+  grid-template-rows: auto auto 1fr auto;
+  gap: 14px;
+  padding: 20px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 10% -12%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 46%),
+    color-mix(in srgb, var(--card) 94%, var(--background));
+  border: 1px solid color-mix(in srgb, var(--primary) 16%, var(--border));
+  border-radius: 16px;
+  /* The slide is the button's hit area, so it carries the cursor too. */
+  cursor: pointer;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .14);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.profile-slide:hover {
+  border-color: color-mix(in srgb, var(--primary) 38%, var(--border));
+  box-shadow: 0 24px 56px rgba(0, 0, 0, .2);
+}
+/* The slide's own grid lines, behind everything, same device as the old hero. */
+.profile-slide::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  opacity: .13;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--foreground) 18%, transparent) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: linear-gradient(170deg, black, transparent 58%);
+  pointer-events: none;
+}
+.profile-slide > * { position: relative; z-index: 1; }
+.slide-head { display: flex; align-items: center; gap: 12px; pointer-events: none; }
+.slide-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
+  border-radius: 10px;
+}
+.slide-icon svg { width: 20px; height: 20px; fill: none; stroke: var(--primary); stroke-width: 1.65; }
+.slide-head > div { display: grid; gap: 2px; min-width: 0; }
+.slide-head strong { font-size: 17px; letter-spacing: -.015em; }
+.slide-head small {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+/* The preview is a drawing of the results screen, so nothing in it takes a
+   cursor: the slide is the control, and the pseudo-element on its button
+   covers the lot. */
+.slide-preview {
+  align-self: start;
+  padding: 12px;
+  background: color-mix(in srgb, var(--background) 55%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 12px;
+  pointer-events: none;
+}
+.slide-preview-head { display: grid; gap: 4px; padding: 0 2px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.slide-preview-head .eyebrow { font-size: 9px; letter-spacing: .14em; }
+.slide-preview-head strong { font-size: 17px; font-weight: 500; letter-spacing: -.03em; }
+.slide-preview-head small { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
+/* The real card, at the spacing a column this narrow can afford. */
+.slide-preview .hotspot-card {
+  margin-top: 10px;
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+  box-shadow: none;
+}
+.slide-preview .hotspot-head { padding: 12px 13px; gap: 10px; }
+.slide-preview .hotspot-head .hotspot-heading-copy strong { font-size: 13.5px; }
+.slide-preview .hotspot-rank { width: 28px; height: 28px; }
+.slide-preview .hotspot-shape { font-size: 11px; }
+.slide-preview .hotspot-time { font-size: 12px; }
+.slide-preview .contribution { gap: 10px; padding: 12px 13px; }
+.slide-preview .contribution-bar { height: 24px; }
+.slide-preview .contribution-detail { gap: 5px; min-height: 0; padding: 10px 12px; }
+.slide-preview .contribution-detail-name { font-size: 13px; }
+.slide-preview .contribution-detail-ms { font-size: 16px; }
+
+.slide-cta {
+  position: relative;
+  justify-self: center;
   justify-content: center;
   gap: 10px;
+  width: fit-content;
+  min-width: 196px;
+  height: 44px;
+  padding-inline: 26px;
   margin: 0;
-  overflow: hidden;
   color: #fff;
   background: var(--primary);
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  box-shadow: 0 10px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .18);
   font-family: var(--font-mono, monospace);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
-  transition: transform 170ms ease, box-shadow 170ms ease, filter 170ms ease;
+  transition: filter 170ms ease;
 }
-.get-started-button:hover {
-  transform: translateY(-2px) scale(1.01);
-  filter: saturate(1.08) brightness(1.04);
-}
+.profile-slide:hover .slide-cta { filter: saturate(1.08) brightness(1.06); }
+.slide-cta:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, white); outline-offset: 3px; }
+.slide-cta .ui-icon { width: 17px; height: 17px; transition: transform 170ms ease; }
+.profile-slide:hover .slide-cta .ui-icon { transform: translateX(3px); }
 
-.intro-copy { animation: hero-copy-enter 620ms cubic-bezier(.16, 1, .3, 1) both; }
-.signal-snapshot-gallery { animation: hero-preview-enter 760ms 100ms cubic-bezier(.16, 1, .3, 1) both; }
-@keyframes hero-copy-enter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes hero-preview-enter { from { opacity: 0; transform: translateY(22px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-.get-started-button:active { transform: translateY(0); }
-.get-started-button:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 40%, white); outline-offset: 4px; }
-.get-started-button .ui-icon { position: relative; width: 17px; height: 17px; transition: transform 170ms ease; }
-.get-started-button:hover .ui-icon { transform: translateX(3px); }
+@keyframes landing-head-enter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.landing-carousel { animation: landing-carousel-enter 700ms 110ms cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes landing-carousel-enter { from { opacity: 0; transform: translateY(24px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .workflow-label {
   display: flex;
   align-items: center;
@@ -1060,7 +1307,6 @@ body { background: var(--background, #151419); }
 .upload-pane { min-height: 200px; border-radius: 12px; }
 .upload-pane:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent); }
 .browse-button { border-radius: 7px; }
-.key-field { color: var(--muted-foreground); font-size: 12px; }
 
 .drawer-overlay { position: fixed; z-index: 90; inset: 0; }
 .drawer-backdrop {
@@ -1130,14 +1376,7 @@ body { background: var(--background, #151419); }
 @keyframes drawer-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popover-enter { from { opacity: 0; transform: translateY(-5px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-@media (max-width: 980px) {
-  .hero-stage { grid-template-columns: 1fr; min-height: 0; }
-  .intro-copy { text-align: center; }
-  .intro p { margin-inline: auto; }
-  .intro-actions { margin-inline: auto; }
-  .platform-list { justify-content: center; }
-  .signal-snapshot-gallery { width: min(100%, 720px); min-height: 500px; margin-inline: auto; }
-}
+
 
 @media (max-width: 760px) {
   [data-slot="plugin-header"] { padding-inline: 14px; }
@@ -1148,36 +1387,41 @@ body { background: var(--background, #151419); }
   .settings-popover { right: -44px; }
   .popover-arrow { right: 57px; }
   .workspace { width: min(100% - 24px, 560px); padding-top: 20px; }
-  .hero-stage { grid-template-columns: 1fr; gap: 28px; min-height: 0; padding: 30px 24px; border-radius: 20px; }
-  .hero-stage::before { background-size: 34px 34px; }
-  .intro-copy { align-items: center; text-align: center; }
-  .intro h1 { margin-top: 18px; font-size: clamp(36px, 11vw, 50px); }
-  .intro p { margin-inline: auto; }
-  .platform-list { justify-content: center; }
-  .signal-snapshot-gallery { width: min(100%, 560px); min-height: 500px; margin-inline: auto; }
+  .landing-head h1 { font-size: clamp(30px, 9vw, 42px); }
+  .landing-head p { font-size: 15px; }
+  .landing-carousel { margin-block-start: 22px; --carousel-gap: 14px; }
+  .profile-slide { padding: 18px; border-radius: 14px; }
+  .profile-slide::before { background-size: 32px 32px; }
+  /* A phone reads the two slides as a column twice as long, so each preview
+     keeps the card and the bar and drops the slice it had opened. */
+  .slide-preview .contribution-detail { display: none; }
   .profile-options { grid-template-columns: 1fr; }
   .profile-option { min-height: 106px; }
   .sample-callout { flex-wrap: wrap; }
 }
 
 @media (max-width: 420px) {
-  .hero-stage { padding-inline: 20px; }
   .platform-list { display: grid; grid-template-columns: 1fr 1fr; }
   .platform-list span { justify-content: center; padding-inline: 8px; font-size: 12px; }
+  /* Two to a row, so the divider belongs to the second of each pair only. */
+  .platform-list span:nth-child(odd) { border-left: 0; }
   .platform-list span:last-child { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .intro-copy,
-  .signal-snapshot-gallery,
+  .landing-head,
+  .landing-carousel,
   .analysis-drawer,
   .drawer-backdrop,
   .settings-popover { animation: none; }
-  .get-started-button,
-  .get-started-button .ui-icon,
-  .signal-snapshot { transition: none; }
-  .get-started-button:hover,
-  .get-started-button:hover .ui-icon { transform: none; }
+  .carousel-track,
+  /* The shrink stays — it is what tells the slides apart — but it arrives
+     without a transition, like the move itself. */
+  .carousel-cell,
+  .landing-dot,
+  .slide-cta,
+  .slide-cta .ui-icon { transition: none; }
+  .profile-slide:hover .slide-cta .ui-icon { transform: none; }
 }
 
 /* Results: stronger hierarchy, denser evidence, clearer navigation */
@@ -1201,7 +1445,30 @@ body { background: var(--background, #151419); }
 .results-header { align-items: center; padding-bottom: 27px; border-bottom: 1px solid var(--border); }
 .results-header .intro { min-width: 0; }
 .results-header .eyebrow { font-size: 10px; }
-.results-title { margin: 10px 0 10px; font-size: clamp(30px, 4vw, 42px); }
+/*
+ * Scoped to the header so it outweighs `.intro h1`, which the results heading
+ * otherwise inherits its display size from. The title is a fixed label — the
+ * summary line under it carries the figures — so it reads as a heading, not as
+ * the page's largest element.
+ */
+.results-header .results-title {
+  max-width: none;
+  margin: 8px 0 10px;
+  font-size: clamp(23px, 2.6vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+/*
+ * Also scoped past `.intro p`, which otherwise sets these to the landing
+ * page's 16px body size and caps them at 480px. They are a caption under the
+ * heading, and `.usage-line` needs to outweigh both to keep its own size.
+ */
+.results-header .intro p {
+  max-width: none;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.results-header .intro .usage-line { font-size: 12px; }
 .hotspot-list { gap: 18px; margin-top: 24px; }
 .hotspot-card {
   gap: 0;
@@ -1225,13 +1492,28 @@ body { background: var(--background, #151419); }
 .hotspot-rank {
   width: 34px;
   height: 34px;
-  color: var(--primary-foreground);
+  /* Not `--primary-foreground`: the chip's fill is `--muted`, which in the
+     light theme is all but white, and white on white is no rank at all. */
+  color: var(--foreground);
   border-color: color-mix(in srgb, var(--primary) 30%, transparent);
   border-radius: 10px;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
 }
-.hotspot-heading-copy { display: grid; min-width: 0; }
+.hotspot-heading-copy { display: grid; min-width: 0; gap: 3px; }
+/* The burst count qualifies the headline total; it must not compete with it. */
+.hotspot-subtitle { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; opacity: 0.75; overflow-wrap: anywhere; }
+/* The measured shape of the cost: the card's finding, so it sits above the
+   subtitle's weight and below the heading's. Tabular figures because the shares
+   are read down a column of cards. */
+.hotspot-shape {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .hotspot-head .hotspot-heading-copy strong { font-size: 15px; line-height: 1.4; }
 .hotspot-time {
   padding: 6px 9px;
@@ -1247,9 +1529,14 @@ body { background: var(--background, #151419); }
 .hot-path-row:last-child { border-bottom: 0; }
 .row-location { margin-bottom: 13px; }
 .row-location-label { color: var(--primary); background: var(--accent); border-color: transparent; }
+.row-callers { margin-bottom: 13px; }
+.row-callers-label { color: var(--primary); background: var(--accent); border-color: transparent; }
 .row-title { display: block; margin-bottom: 12px; font-size: 14px; }
+.row-title-link { margin-bottom: 12px; font-size: 14px; }
+.row-shape { margin-top: 10px; font-size: 12px; }
 .row-figure-line { align-items: flex-end; margin-bottom: 9px; }
 .row-figure { display: flex; align-items: baseline; font-size: 16px; color: var(--primary); opacity: 0.8; }
+.row-secondary { font-size: 13px; }
 .row-share { padding: 3px 7px; background: var(--muted); border-radius: 999px; font-size: 10px; }
 .row-bar-track { height: 6px; background: color-mix(in srgb, var(--muted) 88%, var(--background)); }
 .row-bar-fill { background: color-mix(in srgb, var(--foreground) 45%, var(--background)); }
@@ -1266,7 +1553,7 @@ body { background: var(--background, #151419); }
 .hotspot-footer {
   min-height: 62px;
   align-items: center;
-  justify-items: end;
+  justify-items: stretch;
   margin: 0;
   padding: 12px 20px;
   background: color-mix(in srgb, var(--muted) 34%, transparent);
@@ -1365,7 +1652,12 @@ body { background: var(--background, #151419); }
 @media (max-width: 680px) {
   .workspace.results { width: min(100% - 24px, 560px); padding-top: 24px; }
   .results-back { margin-bottom: 20px; }
-  .results-header { align-items: flex-start; }
+  /*
+   * The controls do not fit beside the heading here, and crowding them in
+   * breaks the title to one word per line: give them their own row.
+   */
+  .results-header { align-items: flex-start; flex-wrap: wrap; }
+  .result-actions { flex-basis: 100%; }
   .hotspot-head { grid-template-columns: auto minmax(0,1fr); }
   .hotspot-time { grid-column: 2; width: fit-content; }
   .hot-path-rows { padding-inline: 16px; }
@@ -1393,7 +1685,6 @@ body {
 .option-copy small,
 .section-heading small,
 .upload-detail,
-.action-row p,
 .react-budget-field p {
   font-size: 14px;
   line-height: 1.5;
@@ -1401,7 +1692,6 @@ body {
 .option-copy em { font-size: 12px; line-height: 1.45; }
 .sample-callout { font-size: 14px; }
 .section-heading h2 { font-size: 18px; }
-.key-field { font-size: 14px; line-height: 1.5; }
 
 .settings-popover-head small,
 .toggle-copy small,
@@ -1427,3 +1717,908 @@ body {
 .guide-step strong { font-size: 15px; }
 .guide-privacy p { font-size: 12px; line-height: 1.5; }
 .guide-privacy strong { font-size: 13px; }
+
+
+/* ---------------------------------------------------------------------------
+   Card drill-down (/explore)
+   One card's subtree, in its own tab: a flame graph for where the time is, a
+   call tree for what called what, and a table of the work that repeated.
+   --------------------------------------------------------------------------- */
+
+.explore-page {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.explore-header { display: flex; flex-direction: column; gap: 8px; }
+.explore-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+.explore-shape {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-location {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.explore-figures strong { font-size: 18px; color: var(--primary); }
+.explore-figures span { opacity: 0.5; }
+/* A note under a chart or a table. Capped at a readable measure rather than
+   taking the container's: these sit under charts that run the width of the
+   page, and at 12px an uncapped line ran past 150 characters. Italic stays,
+   because what is left under this class is the one-line aside it suits; the
+   multi-line notes moved to `.chart-notes` below. */
+.explore-caveat {
+  max-width: 72ch;
+  font-size: 12px;
+  line-height: 1.55;
+  font-style: italic;
+  color: var(--muted-foreground);
+}
+
+/* ── The notes under a chart ──────────────────────────────────────────────────
+   Three jobs that used to share one paragraph, now stacked in the order they
+   are read: the reading key on arrival, the controls when a reader wants to
+   move, and the caveats folded away until a figure looks wrong. The key is
+   upright and at the body colour because it is the one line here that is not
+   an aside. */
+.chart-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 72ch;
+  margin-top: 10px;
+}
+.chart-notes-reading {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+.chart-notes-controls {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
+.chart-notes-caveats { font-size: 12px; color: var(--muted-foreground); }
+.chart-notes-caveats > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.chart-notes-caveats > summary::-webkit-details-marker { display: none; }
+.chart-notes-caveats > summary::before {
+  content: "\25B8";
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+.chart-notes-caveats[open] > summary::before { transform: rotate(90deg); }
+.chart-notes-caveats > summary:hover { opacity: 1; color: var(--foreground); }
+/* Block, not flex: a flex container drops the list markers, and the markers are
+   most of what makes these read as a list rather than as the paragraph they
+   used to be. */
+.chart-notes-caveats ul {
+  margin: 7px 0 0;
+  padding-left: 1.2em;
+  list-style: disc;
+  line-height: 1.55;
+}
+.chart-notes-caveats li { margin: 0 0 5px; }
+.chart-notes-caveats li:last-child { margin-bottom: 0; }
+.chart-notes-caveats li::marker { opacity: 0.6; }
+.chart-notes-caveats strong { color: var(--foreground); font-weight: 600; }
+.chart-notes-caveats code,
+.chart-notes-reading code { font-family: var(--font-mono, monospace); font-size: 11.5px; }
+.explore-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.explore-path-label { text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.explore-path-frame + .explore-path-frame::before { content: "→ "; opacity: 0.5; }
+
+/* A segmented control rather than four boxes in a row. The component ships one
+   already, but the app sets `--radius: 0` and a 16px body size, which squares
+   its corners and overfills its 24px track — so the strip is sized and rounded
+   here instead of inheriting those two. */
+.explore-tabs { width: 100%; }
+.explore-tabs [data-slot="tabs-list"] {
+  gap: 2px;
+  height: auto;
+  padding: 4px;
+  background: color-mix(in srgb, var(--muted) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 11px;
+}
+.explore-tabs [data-slot="tabs-tab"] {
+  height: auto;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.explore-tabs [data-slot="tabs-tab"]:not(:disabled) { cursor: pointer; }
+.explore-tabs [data-slot="tabs-tab"]:hover:not([data-active]) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+/* The selected view is the one you are reading, so it lifts off the track. */
+.explore-tabs [data-slot="tabs-tab"][data-active] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary) 15%, var(--card));
+  border-color: color-mix(in srgb, var(--primary) 32%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+}
+.explore-panel {
+  padding-top: 18px;
+  min-height: 320px;
+}
+
+.explore-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.explore-tree .explore-tree { padding-left: 16px; border-left: 1px solid var(--border); margin-left: 6px; }
+.explore-tree summary { cursor: pointer; list-style-position: outside; }
+.explore-tree summary::marker { color: var(--muted-foreground); }
+.explore-tree-leaf { list-style: none; padding-left: 15px; }
+.explore-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name figures" "bar bar" "location location";
+  gap: 4px 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.explore-tree-row:hover { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.explore-tree-name {
+  grid-area: name;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.explore-tree-figures { grid-area: figures; display: flex; align-items: baseline; gap: 10px; }
+.explore-tree-row .row-bar-track { grid-area: bar; }
+.explore-tree-location {
+  grid-area: location;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.explore-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.explore-table th, .explore-table td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.explore-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-foreground); }
+.explore-table thead button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.explore-table thead button.is-sorted { color: var(--primary); }
+.explore-table tbody th {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.explore-table tbody th code { font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
+.explore-table td { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
+/* A figure column is as wide as its widest figure and no wider. Left to wrap,
+   a long frame name or path claims the table's width and `2.92 s` breaks after
+   the number, so the digits in one row no longer line up with the next. The
+   `Called from` column is the one that holds prose, so it opts back in. */
+.explore-table thead th,
+.explore-table td { white-space: nowrap; }
+.explore-table .explore-table-callers { white-space: normal; }
+/* The name column takes what is left, and wraps inside itself. */
+.explore-table tbody th { width: 100%; }
+/* Every frame name in Explore is a way to refocus the view on that frame. */
+.explore-tree-focus {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.explore-tree-focus:hover { color: var(--primary); }
+.explore-tree-focus em { color: var(--muted-foreground); font-style: normal; }
+/* The one way back out of a focused frame, to the whole task. */
+.explore-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.explore-caller { display: block; font-size: 12px; }
+.explore-caller em { color: var(--muted-foreground); font-style: normal; }
+
+.explore-footer { display: flex; justify-content: flex-end; }
+.explore-footer button:not(:disabled) { cursor: pointer; }
+
+@media (max-width: 640px) {
+  .explore-tree-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "figures" "bar" "location"; }
+  .explore-table { font-size: 12px; }
+}
+
+/* The task against the clock. Positions are percentages of the task duration,
+   so the chart fits at zoom 1 and zooming is one width on the canvas. */
+.timeline { display: flex; flex-direction: column; gap: 10px; }
+.timeline-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-bottom: 10px;
+}
+.timeline-zoom {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.timeline-zoom:hover { background: var(--muted); }
+.timeline-zoom.is-current { border-color: var(--primary); color: var(--primary); }
+.timeline-legend { margin-left: auto; }
+.timeline-zoom:disabled { opacity: 0.4; cursor: default; }
+.timeline-zoom:disabled:hover { background: transparent; }
+
+/* The flame graph's two controls on one line, and the box the stretched graph
+   scrolls inside. The graph itself is percentage-based, so zooming is nothing
+   but a wider canvas: `.flame-scale` is `zoom * 100%` of the viewport and every
+   frame keeps the same share of it. */
+.flame-controls { display: flex; flex-wrap: wrap; align-items: baseline; gap: 18px; }
+.flame-controls .timeline-controls { margin-bottom: 10px; }
+.flame-viewport { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+/* Where a wheel gesture landed, which falls between the ladder's rungs. */
+.zoom-readout { min-width: 4ch; margin-left: 4px; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.flame-scale { min-width: 100%; }
+
+/* Frames are packed edge to edge and the library draws only a faint right edge,
+   so a run of same-coloured boxes reads as one box and a row reads as a band.
+   A full border in the page's own background cuts every cell out of its
+   neighbours and out of the row below, and hovering lifts that border so the
+   box under the pointer is the one being read. Unlayered, so it beats the
+   utility classes the library sets the faint edge with. */
+[data-slot="flame-graph-frame"] {
+  border: 1px solid var(--background);
+  border-radius: 3px;
+}
+[data-slot="flame-graph-frame"]:hover {
+  border-color: var(--foreground);
+  z-index: 1;
+}
+
+/* The "no own time" bucket is muted-on-muted, which at 11px is a box whose name
+   cannot be read at all — and those are most of the boxes in a React commit,
+   where the pass-through wrappers are exactly the frames a reader is trying to
+   name. Same grey, enough of a lift to carry text. */
+[data-slot="flame-graph-frame"].bg-muted { background: color-mix(in srgb, var(--muted) 55%, var(--border)); }
+[data-slot="flame-graph-frame"].bg-muted span { color: var(--foreground); opacity: 0.85; }
+
+/* What the five colours mean, above every graph that uses them. */
+.flame-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.flame-legend-lead { margin-right: 2px; }
+.flame-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.flame-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--background) 60%, transparent);
+}
+.flame-legend-swatch[data-bucket="heaviest"] { background: var(--danger); }
+.flame-legend-swatch[data-bucket="heavy"] { background: var(--warning); }
+.flame-legend-swatch[data-bucket="moderate"] { background: var(--info); }
+.flame-legend-swatch[data-bucket="light"] { background: var(--success); }
+.flame-legend-swatch[data-bucket="none"] { background: color-mix(in srgb, var(--muted) 55%, var(--border)); }
+
+.timeline-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: 10px; }
+.timeline-canvas { position: relative; min-width: 100%; padding: 0 0 8px; }
+
+.timeline-ruler {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.timeline-tick {
+  position: absolute;
+  top: 4px;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Gaps are stretches where only React, or engine code naming nothing, was on the
+   stack. They are left empty on a hatched ground so they read as "not our code",
+   never as idle. */
+.timeline-rows {
+  position: relative;
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--muted) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.timeline-box {
+  position: absolute;
+  height: 20px;
+  min-width: 1px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--chart-2, #4ade80);
+  color: #04210f;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--background) 65%, transparent);
+}
+/* A built-in the code called by name — `[Native] intlDateTimeFormatFormat` — is
+   kept on the chart because the cost is real and the caller controls it, but it
+   is not the reader's own code: a paler fill inside a hairline ring says
+   `engine` at a glance without taking it off the row it ran on. The name is on the box
+   and the class is in the tooltip, so this never carries the distinction alone. */
+.timeline-box[data-class="native"] {
+  background: color-mix(in srgb, var(--chart-2, #4ade80) 32%, var(--muted));
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+.timeline-box > span { padding: 0 4px; pointer-events: none; }
+.timeline-box:hover { filter: brightness(1.12); }
+.timeline-box.is-selected { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
+
+/* ── The React commit chart ──────────────────────────────────────────────────
+   One bar per commit, evenly spaced. The plot grows downwards from a baseline
+   at its foot, because bar height is duration against the tallest commit and a
+   reader compares tops. */
+.commit-fill {
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--chart-2, #4ade80) 55%, var(--muted));
+}
+/* Over budget is the whole point of the chart, so it is the one thing the fill
+   carries. The budget line says how far over. */
+.commit-fill[data-over="yes"] { background: var(--chart-1, #f87171); }
+/* A commit that produced a card is a finding the reader has already seen
+   named, so it is ringed rather than recoloured: the fill still has to mean
+   `over budget` alone. */
+.commit-fill[data-carded="yes"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 45%, transparent); }
+.commit-fill.is-selected { outline: 2px solid var(--primary); outline-offset: 1px; z-index: 1; }
+.commit-strip-budget {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--foreground) 45%, transparent);
+  pointer-events: none;
+}
+.commit-strip-budget > span {
+  position: sticky;
+  left: 0;
+  /* Above a bar label's own background, which otherwise paints over the
+     leftmost one. */
+  z-index: 2;
+  display: inline-block;
+  padding: 0 4px;
+  background: var(--background);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  /* Above its own line: below it, the label of a budget that sits low in a
+     recording with one enormous commit lands on the numbers underneath. */
+  transform: translateY(-100%);
+}
+
+/* Every commit gets an equal share of the width, so a recording with one
+   dominant commit still offers its small ones as targets the same size as the
+   big one. Only height carries time here. */
+.commit-bars { min-width: 100%; }
+.commit-bars-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  border-bottom: 1px solid var(--border);
+}
+.commit-slot {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+/* Above the bar, not inside it: the bars worth reading a figure off are the
+   short ones, which have no room inside. The background is load-bearing — a
+   recording with one dominant commit puts the budget line and the labels of
+   every short bar at much the same height, and the label breaks the dashed
+   line rather than being printed across it. */
+.commit-slot-label {
+  position: relative;
+  z-index: 1;
+  background: var(--background);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--muted-foreground);
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.commit-slot:hover .commit-fill { filter: brightness(1.15); }
+/* Matches the plot's `gap` and the slots' `min-width`, or the numbers drift
+   away from the bars they label. */
+.commit-bars-axis {
+  display: flex;
+  gap: 3px;
+  padding-top: 4px;
+}
+.commit-bars-axis > span {
+  flex: 1 1 0;
+  overflow: hidden;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+/* ── Every component in one commit ───────────────────────────────────────────
+   The table the card deliberately does not have: all of it, ranked by own time,
+   including the three hundred rows that each cost a hundredth of a frame. */
+.react-component-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.react-component-table th,
+.react-component-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  vertical-align: baseline;
+}
+.react-component-table thead th {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.react-component-table tbody th { font-weight: 500; }
+.react-component-table td:nth-child(2),
+.react-component-table td:nth-child(3),
+.react-component-table td:nth-child(4) {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.react-component-table td:last-child { color: var(--muted-foreground); }
+/* A host element or a framework wrapper is still a row — its own time is real —
+   but it is not a component anybody wrote, and a reader scanning for something
+   to change should be able to skip it. */
+.react-component-table tr[data-class="host"] .react-component-name,
+.react-component-table tr[data-class="framework"] .react-component-name,
+.react-component-table tr[data-class="unnamed"] .react-component-name {
+  color: var(--muted-foreground);
+}
+.react-component-name { margin-right: 6px; }
+.react-component-table code { font-size: 11px; color: var(--muted-foreground); }
+.react-components .explore-caveat { margin-top: 10px; }
+.react-components .chart-notes { margin-top: 12px; }
+
+/* ── A task's cost as parts of a whole ────────────────────────────────────────
+   The categorical palette the contribution charts paint with. Eight slots in a
+   fixed order, assigned by a slice's rank in the culprit list and never by how
+   many slices survived the fold, so a colour means one function rather than one
+   position. Both columns were validated against this app's own surfaces
+   (#ffffff light, #201f24 dark): every slot clears the lightness band, the
+   chroma floor, and an adjacent-pair separation of ΔE 9.1 light / 8.4 dark
+   under protanopia and deuteranopia simulation. Three of the light steps sit
+   below 3:1 against white, which is why the legend and the detail strip are not
+   optional — identity never rests on the fill alone.
+   The remainder takes no slot: it is not a series, it is what is left. */
+[data-slot="plugin-shell"] {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  /* The residuals. `tail` is code of yours that is merely small, so it stays
+     nearer the series; `outside` was never your code, so it recedes and is
+     hatched. */
+  --series-tail: color-mix(in srgb, var(--muted-foreground) 42%, var(--muted));
+  --series-outside: color-mix(in srgb, var(--muted-foreground) 16%, var(--muted));
+  --series-rest: color-mix(in srgb, var(--muted-foreground) 26%, var(--muted));
+}
+[data-slot="plugin-shell"].dark {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-tail: color-mix(in srgb, var(--muted-foreground) 34%, var(--muted));
+  --series-outside: color-mix(in srgb, var(--muted-foreground) 12%, var(--muted));
+  --series-rest: color-mix(in srgb, var(--muted-foreground) 22%, var(--muted));
+}
+
+/* The bottom padding is the chart's own breathing room: the legend is the last
+   thing read before the footer or the AI reading, and it needs separating from
+   both rather than sitting on the divider. */
+.contribution { display: grid; gap: 14px; padding: 18px 20px 18px; }
+
+/* Which whole the chart is currently dividing. Only drawn one level down,
+   where the question "per cent of what" has a second possible answer. */
+.contribution-crumbs {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.contribution-crumb {
+  padding: 0;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.contribution-crumb:hover { text-decoration: underline; }
+.contribution-crumb-current { color: var(--muted-foreground); }
+.contribution-crumb-current::before { content: "/"; margin-right: 8px; opacity: 0.5; }
+.contribution-lede {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* One bar, the task wide. The 2px seams are the surface showing through
+   between fills, not borders: a border would eat into a slice's width and make
+   the drawing disagree with the figure beside it. */
+.contribution-bar {
+  display: flex;
+  gap: 2px;
+  height: 34px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+.contribution-band {
+  min-width: 3px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+.contribution-band.is-outside {
+  /* Hatched for the same reason the timeline hatches its gaps: this is not one
+     thing that ran, it is the absence of anything big enough to name. */
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--background) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.contribution-bar:hover .contribution-band:not(.is-active) { opacity: 0.4; }
+.contribution-band.is-active { filter: brightness(1.08); }
+.contribution-band:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+/* The same slices as area. Tiles are placed in percentages, so the box can be
+   any width; its aspect ratio is set inline from the one the layout assumed. */
+.contribution-treemap {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+.contribution-tile {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  padding: 7px 9px;
+  border: 0;
+  /* The 2px seam again, as an inset ring rather than a gap: a tile is placed at
+     an exact area, so the spacer has to come out of its paint, not its box. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card) 85%, transparent);
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+.contribution-tile.is-outside {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--background) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.contribution-treemap:hover .contribution-tile:not(.is-active) { opacity: 0.45; }
+.contribution-tile.is-active { filter: brightness(1.08); }
+.contribution-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
+.contribution-tile-copy { display: grid; gap: 2px; min-width: 0; }
+.contribution-tile-name {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* White ink on eight different fills, two of which are a light yellow: the
+     scrim is what keeps the label legible on all of them. The name is also in
+     the legend and the detail strip, so this is the convenience channel rather
+     than the only one. */
+  text-shadow: 0 1px 3px rgba(0,0,0,.7);
+}
+.contribution-tile-figure {
+  color: color-mix(in srgb, #ffffff 82%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 1.2;
+  text-shadow: 0 1px 3px rgba(0,0,0,.7);
+}
+.contribution-tile.is-neutral .contribution-tile-name,
+.contribution-tile.is-neutral .contribution-tile-figure { color: var(--muted-foreground); text-shadow: none; }
+
+/* The hovered slice in full. A fixed minimum height, because the strip changes
+   on hover and a card that grows under the cursor moves the slice away from it. */
+.contribution-detail {
+  display: grid;
+  gap: 7px;
+  min-height: 148px;
+  align-content: start;
+  padding: 13px 15px;
+  color: inherit;
+  text-align: left;
+  background: color-mix(in srgb, var(--muted) 48%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 10px;
+}
+.contribution-detail p { margin: 0; }
+.contribution-detail-actions { display: flex; align-items: baseline; gap: 14px; margin-top: 2px; }
+.contribution-detail-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.contribution-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+.contribution-detail-name {
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.contribution-detail-share {
+  margin-left: auto;
+  flex: none;
+  padding: 3px 7px;
+  background: var(--muted);
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.contribution-detail-figures { display: flex; align-items: baseline; gap: 10px; }
+.contribution-detail-ms {
+  color: var(--primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 18px;
+  opacity: 0.85;
+}
+.contribution-detail-secondary { color: var(--muted-foreground); font-size: 13px; }
+.contribution-detail-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 78%, var(--muted-foreground));
+}
+.contribution-detail-line code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contribution-detail-label {
+  flex: none;
+  padding: 2px 6px;
+  color: var(--primary);
+  background: var(--accent);
+  border-radius: 5px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.contribution-detail-shape {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.contribution-detail-open,
+.contribution-detail-aside {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.contribution-detail-open { color: var(--primary); }
+.contribution-detail-aside { color: var(--muted-foreground); font-weight: 500; }
+.contribution-detail-open:hover,
+.contribution-detail-aside:hover { text-decoration: underline; }
+.contribution-detail-aside:hover { color: var(--foreground); }
+
+/* Names and figures for every slice: the table view of the chart above it. */
+.contribution-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(252px, 1fr));
+  gap: 2px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.contribution-legend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.contribution-legend-row:hover,
+.contribution-legend-row.is-active { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.contribution-legend-row .contribution-swatch { align-self: center; }
+.contribution-legend-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contribution-legend-ms {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.contribution-legend-share {
+  flex: none;
+  min-width: 3.5ch;
+  text-align: right;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--foreground) 70%, var(--muted-foreground));
+}
+
+/* Carrying only footnotes, the row container contributes nothing but its own
+   padding, which would indent them past the chart they qualify. */
+.hot-path-rows-footnotes-only { padding: 0; }
+
+/* Which drawing the cards carry, while both are on offer. */
+.chart-switch { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 640px) {
+  .contribution { padding-inline: 14px; }
+  .contribution-legend { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contribution-band,
+  .contribution-tile { transition: none; }
+}

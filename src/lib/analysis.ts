@@ -1,19 +1,54 @@
+import { constants as bufferConstants } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rm, rename, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Bottleneck } from "./bottlenecks";
+import type { ProfileCard } from "./profile-cards";
+import type { TaskCardSet } from "./task-cards";
 import { normalizeStoredReactIssues, type ReactIssue } from "./react-analyzer.ts";
+import type { ReactCardSet } from "./react-cards";
+import type { ReactExplore } from "./react-explore";
+import { sampleAnalysis } from "./sample-analyses.ts";
 
 export const MAX_SUMMARY_BULLETS = 3;
-const MAX_BULLET_LENGTH = 180;
+/**
+ * A guard against a runaway model, not a layout constraint: the card does not
+ * clamp captions, so cutting at a sentence's width only hid the evidence the
+ * bullet was explaining. Generous enough that a well-formed bullet survives whole.
+ */
+const MAX_BULLET_LENGTH = 600;
+
+/** Cut back to a word boundary so a trimmed bullet does not end mid-identifier. */
+function trimBullet(item: string): string {
+  if (item.length <= MAX_BULLET_LENGTH) return item;
+  const cut = item.slice(0, MAX_BULLET_LENGTH - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > MAX_BULLET_LENGTH * 0.8 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
 
 export interface Hotspot extends Bottleneck {
   groupingCaller: string;
   supportingFunctionIds: string[];
-  /** At most three short bullets describing the expensive work. */
+  /**
+   * The agent's evidence for one measured function, keyed by that function's id.
+   * Keyed rather than positional: the card captions each function's own row, and
+   * pairing an ordered bullet list to an ordered function list by index attached
+   * whatever the agent wrote third to whichever function ranked third.
+   */
+  evidence: Record<string, string>;
+  /** `evidence` flattened in self-time order, for prose that wants the whole explanation. */
   summary: string[];
+  /**
+   * Self time across every measured function in the group, including the ones
+   * trimmed out of `functions` before the card is published. Without it the card
+   * cannot tell time that no function was named for apart from time belonging to
+   * functions it simply did not list.
+   */
+  namedTimeMs?: number;
+  /** How many functions were measured, before `functions` was trimmed for the card. */
+  namedFunctionCount?: number;
 }
 
 /** Token accounting for one agent run, summed across all assistant turns. */
@@ -46,6 +81,22 @@ export interface AnalysisRecord {
   dir: string;
   totalMs: number;
   hotspots: Hotspot[];
+  /**
+   * The React path's measured output: one card per over-budget commit.
+   * `reactIssues` below is the model-selected shape it replaces, kept because
+   * saved analyses hold it and `TRACESIFT_REACT_ENGINE=analyzer` still writes it.
+   */
+  reactCards?: ReactCardSet;
+  /**
+   * Every commit against the clock, and each one's rendered tree, for the
+   * drill-down.
+   *
+   * Kept on the record because the measured engine never writes the upload to
+   * disk: the export is parsed in the request and dropped, so there is nothing
+   * to re-read when a reader opens Explore ten minutes later. Absent on records
+   * from the model path and on anything saved before the drill-down existed.
+   */
+  reactExplore?: ReactExplore;
   reactIssues: ReactIssue[];
   /** Item id -> deterministic diagnostic hand-off cached after first rendering. */
   prompts: Record<string, string>;
@@ -55,57 +106,105 @@ export interface AnalysisRecord {
   model?: AnalysisModel;
   /** Item id -> token usage for hand-off rendering (zero for deterministic prompts). */
   promptUsage: Record<string, TokenUsage>;
+  /**
+   * The CPU path's output: one card per task the runtime ran. `cards` and
+   * `hotspots` below are the two engines it replaces, both still reachable
+   * through `TRACESIFT_CPU_ENGINE` so a suspicious profile can be run through
+   * each and compared.
+   */
+  taskCards?: TaskCardSet;
+  /** Deterministic call-tree cards, the engine task cards replace. */
+  cards?: ProfileCard[];
+  /** Whether this profile's call counts are real invocations rather than call sites. */
+  callCountIsExact?: boolean;
   /** Durable history metadata. Raw profile uploads are deliberately never stored here. */
   profileType?: "cpu" | "react";
   title?: string;
   saved?: boolean;
 }
 
-export interface AnalysisSettings { autoSave: boolean; }
+export interface AnalysisSettings {
+  autoSave: boolean;
+}
 export interface AnalysisHistoryItem {
   id: string; createdAt: number; profileType: "cpu" | "react"; title: string;
   totalTokens: number; issueCount: number;
 }
 
 export const PROFILE_FILE_NAME = "profile.json";
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/** Production profiles routinely exceed 50 MB and development ones a few hundred. */
+const DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+/** Parsing needs the whole profile as one V8 string, so no upload above that ceiling can succeed. */
+const HARD_MAX_UPLOAD_BYTES = bufferConstants.MAX_STRING_LENGTH;
+
+/** Read lazily so `TRACE_SIFT_MAX_UPLOAD_MB` can be set after this module is loaded. */
+export function maxUploadBytes(): number {
+  const configured = Number(process.env.TRACE_SIFT_MAX_UPLOAD_MB);
+  const bytes = Number.isFinite(configured) && configured > 0
+    ? Math.round(configured * 1024 * 1024)
+    : DEFAULT_MAX_UPLOAD_BYTES;
+  return Math.min(bytes, HARD_MAX_UPLOAD_BYTES);
+}
+
+export function uploadTooLargeMessage(): string {
+  return `The profile file is too large (max ${Math.floor(maxUploadBytes() / (1024 * 1024))} MB).`;
+}
 
 const RECORD_TTL_MS = 60 * 60 * 1000;
 const MAX_RECORDS = 24;
 
 const records = new Map<string, AnalysisRecord>();
 
-function traceSiftHome(): string { return process.env.TRACE_SIFT_HOME || path.join(homedir(), ".tracesift"); }
+/** The one place anything persisted on this device is rooted. */
+export function traceSiftHome(): string { return process.env.TRACE_SIFT_HOME || path.join(homedir(), ".tracesift"); }
 function historyDir(): string { return path.join(traceSiftHome(), "analyses"); }
 function settingsPath(): string { return path.join(traceSiftHome(), "settings.json"); }
 function recordPath(id: string): string { return path.join(historyDir(), `${id}.json`); }
 function safeId(id: string): boolean { return /^[a-zA-Z0-9-]{1,100}$/.test(id); }
 
-async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+/**
+ * `indent` is for the files a person opens. Settings are two of those; an
+ * analysis is not.
+ *
+ * A React commit tree nests 110 deep, so two-space indentation writes 220
+ * spaces in front of every leaf: the record for the checked-in fixture is 90 KB
+ * of data and was 1.4 MB on disk. Records are written compact for that reason,
+ * and nothing reads them by eye.
+ */
+async function writeJsonAtomic(file: string, value: unknown, indent = 2): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await writeFile(temporary, JSON.stringify(value, null, indent), { mode: 0o600 });
   await rename(temporary, file);
 }
 
+function reactRecord(record: Pick<AnalysisRecord, "reactIssues" | "reactCards">): boolean {
+  return record.reactIssues.length > 0 || Boolean(record.reactCards);
+}
+
 function durableRecord(record: AnalysisRecord): AnalysisRecord {
-  return { ...record, dir: "", saved: true, profileType: record.profileType ?? (record.reactIssues.length ? "react" : "cpu"), title: record.title || "Untitled analysis" };
+  return { ...record, dir: "", saved: true, profileType: record.profileType ?? (reactRecord(record) ? "react" : "cpu"), title: record.title || "Untitled analysis" };
 }
 
 export async function getAnalysisSettings(): Promise<AnalysisSettings> {
   try {
     const parsed = JSON.parse(await readFile(settingsPath(), "utf8")) as Partial<AnalysisSettings>;
+    // Defaults on, so an install that predates the setting keeps the behaviour
+    // it had: analyses saved.
     return { autoSave: parsed.autoSave !== false };
   } catch { return { autoSave: true }; }
 }
-export async function saveAnalysisSettings(settings: AnalysisSettings): Promise<AnalysisSettings> {
-  const next = { autoSave: settings.autoSave !== false };
+export async function saveAnalysisSettings(settings: Partial<AnalysisSettings>): Promise<AnalysisSettings> {
+  const current = await getAnalysisSettings();
+  const next: AnalysisSettings = {
+    autoSave: settings.autoSave ?? current.autoSave,
+  };
   await writeJsonAtomic(settingsPath(), next);
   return next;
 }
 export async function saveAnalysis(record: AnalysisRecord): Promise<AnalysisRecord> {
   const saved = durableRecord(record);
-  await writeJsonAtomic(recordPath(saved.id), saved);
+  await writeJsonAtomic(recordPath(saved.id), saved, 0);
   records.set(saved.id, { ...record, saved: true });
   return saved;
 }
@@ -115,7 +214,7 @@ export async function getSavedAnalysis(id: string): Promise<AnalysisRecord | und
     const parsed = JSON.parse(await readFile(recordPath(id), "utf8")) as AnalysisRecord;
     if (!parsed || parsed.id !== id || !Array.isArray(parsed.hotspots) || !Array.isArray(parsed.reactIssues)) throw new Error("invalid saved analysis");
     const reactIssues = normalizeStoredReactIssues(parsed.reactIssues);
-    const record = { ...parsed, reactIssues, dir: "", saved: true, profileType: parsed.profileType ?? (reactIssues.length ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
+    const record = { ...parsed, reactIssues, dir: "", saved: true, profileType: parsed.profileType ?? (reactRecord({ reactIssues, reactCards: parsed.reactCards }) ? "react" : "cpu"), title: parsed.title || "Untitled analysis" } as AnalysisRecord;
     records.set(id, record);
     return record;
   } catch (error) {
@@ -128,8 +227,13 @@ export async function listSavedAnalyses(): Promise<AnalysisHistoryItem[]> {
   try { entries = await readdir(historyDir()); } catch { return []; }
   const result = await Promise.all(entries.filter((name) => name.endsWith(".json")).map(async (name) => getSavedAnalysis(name.slice(0, -5))));
   return result.filter((entry): entry is AnalysisRecord => Boolean(entry)).map((entry) => ({
-    id: entry.id, createdAt: entry.createdAt, profileType: entry.profileType ?? (entry.reactIssues.length ? "react" : "cpu"), title: entry.title || "Untitled analysis",
-    totalTokens: entry.usage?.totalTokens ?? 0, issueCount: entry.profileType === "react" ? entry.reactIssues.length : entry.hotspots.length,
+    id: entry.id, createdAt: entry.createdAt, profileType: entry.profileType ?? (reactRecord(entry) ? "react" : "cpu"), title: entry.title || "Untitled analysis",
+    totalTokens: entry.usage?.totalTokens ?? 0,
+    issueCount: entry.profileType === "react"
+      ? entry.reactCards?.cards.length ?? entry.reactIssues.length
+      // The CPU path's cards live in `taskCards`; `cards` and `hotspots` are
+      // the two engines it replaces, only populated under `TRACESIFT_CPU_ENGINE`.
+      : entry.taskCards?.cards.length ?? entry.cards?.length ?? entry.hotspots.length,
   })).sort((a, b) => b.createdAt - a.createdAt);
 }
 export async function deleteSavedAnalysis(id: string): Promise<boolean> {
@@ -168,6 +272,32 @@ export function getRecord(id: string): AnalysisRecord | undefined {
   return records.get(id);
 }
 
+/**
+ * The record behind an analysis id, wherever that record lives: in memory for
+ * one still being read, in `~/.tracesift` for one the user saved, or in the
+ * bundle for one of the two samples.
+ *
+ * Every route that serves a card, a drill-down or a reading of one resolves an
+ * id this way, so a sample opens as far as an upload does. Before this, the
+ * samples were handed to the browser and never registered anywhere, and every
+ * link out of a sample report — Explore, an AI reading, a copied prompt — asked
+ * for a record the server had no idea about and was told the analysis had
+ * expired.
+ */
+export async function findAnalysis(id: string): Promise<AnalysisRecord | undefined> {
+  const live = getRecord(id);
+  if (live) return live;
+  const sample = sampleAnalysis(id);
+  // Seeded like a saved analysis is, so a reading written onto one card is
+  // there for the next request rather than inferred again, and so the copy
+  // this request got is the copy the next one reads.
+  if (sample) {
+    records.set(id, sample);
+    return sample;
+  }
+  return getSavedAnalysis(id);
+}
+
 export function putRecord(record: AnalysisRecord): void {
   pruneExpired();
   records.set(record.id, record);
@@ -187,27 +317,26 @@ export async function destroyRecord(id: string, dir?: string): Promise<void> {
   await rm(target, { recursive: true, force: true }).catch(() => undefined);
 }
 
-function splitSummaryText(text: string): string[] {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-  const lines = trimmed.split(/\n+/).map((line) => line.replace(/^[-*•\d.)]+\s+/, "").trim()).filter(Boolean);
-  if (lines.length > 1) return lines;
-  return trimmed.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
-}
 
-/** Accept an array, a prose string, or missing text; return at most `maxBullets` bullets. */
-export function normalizeSummary(raw: unknown, fallback: string[], maxBullets: number = MAX_SUMMARY_BULLETS): string[] {
-  const source = Array.isArray(raw)
-    ? raw.filter((item): item is string => typeof item === "string")
-    : typeof raw === "string"
-      ? splitSummaryText(raw)
-      : [];
-  const bullets = source
-    .map((item) => item.replace(/^[-*•]\s+/, "").trim())
-    .filter(Boolean)
-    .slice(0, maxBullets)
-    .map((item) => (item.length > MAX_BULLET_LENGTH ? `${item.slice(0, MAX_BULLET_LENGTH - 1)}…` : item));
-  return bullets.length > 0 ? bullets : fallback;
+/**
+ * Read the agent's per-function evidence. Entries that name no supplied function,
+ * or carry no text, are dropped rather than shifting every later entry onto the
+ * wrong function.
+ */
+export function normalizeFunctionEvidence(raw: unknown): { id: string; evidence: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const cited: { id: string; evidence: string }[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const { id, evidence } = entry as Record<string, unknown>;
+    if (typeof id !== "string" || seen.has(id)) continue;
+    const text = typeof evidence === "string" ? evidence.replace(/^[-*•]\s+/, "").trim() : "";
+    if (!text) continue;
+    seen.add(id);
+    cited.push({ id, evidence: trimBullet(text) });
+  }
+  return cited.slice(0, MAX_SUMMARY_BULLETS);
 }
 
 /** Keep measured groups authoritative; the agent only supplies explanations. */
@@ -222,27 +351,46 @@ export function normalizeHotspots(raw: unknown, totalMs: number, groups: Bottlen
     totalMs,
     hotspots: groups.map((group) => {
       const candidate = annotations.get(group.id);
-      const ids = candidate?.supportingFunctionIds;
       const functionIds = new Set(group.functions.map((fn) => fn.id));
+      const cited = normalizeFunctionEvidence(candidate?.functions);
       // Reject ungrounded annotations, including reports extracted from plain text.
-      const validEvidence = Array.isArray(ids) && ids.length > 0 && ids.length <= 8
-        && ids.every((id) => typeof id === "string" && functionIds.has(id))
-        && ids.includes(group.functions[0]?.id);
+      const grounded = cited.length > 0 && cited.length <= 8
+        && cited.every(({ id }) => functionIds.has(id))
+        && cited.some(({ id }) => id === group.functions[0]?.id);
       const rawTitle = typeof candidate?.title === "string" ? candidate.title.trim() : "";
       const title = rawTitle.slice(0, 120).trimEnd();
-      const annotation = validEvidence && title.length > 0 ? candidate : undefined;
+      const annotation = grounded && title.length > 0 ? cited : undefined;
       const heaviest = group.functions.slice(0, MAX_SUMMARY_BULLETS);
       const fallbackTitle = heaviest.map((fn) => fn.title).join(" / ") || "Sampled CPU work";
-      const fallbackSummary = heaviest.map((fn) => `${fn.title} (${Math.round(fn.selfTimeMs)} ms self time)`);
+      // Keep the measured order, not the order the agent happened to cite them in.
+      const evidence: Record<string, string> = {};
+      for (const fn of group.functions) {
+        const match = annotation?.find((entry) => entry.id === fn.id);
+        if (match) evidence[fn.id] = match.evidence;
+        else if (!annotation && heaviest.includes(fn)) evidence[fn.id] = `${fn.title} (${Math.round(fn.selfTimeMs)} ms self time)`;
+      }
       return {
         ...group,
         groupingCaller: group.title,
         title: annotation ? title : fallbackTitle,
-        supportingFunctionIds: annotation ? [...new Set(ids as string[])] : heaviest.map((fn) => fn.id),
-        summary: normalizeSummary(annotation?.summary, fallbackSummary, heaviest.length),
+        supportingFunctionIds: Object.keys(evidence),
+        evidence,
+        summary: Object.values(evidence),
       };
     }).sort((a, b) => b.combinedTimeMs - a.combinedTimeMs),
   };
+}
+
+/**
+ * What a card needs in the browser.
+ *
+ * Unlike `clientHotspots`, there is nothing to strip: a card's subtree, its
+ * repeated-function rollup and both of its stacks are all bounded when the card
+ * is built, so the published card is the measured one. Trimming the upward
+ * stack here would only hand the drill-down a path missing its entry point.
+ */
+export function clientCards(cards: ProfileCard[]): ProfileCard[] {
+  return cards;
 }
 
 /** Card results keep top function names; stacks stay on the server record for prompt generation. */
@@ -250,7 +398,15 @@ export function clientHotspots(hotspots: Hotspot[]): Hotspot[] {
   return hotspots.map((hotspot) => ({
     ...hotspot,
     stack: [],
-    functions: hotspot.functions.slice(0, MAX_SUMMARY_BULLETS).map((fn) => ({
+    namedTimeMs: hotspot.functions.reduce((sum, fn) => sum + fn.selfTimeMs, 0),
+    namedFunctionCount: hotspot.functions.length,
+    // Publish the functions the agent explained, then fill from the heaviest
+    // remaining, so a card never shows a row the agent wrote no evidence for
+    // while that evidence sits on a function it dropped.
+    functions: [
+      ...hotspot.functions.filter((fn) => hotspot.evidence[fn.id]),
+      ...hotspot.functions.filter((fn) => !hotspot.evidence[fn.id]),
+    ].slice(0, MAX_SUMMARY_BULLETS).map((fn) => ({
       id: fn.id,
       title: fn.title,
       selfTimeMs: fn.selfTimeMs,

@@ -16,14 +16,13 @@ The supplied measurements and group boundaries are ground truth. Each sample bel
 Return one annotation for every supplied group:
 - id: the exact group id.
 - title: at most 120 characters describing the dominant measured operations, weighted by self time. Do not use a wrapper such as dispatchEvent or batchedUpdates as the problem title.
-- summary: 1-3 concise strings grounded in supplied function names and self times. Use exactly one string for a single-function group. Do not attribute the full group total to listed functions when otherSelfTimeMs is nonzero.
-- supportingFunctionIds: exact supplied function ids supporting the annotation, including the heaviest function.
+- functions: 1-3 entries, each {"id": exact supplied function id, "evidence": one concise string about that function alone}. Order them by self time, heaviest first, and always include the heaviest supplied function. Each evidence string describes only its own function: its supplied self time and, as representative context, the callers in its own stack. Do not write about the group total, otherSelfTimeMs, omitted functions, or how much time is unaccounted for; the report states that itself. Omit a function rather than padding it with filler.
 
-Stacks are innermost first and representative only: later frames call earlier ones, but a function's aggregated self time can include other paths. Put caller, handler, and readable source-path context in summaries only, qualified as a representative or recorded path; do not make a handler part of the title or imply it owns every sample. Never derive a source path from a URL. Do not infer invocation frequency, render placement, collection size, missing memoization, formatter construction count, user-visible symptoms, or fixes.
+Stacks are innermost first and representative only: later frames call earlier ones, but a function's aggregated self time can include other paths. Put caller, handler, and readable source-path context in evidence only, qualified as a representative or recorded path; do not make a handler part of the title or imply it owns every sample. Never derive a source path from a URL. Do not infer invocation frequency, render placement, collection size, missing memoization, formatter construction count, user-visible symptoms, or fixes.
 
-Example: if regexpPrototypeExec dominates a group and its representative stack passes through tokenizeMarkdown and buildMessagePreview from onMessagePress, use a title like "Expensive regular-expression work during markdown tokenization". A grounded summary can state its supplied self time and that the representative stack reaches it through tokenizeMarkdown from onMessagePress, adding a readable source path only when supplied.
+Example: if regexpPrototypeExec dominates a group and its representative stack passes through tokenizeMarkdown and buildMessagePreview from onMessagePress, use a title like "Expensive regular-expression work during markdown tokenization". Its evidence can state its supplied self time and that the representative stack reaches it through tokenizeMarkdown from onMessagePress, adding a readable source path only when supplied.
 
-Return exactly one JSON object as the final response: {"hotspots":[{"id":"...","title":"...","summary":["..."],"supportingFunctionIds":["..."]}]}. Do not use Markdown fences or add explanatory prose.`;
+Return exactly one JSON object as the final response: {"hotspots":[{"id":"...","title":"...","functions":[{"id":"...","evidence":"..."}]}]}. Do not use Markdown fences or add explanatory prose.`;
 
 export function analystUserPrompt(
   groups: Bottleneck[],

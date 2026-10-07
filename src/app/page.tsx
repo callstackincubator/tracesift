@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ChangeEvent, DragEvent, useEffect, useId, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   Alert,
   ArrowRight,
@@ -11,13 +11,26 @@ import {
   PluginHeader,
   PluginShell,
   RozeniteLoader,
-  Text,
 } from "@rozenite/ui";
 
 import { HowToUseGuide } from "@/app/how-to-use";
+import { ThemeGate } from "@/app/theme-gate";
+import { TaskContribution } from "@/app/task-contribution";
+import { ReactContribution, reactCulpritShape } from "@/app/react-contribution";
+import { type ContributionChartKind } from "@/app/contribution-chart";
 import type { Hotspot } from "@/lib/analysis";
+import type { ProfileCard } from "@/lib/profile-cards";
+import { reactExploreHref, storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
+import { type TaskCard, type TaskCardSet } from "@/lib/task-cards";
+import { CHART_SLICES } from "@/lib/contribution";
+import { formatMs } from "@/lib/format";
+import { profileCardLocations, taskCardLocations } from "@/lib/frame-location";
+import { shortLocationLabel } from "@/lib/source-location";
+import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
 import { pollOAuthAttempt, type OAuthAttempt } from "@/lib/oauth-client";
 import type { ReactIssue } from "@/lib/react-analyzer";
+import type { ReactCard, ReactCardSet } from "@/lib/react-cards";
+import { reactCommitSlices } from "@/lib/react-contribution";
 
 type ProfileType = "javascript" | "react";
 type UploadKind = "cpu" | "reactProfile";
@@ -30,11 +43,14 @@ interface AnalyzeResponse {
   saved?: boolean;
   totalMs: number;
   hotspots: Hotspot[];
+  taskCards?: TaskCardSet;
+  cards?: ProfileCard[];
+  callCountIsExact?: boolean;
   usage?: TokenUsage;
   model?: AnalysisModel;
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
-interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
+interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; taskCards?: TaskCardSet; cards?: ProfileCard[]; callCountIsExact?: boolean; reactCards?: ReactCardSet; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
 interface AuthMethod { type: 'api_key' | 'oauth'; label: string; configured: boolean; subscription: boolean; }
 interface ModelProvider { id: string; name: string; authMethods: AuthMethod[]; models: Array<{ id: string; name: string }>; }
 interface ModelSettings {
@@ -77,16 +93,6 @@ const acceptedFiles: Record<UploadKind, string> = {
   reactProfile: ".json,application/json",
 };
 
-function formatMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  const seconds = ms / 1000;
-  if (seconds < 10) return `${seconds.toFixed(2)} s`;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes} m ${Math.round(seconds % 60)} s`;
-}
-
 function formatTokens(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens <= 0) return "0";
   if (tokens < 1000) return `${Math.round(tokens)}`;
@@ -125,7 +131,7 @@ function errorMessageFrom(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" }) {
+function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" | "arrow" | "back" | "explore" | "sparkle" | "bulb" | "chevron-up" | "chevron-down" }) {
   const paths = {
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.65 1 .3.27.68.41 1.08.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -133,69 +139,361 @@ function HeaderIcon({ type }: { type: "history" | "settings" | "help" | "close" 
     close: <path d="m6 6 12 12M18 6 6 18" />,
     arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
     back: <path d="M19 12H5m6 6-6-6 6-6" />,
+    explore: <><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
+    sparkle: <><path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3Z" /><path d="M18 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7Z" /></>,
+    bulb: <><path d="M9.5 18h5M10 21h4" /><path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.7l.1.5h5.2l.1-.5c.1-.7.4-1.3.9-1.7A6 6 0 0 0 12 3Z" /></>,
+    "chevron-up": <path d="m6 14 6-6 6 6" />,
+    "chevron-down": <path d="m6 10 6 6 6-6" />,
   };
   return <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]}</svg>;
 }
 
-function ProfileSnapshot({ type, active }: { type: "cpu" | "react"; active: boolean }) {
-  const isCpu = type === "cpu";
-  const title = isCpu ? "Bottlenecks, slowest first" : "React issues";
-  const summary = isCpu
-    ? "2 bottlenecks · 8.13 s total"
-    : "1 issue · 16 ms budget · 4 commits · 169.74 ms peak · 1 over budget";
-  const usage = isCpu
-    ? "analyzer · 2.3k tokens · 1.3k in · 975 out"
-    : "analyzer · 2.6k tokens · 1.9k in · 752 out";
-  const issueTitle = isCpu
-    ? "toLocaleString date formatting dominates sorting inside getUserByUserName on _onFocus"
-    : "Expensive render work in HeavyActivityHeatmap";
-  const time = isCpu ? "2.05 s" : "125 ms";
-  const share = isCpu ? "97% of group" : "74% of commit";
-  const detail = isCpu
-    ? "Native datePrototypeToLocaleStringHelper costs 2050 ms of self time, reached through arrayPrototypeSort inside getUserByUserName from the _onFocus dispatch."
-    : "HeavyActivityHeatmap used 124.8 ms self time, 73.5% of a 169.7 ms over-budget React render.";
+/**
+ * The landing page's two slides: one per profile a recording can be, each
+ * showing what the analysis of that kind actually looks like and starting the
+ * run for it. The previews borrow the app's own classes — `hotspot-card`, the
+ * contribution chart — so a change to the card is a change to the landing page,
+ * and the page cannot go on advertising a card the app no longer draws.
+ */
+type SlideBand = {
+  name: string;
+  ms: string;
+  share: string;
+  percent: number;
+  color: string;
+  outside?: boolean;
+};
 
+type SlideSpec = {
+  /** What this profile is called where the user captured it. */
+  label: string;
+  source: string;
+  resultsTitle: string;
+  summary: string;
+  headline: string;
+  shape: string;
+  timeLabel: string;
+  bands: SlideBand[];
+  detail: {
+    share: string;
+    ms: string;
+    secondary?: string;
+    lineLabel: string;
+    line: string;
+    lineIsCode?: boolean;
+    shape: string;
+  };
+};
+
+const SLIDES: Record<ProfileType, SlideSpec> = {
+  javascript: {
+    label: "JavaScript CPU",
+    source: "Chrome Performance · Hermes",
+    resultsTitle: "Tasks, longest first",
+    summary: "2 long tasks of 2 · 8.13 s total",
+    headline: "_onFocus › getUserByUserName › _compareUsers",
+    shape: "74% in datePrototypeToLocaleStringHelper · 8 calls",
+    timeLabel: "2.11 s",
+    bands: [
+      { name: "_compareUsers", ms: "1.56 s", share: "74%", percent: 73.9, color: "var(--series-1)" },
+      { name: "getUserByUserName", ms: "295 ms", share: "14%", percent: 13.9, color: "var(--series-2)" },
+      { name: "12 smaller frames", ms: "258 ms", share: "12%", percent: 12.2, color: "var(--series-tail)" },
+    ],
+    detail: {
+      share: "74% of task",
+      ms: "1.56 s",
+      secondary: "none of it in its own body",
+      lineLabel: "file",
+      line: "app/screens/UserList.js:142:1",
+      lineIsCode: true,
+      shape: "ran 8 times in this task · longest 196 ms",
+    },
+  },
+  react: {
+    label: "React components",
+    source: "React DevTools profiling",
+    resultsTitle: "Commits, longest first",
+    summary: "1 commit over the 16 ms budget, of 4 · 173 ms rendering",
+    headline: "HeavyActivityHeatmap spent 124.8 ms rendering in a 169.7 ms commit",
+    shape: "74% of the commit in one component · 329 rendered",
+    timeLabel: "170 ms",
+    bands: [
+      { name: "HeavyActivityHeatmap", ms: "124.8 ms", share: "74%", percent: 73.5, color: "var(--series-1)" },
+      { name: "Route(explore-details)", ms: "2.2 ms", share: "1%", percent: 1.3, color: "var(--series-2)" },
+      { name: "327 smaller components", ms: "19.9 ms", share: "12%", percent: 11.7, color: "var(--series-tail)" },
+      { name: "React itself, no component", ms: "22.8 ms", share: "13%", percent: 13.4, color: "var(--series-outside)", outside: true },
+    ],
+    detail: {
+      share: "74% of commit",
+      ms: "124.8 ms",
+      lineLabel: "via",
+      line: "DetailsScreen › … › View › ScrollView",
+      shape: "render reason not recorded · React Compiler",
+    },
+  },
+};
+
+/**
+ * A slide's preview: the results screen at one card, trimmed to the bar and
+ * the slice it opens on. The lede and the legend are the two blocks that only
+ * repeat what the drawing already says, so a column this narrow drops them.
+ */
+function SlidePreview({ spec }: { spec: SlideSpec }) {
+  const [lead] = spec.bands;
+
+  /* Spans and divs rather than the card's own buttons: the whole slide is one
+     control, and nothing inside the drawing is separately clickable. */
   return (
-    <article className={`signal-snapshot signal-snapshot-${type}${active ? " is-active" : ""}`} aria-label={`${title} example`}>
-      {isCpu ? null : <span className="snapshot-kicker">Analysis results</span>}
-      <h2>{title}</h2>
-      <p className="snapshot-summary">{summary}</p>
-      <p className="snapshot-usage">{usage}</p>
-      <div className="snapshot-divider" />
-      <section className="snapshot-issue">
-        <div className="snapshot-issue-head">
-          <span className="snapshot-rank">#1</span>
-          <strong>{issueTitle}</strong>
-          <span className="snapshot-budget">{isCpu ? "2.11 s" : "high · commit 170 ms"}</span>
-        </div>
-        <div className="snapshot-issue-body">
-          <div className="snapshot-time-line">
-            <span>{time}</span>
-            <small>{share}</small>
+    <div className="slide-preview" aria-hidden="true">
+      <div className="slide-preview-head">
+        <span className="eyebrow">Analysis results</span>
+        <strong>{spec.resultsTitle}</strong>
+        <small>{spec.summary}</small>
+      </div>
+      <div className="hotspot-card">
+        <div className="hotspot-head">
+          <span className="hotspot-rank">#1</span>
+          <div className="hotspot-heading-copy">
+            <strong>{spec.headline}</strong>
+            <span className="hotspot-shape">{spec.shape}</span>
           </div>
-          <div className="snapshot-meter" aria-hidden="true"><span /></div>
-          <p>{detail}</p>
+          <span className="hotspot-time">{spec.timeLabel}</span>
         </div>
-      </section>
+        <div className="contribution" data-kind="bar">
+          <div className="contribution-bar">
+            {spec.bands.map((band) => (
+              <span
+                key={band.name}
+                className={`contribution-band${band.outside ? " is-outside" : ""}${band === lead ? " is-active" : ""}`}
+                style={{ width: `${band.percent}%`, background: band.color }}
+              />
+            ))}
+          </div>
+          <div className="contribution-detail">
+            <div className="contribution-detail-head">
+              <span className="contribution-swatch" style={{ background: lead.color }} />
+              <span className="contribution-detail-name">{lead.name}</span>
+              <span className="contribution-detail-share">{spec.detail.share}</span>
+            </div>
+            <div className="contribution-detail-figures">
+              <span className="contribution-detail-ms">{spec.detail.ms}</span>
+              {spec.detail.secondary ? <span className="contribution-detail-secondary">{spec.detail.secondary}</span> : null}
+            </div>
+            <p className="contribution-detail-line">
+              <span className="contribution-detail-label">{spec.detail.lineLabel}</span>
+              {spec.detail.lineIsCode ? <code>{spec.detail.line}</code> : spec.detail.line}
+            </p>
+            <p className="contribution-detail-shape">{spec.detail.shape}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileSlide({
+  type,
+  active,
+  onStart,
+}: {
+  type: ProfileType;
+  active: boolean;
+  onStart: (type: ProfileType) => void;
+}) {
+  const spec = SLIDES[type];
+
+  /*
+   * The click lands on the slide, with the button inside it for the keyboard
+   * and for anything reading the page out: the whole card is the target, and
+   * a stretched overlay on the button cannot be trusted to cover it — the
+   * button's own hover `filter` makes it the containing block.
+   */
+  return (
+    <article
+      className={`profile-slide profile-slide-${type}`}
+      /* Inert while it is the slide waiting beside the current one: the click
+         then lands on the cell around it, which brings this slide in rather
+         than starting a run the reader cannot even read yet. */
+      inert={!active}
+      onClick={() => onStart(type)}
+    >
+      <div className="slide-head">
+        <span className="slide-icon"><ProfileIcon type={type} /></span>
+        <div>
+          <strong>{spec.label}</strong>
+          <small>{spec.source}</small>
+        </div>
+      </div>
+      <SlidePreview spec={spec} />
+      <Button className="slide-cta" size="lg" onClick={() => onStart(type)}>
+        Get started <HeaderIcon type="arrow" />
+      </Button>
     </article>
   );
 }
 
-function ProfileSnapshotGallery() {
-  const [activeSnapshot, setActiveSnapshot] = useState<"cpu" | "react">("cpu");
+const SLIDE_ORDER: ProfileType[] = ["javascript", "react"];
+/*
+ * The strip carries three copies of the slides and runs through the middle
+ * one, so there is always a slide either side of the one on show — no edge of
+ * the row is ever in view — and the move past the last slide lands on a clone
+ * rather than on nothing. Once that move has finished the index drops back to
+ * the matching slide in the middle copy with the transition off; the reader
+ * cannot see the jump, because the cell it jumps to shows the same card in the
+ * same place.
+ */
+const SLIDE_CELLS: ProfileType[] = [...SLIDE_ORDER, ...SLIDE_ORDER, ...SLIDE_ORDER];
+/** Where the middle copy — the one the index runs through — starts. */
+const SLIDE_OFFSET = SLIDE_ORDER.length;
+/** The middle copy is the row the reader is given; the others are its clones. */
+const isRealSlide = (index: number) => index >= SLIDE_OFFSET && index < SLIDE_OFFSET + SLIDE_ORDER.length;
+/* Measured from the start of one move to the start of the next, so the row
+   comes to rest for the remainder after the slide itself has landed. */
+const SLIDE_INTERVAL_MS = 3000;
+/** The track's own transition, in `.carousel-track`; the snap waits it out. */
+const SLIDE_SHIFT_MS = 620;
+
+function ProfileLanding({ onStart }: { onStart: (type: ProfileType) => void }) {
+  const [current, setCurrent] = useState(SLIDE_OFFSET);
+  /* Off for the one frame the loop snaps back on, so the return to the first
+     slide is a cut and not a long slide backwards — and so the slide the
+     class moves off does not fade and shrink out over the one it moves onto,
+     which is the same card in the same place and dips as they cross. */
+  const [animate, setAnimate] = useState(true);
+  /* Two reasons to stop advancing: the reader is on the slide (hover or focus),
+     or they have picked one themselves, which settles the question the
+     rotation was asking. */
+  const [held, setHeld] = useState(false);
+  const [picked, setPicked] = useState(false);
 
   useEffect(() => {
+    if (held || picked) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const interval = window.setInterval(() => {
-      setActiveSnapshot((current) => current === "cpu" ? "react" : "cpu");
-    }, 2000);
-
+      /* Counts up through the clones rather than wrapping, so every move is
+         forwards; the snap below brings the index home. */
+      setCurrent((index) => index + 1);
+    }, SLIDE_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [held, picked]);
+
+  useEffect(() => {
+    if (current < SLIDE_OFFSET + SLIDE_ORDER.length) return;
+    const timer = window.setTimeout(() => {
+      setAnimate(false);
+      setCurrent(SLIDE_OFFSET + (current % SLIDE_ORDER.length));
+    }, SLIDE_SHIFT_MS);
+    return () => window.clearTimeout(timer);
+  }, [current]);
+
+  /* Two frames: the first paints the snapped-back position with the transition
+     off, the second puts the transition back for the move after it. */
+  useEffect(() => {
+    if (animate) return;
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => setAnimate(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(first);
+      window.cancelAnimationFrame(second);
+    };
+  }, [animate]);
+
+  const show = (index: number) => {
+    setCurrent(SLIDE_OFFSET + index);
+    setPicked(true);
+  };
+
+  /*
+   * The shift is read off the cell itself rather than computed from a width
+   * this file also has to know: the slide width and the gap are the
+   * stylesheet's to set, and they change with the breakpoint. It brings the
+   * cell's centre to the strip's centre, so the slide on show sits in the
+   * middle with a shoulder of the slides either side of it; it is negative
+   * for the first cell, which the strip is happy to be pushed by. No cap,
+   * because the clones mean there is always another slide past the
+   * current one.
+   */
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    const viewport = track?.parentElement;
+    if (!track || !viewport) return;
+    const measure = () => {
+      const cell = track.children[current] as HTMLElement | undefined;
+      if (!cell) return;
+      setShift(cell.offsetLeft + cell.offsetWidth / 2 - viewport.clientWidth / 2);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [current]);
 
   return (
-    <div className="signal-snapshot-gallery" aria-label="Example CPU and React analysis results">
-      <ProfileSnapshot type="cpu" active={activeSnapshot === "cpu"} />
-      <ProfileSnapshot type="react" active={activeSnapshot === "react"} />
+    <div className="landing">
+      <div className="landing-head">
+        <h1>Find the code that makes your app feel slow</h1>
+        <p>Turn profiler traces into a focused list of bottlenecks</p>
+        <div className="platform-list" aria-label="Supported platforms">
+          <span><ProfileIcon type="react" />React</span>
+          <span><ProfileIcon type="javascript" />JavaScript</span>
+          <span><ProfileIcon type="react" />React Native</span>
+        </div>
+      </div>
+      <div
+        className="landing-carousel"
+        aria-roledescription="carousel"
+        aria-label="What an analysis of each profile looks like"
+        onMouseEnter={() => setHeld(true)}
+        onMouseLeave={() => setHeld(false)}
+        onFocus={() => setHeld(true)}
+        onBlur={() => setHeld(false)}
+      >
+        {/* Every slide stays in the track, so its height is the tallest of
+            them and the card does not resize under the reader mid-swap. */}
+        {/* The current slide centred, with the slides either side of it
+            shrunk and held back to a fraction of their opacity: the strip
+            reads as a row that moves rather than a card that is replaced. */}
+        <div
+          className={`carousel-track${animate ? "" : " is-snapping"}`}
+          ref={trackRef}
+          style={{ transform: `translateX(${-shift}px)` }}
+        >
+          {SLIDE_CELLS.map((type, index) => (
+            <div
+              key={index}
+              className={`carousel-cell${index === current ? " is-current" : ""}`}
+              role="group"
+              aria-roledescription="slide"
+              /* The copies either side repeat slides the reader has already
+                 been given, so they are not announced a second time — unless
+                 the loop has come to rest on one, when it is the slide on
+                 show. */
+              aria-hidden={(!isRealSlide(index) && index !== current) || undefined}
+              aria-label={`${SLIDES[type].label} — ${(index % SLIDE_ORDER.length) + 1} of ${SLIDE_ORDER.length}`}
+              onClick={index === current ? undefined : () => show(index % SLIDE_ORDER.length)}
+            >
+              <ProfileSlide type={type} active={index === current} onStart={onStart} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="landing-dots">
+        {SLIDE_ORDER.map((type, index) => (
+          <button
+            key={type}
+            type="button"
+            className={`landing-dot${index === current % SLIDE_ORDER.length ? " is-current" : ""}`}
+            aria-label={`Show ${SLIDES[type].label}`}
+            aria-current={index === current % SLIDE_ORDER.length}
+            onClick={() => show(index)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -227,6 +525,25 @@ function PromptActionButton({
 
 const MAX_RESULT_CARDS = 3;
 
+/**
+ * Component rows a React card shows. Eight is what the cards' own culprit floor
+ * admits on a realistic commit, and past it the footnote says as much as another
+ * row would.
+ */
+const MAX_REACT_CARD_ROWS = 8;
+
+/**
+ * The smallest share of a commit worth its own row.
+ *
+ * The cards' own culprit floor (0.5 ms, or 1% of the commit) is set for the
+ * hand-off, where an agent reading the repo can use a small component as a
+ * hint. On the card it produced rows like `VirtualizedList 3 ms / 1% of
+ * commit`: true, measured, and nothing a reader can act on, sitting at the
+ * same visual weight as the 142 ms row above it. Five percent is the point
+ * where fixing the component could plausibly move the commit.
+ */
+const REACT_ROW_MIN_SHARE = 5;
+
 function reactIssueRemainingMs(issue: ReactIssue): number {
   return Math.max(0, issue.commit.durationMs - issue.components.reduce((total, component) => total + component.selfTimeMs, 0));
 }
@@ -238,35 +555,284 @@ interface HotPathRow {
   title?: string;
   ms?: number;
   percentLabel?: string;
+  /** The second of a row's two figures, e.g. self time beside total time. */
+  secondaryLabel?: string;
   barPercent?: number;
   caption?: string;
+  /**
+   * How this row's time was distributed over separate calls. The single most
+   * actionable line on a task card: one 424 ms call is an algorithm to fix and
+   * 54 calls of 8 ms is a call site to stop hitting, and a total alone renders
+   * both identically.
+   */
+  shape?: string;
+  /**
+   * The named callers that reached this row's frame, outermost first. A
+   * function name alone rarely says what to do about it; the frames that called
+   * it place it in a feature and usually in a loop.
+   */
+  callers?: string;
+  /** Opens Explore on this row's frame inside the task. */
+  onFocus?: () => void;
 }
 
 interface HotPathCard {
   rows: HotPathRow[];
-  footnote?: string;
+  footnotes: string[];
+}
+
+/**
+ * A caller sampled in several bursts is one bottleneck, but its total and its
+ * worst single burst answer different questions: how much work it costs overall,
+ * and how much of that lands in one block a user could feel.
+ */
+function occurrenceLabel(hotspot: Hotspot): string | undefined {
+  if (!hotspot.occurrences || hotspot.occurrences < 2) return undefined;
+  return `${hotspot.occurrences} bursts · longest ${formatMs(hotspot.longestRunMs)}`;
 }
 
 function hotspotRows(hotspot: Hotspot): HotPathCard {
+  // The name is measured; only the explanation comes from the agent. Keying the
+  // explanation by function id keeps a row's caption about that row's function.
   const ranked = hotspot.functions
-    .map((fn, index) => ({ fn, detail: hotspot.summary[index] }))
+    .map((fn) => ({ fn, detail: hotspot.evidence?.[fn.id] }))
     .sort((a, b) => b.fn.selfTimeMs - a.fn.selfTimeMs);
   const shown = ranked.slice(0, MAX_RESULT_CARDS);
   const rows: HotPathRow[] = shown.map(({ fn, detail }) => ({
     location: fn.location,
+    title: fn.title,
     ms: fn.selfTimeMs,
     percentLabel: `${Math.round(fn.percentOfGroup)}% of group`,
     barPercent: fn.percentOfGroup,
     caption: detail,
   }));
 
-  const attributedMs = ranked.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
-  const leftoverMs = hotspot.combinedTimeMs - attributedMs;
-  const footnote = leftoverMs >= 1
-    ? `+ ~${formatMs(leftoverMs)} other time not attributed to a named function`
-    : undefined;
+  // Only the top rows are published, so the group's own named total has to come
+  // from the server; subtracting the shown rows alone reported measured functions
+  // as unattributed time.
+  const shownMs = shown.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
+  const namedMs = hotspot.namedTimeMs ?? ranked.reduce((sum, { fn }) => sum + fn.selfTimeMs, 0);
+  const unlistedCount = (hotspot.namedFunctionCount ?? ranked.length) - shown.length;
+  const unlistedMs = Math.max(0, namedMs - shownMs);
+  const unnamedMs = Math.max(0, hotspot.combinedTimeMs - namedMs);
 
-  return { rows, footnote };
+  const footnotes: string[] = [];
+  if (unlistedCount > 0 && unlistedMs >= 1) {
+    footnotes.push(`+ ~${formatMs(unlistedMs)} across ${unlistedCount} further measured function${unlistedCount === 1 ? "" : "s"}`);
+  }
+  // The naming threshold scales with the profile's sampling interval, so it has
+  // to be read off the group rather than restated as the group-ranking constant.
+  if (unnamedMs >= 1) {
+    const cutoff = hotspot.minFunctionTimeMs ?? MIN_HOTSPOT_TIME_MS;
+    footnotes.push(`+ ~${formatMs(unnamedMs)} spread thinly across functions under ${formatMs(cutoff)} each`);
+  }
+
+  return { rows, footnotes };
+}
+
+/**
+ * A card's "Main highlights": the heaviest named work inside the parent's
+ * subtree, each with both of its times. Inclusive time is what ranks them —
+ * self time alone cannot say that a 240 ms helper sits under this parent.
+ */
+function cardRows(card: ProfileCard): HotPathCard {
+  const locations = profileCardLocations(card);
+  const rows: HotPathRow[] = card.highlights.map((highlight) => ({
+    location: locations.shown(highlight.name, highlight.location),
+    title: highlight.name,
+    ms: highlight.totalMs,
+    secondaryLabel: `${formatMs(highlight.selfMs)} self`,
+    percentLabel: card.totalMs > 0 ? `${Math.round((highlight.totalMs / card.totalMs) * 100)}% of parent` : undefined,
+    barPercent: card.totalMs > 0 ? (highlight.totalMs / card.totalMs) * 100 : 0,
+  }));
+
+  const footnotes: string[] = [];
+  footnotes.push(
+    card.selfShape === "longTail"
+      ? `${formatMs(card.selfMs)} is spread across calls too small to list`
+      : `${formatMs(card.selfMs)} in its own body`
+  );
+  if (card.subtreeFunctionCount > card.highlights.length) {
+    footnotes.push(`${card.subtreeFunctionCount} functions ran under this parent in total`);
+  }
+  if (card.confidence === "low") {
+    footnotes.push("few samples landed here — treat these figures as a hint");
+  }
+  return { rows, footnotes };
+}
+
+/**
+ * A task card's content is a drawing of how the block divides between the
+ * features it entered, plus the footnotes that qualify the measurement.
+ *
+ * It was a list of culprit rows until the chart replaced it, and before that a
+ * list of boundary frames with inclusive-time bars. Both were readings of a
+ * card as eight independent rows, which is the thing the chart is not: the rows
+ * shared no whole, so a reader could not see that the eight heaviest culprits
+ * of a 3227 ms task account for 30% of it, nor what the other 70% was.
+ *
+ * Dividing by boundary frame instead is what makes the whole say something. See
+ * `contribution.ts` for why both levels of the chart are honest partitions, and
+ * why the residuals are slices rather than footnotes — which is also why the
+ * footnotes below no longer describe the remainder.
+ */
+function taskCardFootnotes(card: TaskCard): string[] {
+  const footnotes: string[] = [];
+  if (card.confidence === "low") footnotes.push("few samples landed in this task — treat these figures as a hint");
+  return footnotes;
+}
+
+/**
+ * A task that entered no frame of its own — a bundle whose identifiers are all
+ * mangled, or work that really was all framework — has no features to divide
+ * into, so the chart could only say "none of this was your code" and offer
+ * nothing to open. Its culprits can still name functions, so the card falls
+ * back to the rows they used to be drawn as.
+ */
+function taskFallbackRows(card: TaskCard, onFocus: (nodeId: string) => void): HotPathRow[] {
+  const locations = taskCardLocations(card);
+  return card.culprits.slice(0, CHART_SLICES).map((culprit) => ({
+    location: locations.shown(culprit.name, culprit.location),
+    title: culprit.name,
+    ms: culprit.selfMs,
+    // Only when the two differ. A leaf burns all of its own time, so printing
+    // `1.57 s` beside `1.57 s with callees` says the same thing twice.
+    secondaryLabel: culprit.totalMs - culprit.selfMs >= 1 ? `${formatMs(culprit.totalMs)} with callees` : undefined,
+    percentLabel: card.durationMs > 0 ? `${Math.round((culprit.selfMs / card.durationMs) * 100)}% of task` : undefined,
+    barPercent: card.durationMs > 0 ? (culprit.selfMs / card.durationMs) * 100 : 0,
+    shape: culprit.shapeText,
+    callers: culprit.callers.length > 0 ? culprit.callers.join(" › ") : undefined,
+    onFocus: () => onFocus(culprit.nodeId),
+  }));
+}
+
+/* A task card's heading used to carry a third line naming the rest of the
+   boundary frames ("also keysChanged 306 ms · …"). The breakdown beneath the
+   chart already names every one of them with its share, so the line repeated
+   the evidence in a form you could not click. The heading now stops at the
+   shape. */
+
+/**
+ * Which drawing the cards below are read as. One control for both families: a
+ * reader who prefers one reading of a part-of-whole prefers it on a commit for
+ * the same reason they prefer it on a task.
+ */
+/*
+ * Missing render reasons are a property of the recording, not of any one
+ * commit, so this is said once for the whole run. It is a light rather than a
+ * paragraph: most recordings have nothing to say here, and the sentence only
+ * matters to someone who noticed a card saying "render reason not recorded"
+ * and went looking for why.
+ */
+function CausesNotice() {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="causes-notice" ref={containerRef}>
+      <button
+        type="button"
+        className={open ? "causes-notice-button is-open" : "causes-notice-button"}
+        aria-expanded={open}
+        aria-label="Why some render reasons are missing"
+        title="Why some render reasons are missing"
+        onClick={() => setOpen(value => !value)}
+      >
+        <HeaderIcon type="bulb" />
+      </button>
+      {open ? (
+        <div className="causes-notice-popover" role="dialog" aria-label="Render reasons not recorded">
+          <strong>Render reasons not recorded</strong>
+          <p>
+            This recording does not say why each component rendered. Re-record with React DevTools&rsquo;
+            &ldquo;Record why each component rendered&rdquo; setting on to get render causes.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChartSwitch({
+  kind,
+  onChange,
+}: {
+  kind: ContributionChartKind;
+  onChange: (kind: ContributionChartKind) => void;
+}) {
+  return (
+    <div className="chart-switch">
+      {(["bar", "treemap"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={kind === option ? "timeline-zoom is-current" : "timeline-zoom"}
+          onClick={() => onChange(option)}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The second line of a card: how often this frame ran. */
+function cardSubtitle(card: ProfileCard, callCountIsExact: boolean): string | undefined {
+  const count = callCountIsExact ? card.invocations ?? card.callSites : card.callSites;
+  if (count <= 1) return undefined;
+  return callCountIsExact ? `called ${count} times` : `${count} call sites`;
+}
+
+/**
+ * A React card's rows: the components that burned the commit's own time.
+ *
+ * The fallback the chart leaves behind. A commit whose components are all under
+ * the culprit floor — three hundred fibers at 0.1 ms each on a 20 ms commit —
+ * divides into nothing but residuals, so the chart could only say that none of
+ * it was any one component's fault. Its heaviest component is still a name, and
+ * these rows are where it is printed.
+ *
+ * `percentOfCommit` rather than a share of the summed self time, because the
+ * commit's duration is the figure the heading claims and the one a reader can
+ * check against the recording.
+ */
+function reactCardRows(card: ReactCard): HotPathCard {
+  // The top culprit is always shown, however small: a card exists because its
+  // commit went over budget, and a card with no rows states the problem while
+  // withholding the only name it has for it.
+  const worthARow = card.culprits.filter((culprit) => culprit.percentOfCommit >= REACT_ROW_MIN_SHARE);
+  const shown = (worthARow.length > 0 ? worthARow : card.culprits.slice(0, 1)).slice(0, MAX_REACT_CARD_ROWS);
+  const rows: HotPathRow[] = shown.map((culprit) => ({
+    location: culprit.sourceHint ?? undefined,
+    title: culprit.component,
+    ms: culprit.selfMs,
+    percentLabel: `${Math.round(culprit.percentOfCommit)}% of commit`,
+    barPercent: culprit.percentOfCommit,
+    shape: reactCulpritShape(culprit),
+    callers: culprit.path.length > 1 ? culprit.path.slice(0, -1).join(" › ") : undefined,
+  }));
+  /* No footnotes. The three this card used to carry — the sub-floor tail, the
+     reconciler residual, and the effect durations — were each a sentence of
+     arithmetic about time no component is responsible for, which is time the
+     reader cannot act on. They are still in the record, and still in the
+     hand-off, where an agent that can read the repo can use them. */
+  return { rows, footnotes: [] };
 }
 
 function reactIssueRows(issue: ReactIssue): HotPathCard {
@@ -279,44 +845,99 @@ function reactIssueRows(issue: ReactIssue): HotPathCard {
       barPercent: component.percentOfCommit,
       caption: component.evidence.trim() || undefined,
     })),
-    footnote: remainingMs >= 1
-      ? `+ ~${formatMs(remainingMs)} other commit work not represented by these findings`
-      : undefined,
+    footnotes: remainingMs >= 1
+      ? [`+ ~${formatMs(remainingMs)} other commit work not represented by these findings`]
+      : [],
   };
 }
 
 function AnalysisResultCard({
   rank,
   title,
+  shape,
+  subtitle,
   timeLabel,
+  insight,
+  onExplain,
+  explainDisabledReason,
+  explaining,
+  insightError,
+  chart,
   rows,
-  footnote,
+  footnotes,
   loading,
   error,
   copied,
   busy,
   onCopy,
+  onExplore,
 }: {
   rank: number;
   title: string;
+  /**
+   * The second heading row: the measured shape of the cost, where the card has
+   * one. Under evaluation beside `title`, so it is optional and the legacy
+   * engines below simply do not pass it.
+   */
+  shape?: string;
+  subtitle?: string;
   timeLabel: string;
+  /**
+   * The model's reading of this finding, once asked for. Labelled on the
+   * card because it is the only thing there that was not measured, and placed
+   * below the rows: the reading is the conclusion the evidence above leads to,
+   * and it lands next to the button that asked for it.
+   */
+  insight?: string[];
+  /** Asks a model to read this task. Absent where no inference is on offer. */
+  onExplain?: () => void;
+  /**
+   * Why the reading cannot be asked for yet, which is only ever a missing
+   * model. The button stays on the card and carries this as its tooltip: the
+   * reading is the one thing here a model is needed for, so the card is where
+   * that is worth saying.
+   */
+  explainDisabledReason?: string;
+  explaining?: boolean;
+  insightError?: string;
+  /**
+   * The evidence as a drawing rather than as rows. Where a finding divides into
+   * parts of a whole it is the better reading, and where it does not — a React
+   * commit, a hotspot group — the card still takes rows.
+   */
+  chart?: ReactNode;
   rows: HotPathRow[];
-  footnote?: string;
+  footnotes: string[];
   loading: boolean;
   error?: string;
   copied: boolean;
   busy: boolean;
   onCopy: () => void;
+  onExplore?: () => void;
 }) {
+  /* The reading opens with the card that produced it; hiding it is for getting
+     back to the measured evidence without losing the reading. */
+  const [readingOpen, setReadingOpen] = useState(true);
+  const hasReading = Boolean(insight && insight.length > 0);
   return (
     <article className="hotspot-card">
       <div className="hotspot-head">
         <span className="hotspot-rank">#{rank}</span>
         <div className="hotspot-heading-copy">
           <strong>{title}</strong>
+          {shape ? <span className="hotspot-shape">{shape}</span> : null}
+          {subtitle ? <span className="hotspot-subtitle">{subtitle}</span> : null}
         </div>
         <span className="hotspot-time">{timeLabel}</span>
       </div>
+      {chart}
+      {/* The footnotes qualify whatever evidence the card carried, so they
+          belong to the chart as much as to the rows. */}
+      {chart && rows.length === 0 && footnotes.length > 0 ? (
+        <div className="hot-path-rows hot-path-rows-footnotes-only">
+          {footnotes.map((footnote) => <p className="hot-path-footnote" key={footnote}>{footnote}</p>)}
+        </div>
+      ) : null}
       {rows.length > 0 && (
         <div className="hot-path-rows">
           {rows.map((row, rowIndex) => (
@@ -324,14 +945,25 @@ function AnalysisResultCard({
               {row.location ? (
                 <p className="row-location" title={row.location}>
                   <span className="row-location-label">file</span>
-                  <code>{row.location}</code>
+                  <code>{shortLocationLabel(row.location)}</code>
                 </p>
               ) : null}
-              {row.title ? <strong className="row-title">{row.title}</strong> : null}
+              {row.title ? (
+                row.onFocus
+                  ? <button type="button" className="row-title row-title-link" onClick={row.onFocus}>{row.title}</button>
+                  : <strong className="row-title">{row.title}</strong>
+              ) : null}
+              {row.callers ? (
+                <p className="row-callers" title={row.callers}>
+                  <span className="row-callers-label">via</span>
+                  {row.callers}
+                </p>
+              ) : null}
               {row.ms !== undefined && (
                 <>
                   <div className="row-figure-line">
                     <span className="row-figure">{formatMs(row.ms)}</span>
+                    {row.secondaryLabel ? <span className="row-secondary">{row.secondaryLabel}</span> : null}
                     {row.percentLabel ? <span className="row-share">{row.percentLabel}</span> : null}
                   </div>
                   <div className="row-bar-track" aria-hidden="true">
@@ -339,21 +971,67 @@ function AnalysisResultCard({
                   </div>
                 </>
               )}
+              {row.shape ? <p className="row-shape">{row.shape}</p> : null}
               {row.caption ? <p className="row-caption">{row.caption}</p> : null}
             </div>
           ))}
-          {footnote ? <p className="hot-path-footnote">{footnote}</p> : null}
+          {footnotes.map((footnote) => <p className="hot-path-footnote" key={footnote}>{footnote}</p>)}
         </div>
       )}
+      {insight && insight.length > 0 && readingOpen ? (
+        <div className="card-insight">
+          <span className="card-insight-label">AI reading</span>
+          <ul>{insight.map((finding) => <li key={finding}>{finding}</li>)}</ul>
+        </div>
+      ) : null}
+      {insightError ? <p className="hotspot-prompt-error card-insight-error">{insightError}</p> : null}
       <div className="hotspot-footer">
         {error ? <p className="hotspot-prompt-error">{error}</p> : null}
-        <div className="hotspot-actions">
-          <PromptActionButton
-            loading={loading}
-            copied={copied}
-            busy={busy}
-            onCopy={onCopy}
-          />
+        <div className="hotspot-footer-bar">
+          <div className="hotspot-footer-lead">
+            {hasReading ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="prompt-action-button explain-action-button"
+                aria-expanded={readingOpen}
+                onClick={() => setReadingOpen((open) => !open)}
+              >
+                <HeaderIcon type={readingOpen ? "chevron-down" : "chevron-up"} />
+                {readingOpen ? "Hide AI reading" : "Show AI reading"}
+              </Button>
+            ) : onExplain ? (
+              // The tooltip sits on the wrapper, not the button: a disabled
+              // button takes `pointer-events: none`, so its own `title` never
+              // surfaces.
+              <span className="explain-action-wrap" title={explainDisabledReason
+                ?? "Have a model read this task's timeline and name the issue and where it starts."}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="prompt-action-button explain-action-button"
+                  disabled={explaining || Boolean(explainDisabledReason)}
+                  onClick={onExplain}
+                >
+                  {explaining ? <RozeniteLoader size={14} label="" /> : <HeaderIcon type="sparkle" />}
+                  {explaining ? "Reading…" : "Explain with AI"}
+                </Button>
+              </span>
+            ) : null}
+          </div>
+          <div className="hotspot-actions">
+            {onExplore ? (
+              <Button size="sm" variant="outline" className="prompt-action-button" onClick={onExplore}>
+                <HeaderIcon type="explore" /> Explore
+              </Button>
+            ) : null}
+            <PromptActionButton
+              loading={loading}
+              copied={copied}
+              busy={busy}
+              onCopy={onCopy}
+            />
+          </div>
         </div>
       </div>
     </article>
@@ -442,29 +1120,8 @@ function UploadPane({
   );
 }
 
-const ROZENITE_THEME_KEY = "@rozenite/ui:theme";
-
 export default function Home() {
-  const [themeReady, setThemeReady] = useState(false);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(ROZENITE_THEME_KEY);
-      if (stored !== "light" && stored !== "dark") {
-        localStorage.setItem(ROZENITE_THEME_KEY, "dark");
-      }
-    } catch {
-      // Theme still applies for this session even if storage is unavailable.
-    }
-    const frame = requestAnimationFrame(() => setThemeReady(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  if (!themeReady) {
-    return <div className="dark h-screen bg-background" />;
-  }
-
-  return <InspectorApp />;
+  return <ThemeGate><InspectorApp /></ThemeGate>;
 }
 
 function InspectorApp() {
@@ -476,6 +1133,12 @@ function InspectorApp() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [profileType, setProfileType] = useState<ProfileType>("javascript");
   const [showWelcome, setShowWelcome] = useState(true);
+  /* A slide is a choice of profile, not just a way past the landing page: it
+     leaves the reader on the upload step for the kind they clicked. */
+  const startWith = (type: ProfileType) => {
+    setProfileType(type);
+    setShowWelcome(false);
+  };
   const [files, setFiles] = useState<Partial<Record<UploadKind, File>>>({});
   const [modelStatus, setModelStatus] = useState<ModelSettings | null>(null);
   const [selectedProvider, setSelectedProvider] = useState("");
@@ -506,7 +1169,9 @@ function InspectorApp() {
   };
   useEffect(() => {
     void refreshHistory();
-    fetch("/api/analysis-settings", { cache: "no-store" }).then(r => r.json()).then(data => setAutoSave(data.autoSave !== false)).catch(() => undefined);
+    fetch("/api/analysis-settings", { cache: "no-store" }).then(r => r.json()).then(data => {
+      setAutoSave(data.autoSave !== false);
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -536,8 +1201,12 @@ function InspectorApp() {
   const [analyzedType, setAnalyzedType] = useState<ProfileType>("javascript");
   const [totalMs, setTotalMs] = useState(0);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [taskCards, setTaskCards] = useState<TaskCardSet | null>(null);
+  const [cards, setCards] = useState<ProfileCard[]>([]);
+  const [callCountIsExact, setCallCountIsExact] = useState(false);
   const [frameBudget, setFrameBudget] = useState("16");
   const [appliedBudget, setAppliedBudget] = useState(16);
+  const [reactCards, setReactCards] = useState<ReactCardSet | null>(null);
   const [reactIssues, setReactIssues] = useState<ReactIssue[]>([]);
   const [reactSummary, setReactSummary] = useState<ReactSummary | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -546,27 +1215,31 @@ function InspectorApp() {
   const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
   const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [explainingId, setExplainingId] = useState<string | null>(null);
+  const [insightErrors, setInsightErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [isSample, setIsSample] = useState(false);
+  // Two readings of the same slices are on offer while we decide which one a
+  // card keeps; the switch is per page rather than per card so the comparison
+  // is between pages of cards rather than between neighbours.
+  const [chartKind, setChartKind] = useState<ContributionChartKind>("bar");
 
   const updateFile = (kind: UploadKind, file?: File) => {
     setFiles((current) => ({ ...current, [kind]: file }));
   };
 
   const validBudget = frameBudget.trim() !== "" && Number.isFinite(Number(frameBudget)) && Number(frameBudget) > 0;
+  // A model is not part of this: every card an analysis produces is measured,
+  // and the model is only ever asked to read one afterwards.
   const isReady = Boolean(
-    (profileType === "javascript" ? files.cpu : files.reactProfile) && modelStatus?.configured && (profileType !== "react" || validBudget),
+    (profileType === "javascript" ? files.cpu : files.reactProfile)
+    && (profileType !== "react" || validBudget),
   );
 
   const handleAnalyze = async () => {
     const file = profileType === "javascript" ? files.cpu : files.reactProfile;
     if (!file) {
       setError(profileType === "javascript" ? "Add a CPU profile file first." : "Add a React profile file first.");
-      setErrorDetail(null);
-      return;
-    }
-    if (!modelStatus?.configured) {
-      setError("Choose a provider and model in Analysis settings first.");
       setErrorDetail(null);
       return;
     }
@@ -589,9 +1262,13 @@ function InspectorApp() {
         analysisId?: string | null; saved?: boolean;
         totalMs?: number;
         hotspots?: Hotspot[];
+        taskCards?: TaskCardSet;
+        cards?: ProfileCard[];
+        callCountIsExact?: boolean;
         usage?: TokenUsage;
         model?: AnalysisModel;
         summary?: ReactSummary;
+        reactCards?: ReactCardSet;
         issues?: ReactIssue[];
         noIssue?: boolean;
         frameBudgetMs?: number;
@@ -613,19 +1290,24 @@ function InspectorApp() {
     setIsSample(false);
 
       if (profileType === "react") {
-        if (!Array.isArray(data.issues) || data.noIssue !== (data.issues.length === 0)) {
-          setError("The server did not return a valid React issue report. Check the dev server logs.");
+        // The measured engine returns cards; the analyzer engine returns the
+        // issue list it always did. Either is valid, neither is optional.
+        if (!data.reactCards && (!Array.isArray(data.issues) || data.noIssue !== (data.issues.length === 0))) {
+          setError("The server did not return a valid React report. Check the dev server logs.");
           setPhase("upload");
           return;
         }
-        if (data.issues.length > 0 && !data.analysisId) {
+        if ((data.reactCards?.cards.length || data.issues?.length) && !data.analysisId) {
           setError("The server did not return an analysis id. Check the dev server logs.");
           setPhase("upload");
           return;
         }
         setAnalysisId(data.analysisId ?? null);
         setHotspots([]);
-        setReactIssues(data.issues);
+        setTaskCards(null);
+        setCards([]);
+        setReactCards(data.reactCards ?? null);
+        setReactIssues(data.issues ?? []);
         setAppliedBudget(data.frameBudgetMs ?? Number(frameBudget));
         setReactSummary(data.summary ?? null);
         setTotalMs(data.summary?.totalCommitRenderDurationMs ?? 0);
@@ -638,6 +1320,9 @@ function InspectorApp() {
         analysisId: data.analysisId ?? "",
         totalMs: data.totalMs ?? 0,
         hotspots: data.hotspots ?? [],
+        taskCards: data.taskCards,
+        cards: data.cards ?? [],
+        callCountIsExact: data.callCountIsExact === true,
         usage: data.usage,
         model: data.model,
       };
@@ -649,7 +1334,11 @@ function InspectorApp() {
       setAnalysisId(result.analysisId);
       setTotalMs(result.totalMs);
       setHotspots(result.hotspots);
+      setTaskCards(result.taskCards ?? null);
+      setCards(result.cards ?? []);
+      setCallCountIsExact(result.callCountIsExact === true);
       setReactSummary(null);
+      setReactCards(null);
       setPhase("results");
       void refreshHistory();
     } catch (err) {
@@ -677,6 +1366,132 @@ function InspectorApp() {
   const markHandoffCopied = (id: string) => {
     setCopiedId(id);
     setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
+  };
+
+  /**
+   * Open one card's subtree in its own tab. The card already carries everything
+   * the view needs, so this is a storage write and a `window.open` — no new
+   * endpoint, and nothing extra kept on the server.
+   */
+  const exploreCard = (card: ProfileCard) => {
+    if (!analysisId) return;
+    const href = storeCardForExplore({
+      analysisId,
+      totalMs,
+      callCountIsExact,
+      card,
+    });
+    window.open(href, "_blank", "noopener");
+  };
+
+  /**
+   * Open one task in its own tab. With a frame id the view opens focused on
+   * that frame; without one it opens on the whole task, which is what a click
+   * on the card header means.
+   */
+  const exploreTask = (card: TaskCard, focusNodeId?: string) => {
+    if (!analysisId) return;
+    window.open(taskExploreHref(analysisId, card.taskIndex, focusNodeId), "_blank", "noopener");
+  };
+
+  /**
+   * Open one React commit in its own tab.
+   *
+   * The recording is fetched there rather than handed over, like a task: the
+   * commit trees live on the analysis record and the drill-down opens on the
+   * whole strip, not on this commit alone.
+   */
+  const exploreReactCommit = (card: ReactCard) => {
+    if (!analysisId) return;
+    window.open(reactExploreHref(analysisId, card.rootId, card.commitIndex), "_blank", "noopener");
+  };
+
+  /**
+   * Ask a model to read one React commit.
+   *
+   * The same button, the same storage and the same discard of a stale hand-off
+   * as `explainTask` below. What the model is shown differs — a commit has no
+   * timeline and no call tree, only the components and the recorded reasons —
+   * and `react-insight.ts` is where that is said.
+   */
+  const explainReactCard = async (card: ReactCard) => {
+    if (!analysisId || explainingId) return;
+    setExplainingId(card.id);
+    setInsightErrors((current) => {
+      if (!(card.id in current)) return current;
+      const next = { ...current };
+      delete next[card.id];
+      return next;
+    });
+    try {
+      const response = await fetch("/api/react-insight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId, cardId: card.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; insight?: ReactCard["insight"]; usage?: TokenUsage; model?: AnalysisModel };
+      if (!response.ok || !data.insight) throw new Error(data.error ?? `Could not read this commit (${response.status}).`);
+      const insight = data.insight;
+      setReactCards((current) => current && ({
+        ...current,
+        cards: current.cards.map((entry) => (entry.id === card.id ? { ...entry, insight } : entry)),
+      }));
+      setPrompts((current) => {
+        if (!(card.id in current)) return current;
+        const next = { ...current };
+        delete next[card.id];
+        return next;
+      });
+      if (data.usage) setAnalyzerUsage(data.usage);
+      if (data.model) setAnalysisModel(data.model);
+    } catch (err) {
+      setInsightErrors((current) => ({ ...current, [card.id]: errorMessageFrom(err) }));
+    } finally {
+      setExplainingId((current) => (current === card.id ? null : current));
+    }
+  };
+
+  /**
+   * Ask a model to read one task. The server stores what comes back on the
+   * analysis, so the card is updated in place rather than re-fetched, and a
+   * hand-off already copied for this task is dropped — the next one carries
+   * the inference the server has just cached against it.
+   */
+  const explainTask = async (card: TaskCard) => {
+    if (!analysisId || explainingId) return;
+    setExplainingId(card.id);
+    setInsightErrors((current) => {
+      if (!(card.id in current)) return current;
+      const next = { ...current };
+      delete next[card.id];
+      return next;
+    });
+    try {
+      const response = await fetch("/api/task-insight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysisId, cardId: card.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { error?: string; insight?: TaskCard["insight"]; usage?: TokenUsage; model?: AnalysisModel };
+      if (!response.ok || !data.insight) throw new Error(data.error ?? `Could not read this task (${response.status}).`);
+      const insight = data.insight;
+      setTaskCards((current) => current && ({
+        ...current,
+        cards: current.cards.map((entry) => (entry.id === card.id ? { ...entry, insight } : entry)),
+      }));
+      setPrompts((current) => {
+        if (!(card.id in current)) return current;
+        const next = { ...current };
+        delete next[card.id];
+        return next;
+      });
+      if (data.usage) setAnalyzerUsage(data.usage);
+      if (data.model) setAnalysisModel(data.model);
+    } catch (err) {
+      setInsightErrors((current) => ({ ...current, [card.id]: errorMessageFrom(err) }));
+    } finally {
+      setExplainingId((current) => (current === card.id ? null : current));
+    }
   };
 
   const copyHandoff = async (id: string) => {
@@ -724,7 +1539,11 @@ function InspectorApp() {
     setAnalysisId(null);
     setAnalyzedType("javascript");
     setHotspots([]);
+    setTaskCards(null);
+    setCards([]);
+    setCallCountIsExact(false);
     setReactSummary(null);
+    setReactCards(null);
     setReactIssues([]);
     setPrompts({});
     setAnalyzerUsage(null);
@@ -732,6 +1551,8 @@ function InspectorApp() {
     setPromptLoadingId(null);
     setPromptErrors({});
     setCopiedId(null);
+    setExplainingId(null);
+    setInsightErrors({});
     setSaved(false);
     setIsSample(false);
   };
@@ -746,7 +1567,8 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType(analysis.profileType === "react" ? "react" : "javascript");
-    setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setReactIssues(analysis.reactIssues ?? []);
+    setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
+    setCallCountIsExact(analysis.callCountIsExact === true); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues ?? []);
     setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null); setAnalysisModel(analysis.model ?? null);
     setReactSummary(null); setSaved(true); setPhase("results"); setHistoryOpen(false);
     setIsSample(false);
@@ -872,7 +1694,8 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
-    setHotspots(analysis.hotspots); setReactIssues([]); setReactSummary(null);
+    setHotspots(analysis.hotspots); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
+    setCallCountIsExact(analysis.callCountIsExact === true); setReactCards(null); setReactIssues([]); setReactSummary(null);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
   const loadReactSample = async () => {
@@ -882,11 +1705,10 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
-    setHotspots([]); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
+    setHotspots([]); setTaskCards(null); setCards([]); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
 
-  const reactIssueCards = reactIssues.slice(0, MAX_RESULT_CARDS);
   const analyzing = phase === "analyzing";
 
   return (
@@ -1052,25 +1874,7 @@ function InspectorApp() {
         {(phase === "upload" || phase === "analyzing") && (
           <>
             {showWelcome ? (
-              <>
-            <div className="hero-stage">
-              <div className="intro intro-copy">
-                <h1>Find the code that makes your app feel slow</h1>
-                <p>Turn profiler traces into a focused list of bottlenecks</p>
-                <div className="intro-actions">
-                  <Button className="get-started-button" size="lg" onClick={() => setShowWelcome(false)}>
-                    Get Started <HeaderIcon type="arrow" />
-                  </Button>
-                  <div className="platform-list" aria-label="Supported platforms">
-                    <span><ProfileIcon type="react" />React</span>
-                    <span><ProfileIcon type="javascript" />JavaScript</span>
-                    <span><ProfileIcon type="react" />React Native</span>
-                  </div>
-                </div>
-              </div>
-              <ProfileSnapshotGallery />
-            </div>
-              </>
+              <ProfileLanding onStart={startWith} />
             ) : (
               <>
 
@@ -1084,7 +1888,7 @@ function InspectorApp() {
 
               <button type="button" role="radio" aria-checked={profileType === "react"} disabled={analyzing} className={`profile-option${profileType === "react" ? " selected" : ""}`} onClick={() => setProfileType("react")}>
                 <span className="profile-icon"><ProfileIcon type="react" /></span>
-                <span className="option-copy"><strong>React components</strong><small>Find expensive renders and component updates</small><em>React DevTools JSON</em></span>
+                <span className="option-copy"><strong>React components</strong><small>Find expensive commits, wasted re-renders and cascades</small><em>React DevTools JSON</em></span>
                 <span className="radio-indicator" />
               </button>
             </div>
@@ -1115,17 +1919,10 @@ function InspectorApp() {
                     disabled={analyzing}
                     aria-invalid={!validBudget} aria-describedby="react-budget-help"
                     onChange={event => setFrameBudget(event.target.value)} />
-                  <p id="react-budget-help">Defaults to 16 ms. Use a lower budget, such as 8.33 ms, for a higher refresh-rate target.</p>
+                  <p id="react-budget-help">Defaults to 16 ms.</p>
                 </div>
               )}
 
-              <div className="key-field">
-                <Text>{modelStatus === null ? "Loading model…" : modelStatus.configured
-                  ? `Model: ${modelStatus.provider} / ${modelStatus.model}`
-                  : modelStatus.error || "Choose a model in Analysis settings."}</Text>
-                  <br />
-                <Text className="italic text-muted-foreground">Change the provider or model from Analysis settings.</Text>
-              </div>
             </section>
 
             {error && (
@@ -1143,7 +1940,6 @@ function InspectorApp() {
             )}
 
             <div className="action-row">
-              <p>Your profile stays on this device and is analyzed via your configured model.</p>
               <Button className="analyze-profile-button" size="lg" disabled={!isReady || analyzing} onClick={() => void handleAnalyze()}>
                 {phase === "analyzing" ? (
                   <>
@@ -1163,35 +1959,90 @@ function InspectorApp() {
           </>
         )}
 
-        {phase === "results" && analyzedType === "react" && (
+        {phase === "results" && analyzedType === "react" && (() => {
+          const cardList = reactCards?.cards ?? [];
+          const findingCount = cardList.length || reactIssues.length;
+          // A recording of nothing but cheap commits is a real answer, not an
+          // empty one: say so, and show the busiest commits anyway.
+          const summaryLine = reactCards
+            ? (reactCards.noOverBudgetCommits
+              ? `No commit over the ${reactCards.budgetMs} ms budget; the busiest were ${findingCount} of ${formatMs(reactCards.peakCommitMs)} and under`
+              : `${reactCards.commitsOverBudget} commit${reactCards.commitsOverBudget === 1 ? "" : "s"} over the ${reactCards.budgetMs} ms budget, of ${reactCards.commitCount}`)
+              + ` · ${formatMs(reactCards.totalRenderMs)} rendering`
+              + (reactCards.omittedCardCount > 0 ? ` · ${reactCards.omittedCardCount} more not shown` : "")
+              + (reactCards.roots.length > 1 ? ` · ${reactCards.roots.length} roots` : "")
+            : `${reactIssues.length} commit finding${reactIssues.length === 1 ? "" : "s"} · ${appliedBudget} ms budget`
+              + (reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : "")
+              + (reactSummary && reactSummary.omittedEvidenceCommitCount > 0
+                ? ` · ${reactSummary.omittedEvidenceCommitCount} commits omitted from detailed analysis`
+                : "");
+          return (
           <>
             <button className="results-back" type="button" onClick={resetToUpload}><HeaderIcon type="back" /> Back to new analysis</button>
             <div className="results-header">
               <div className="intro">
                 <span className="eyebrow">Analysis results</span>
-                <h1 className="results-title">React issues</h1>
-                <p>
-                  {reactIssues.length} commit finding{reactIssues.length === 1 ? "" : "s"} · {appliedBudget} ms budget
-                  {reactSummary ? ` · ${reactSummary.commitCount} commits · ${reactSummary.peakCommitDurationMs ?? 0} ms peak · ${reactSummary.commitsOverBudget} over budget` : ""}
-                  {reactSummary && reactSummary.omittedEvidenceCommitCount > 0
-                    ? ` · ${reactSummary.omittedEvidenceCommitCount} commits omitted from detailed analysis`
-                    : ""}
-                </p>
-                {analyzerUsage && (
+                <h1 className="results-title">{reactCards ? "Commits, longest first" : "React issues"}</h1>
+                <p>{summaryLine}</p>
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
                   </p>
                 )}
               </div>
               <div className="result-actions">
-                {analyzerUsage && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {reactCards ? <ChartSwitch kind={chartKind} onChange={setChartKind} /> : null}
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {reactCards && !reactCards.causesRecorded ? <CausesNotice /> : null}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
             </div>
 
             <div className="hotspot-list">
-              {reactIssueCards.map((issue, index) => {
-                const { rows, footnote } = reactIssueRows(issue);
+              {reactCards ? cardList.map((card, index) => {
+                // No component cleared the floor, so there is nothing for the
+                // chart to divide the commit into; the rows still name one.
+                const drawable = reactCommitSlices(card).some((slice) => slice.kind === "component");
+                const { rows, footnotes } = drawable ? { rows: [], footnotes: [] } : reactCardRows(card);
+                return (
+                  <AnalysisResultCard
+                    key={card.id}
+                    rank={index + 1}
+                    title={card.insight?.title ?? card.headline}
+                    shape={card.shapeline}
+                    timeLabel={formatMs(card.durationMs)}
+                    chart={drawable
+                      ? (
+                        <ReactContribution
+                          card={card}
+                          kind={chartKind}
+                          onExplore={analysisId ? () => exploreReactCommit(card) : undefined}
+                        />
+                      )
+                      : undefined}
+                    insight={card.insight?.findings}
+                    onExplain={analysisId && !isSample ? () => void explainReactCard(card) : undefined}
+                    explainDisabledReason={modelStatus?.configured ? undefined : "Configure the model from settings"}
+                    explaining={explainingId === card.id}
+                    insightError={insightErrors[card.id]}
+                    rows={rows}
+                    footnotes={footnotes}
+                    loading={promptLoadingId === card.id}
+                    error={promptErrors[card.id]}
+                    copied={copiedId === card.id}
+                    busy={isSample || promptLoadingId !== null}
+                    onCopy={() => void copyHandoff(card.id)}
+                    // Open on a sample too, as a task card does. The sample
+                    // used to be the one React report with no commit timeline
+                    // behind it, so this was the one card whose drill-down
+                    // could only have opened on an error.
+                    onExplore={analysisId ? () => exploreReactCommit(card) : undefined}
+                  />
+                );
+              }) : null}
+              {/* Analyses saved by the model-selected engine still hold the old shape. */}
+              {!reactCards && reactIssues.slice(0, MAX_RESULT_CARDS).map((issue, index) => {
+                const { rows, footnotes } = reactIssueRows(issue);
                 return (
                   <AnalysisResultCard
                     key={issue.id}
@@ -1199,7 +2050,7 @@ function InspectorApp() {
                     title={issue.summary}
                     timeLabel={`${issue.severity} · commit ${formatMs(issue.commit.durationMs)}`}
                     rows={rows}
-                    footnote={footnote}
+                    footnotes={footnotes}
                     loading={promptLoadingId === issue.id}
                     error={promptErrors[issue.id]}
                     copied={copiedId === issue.id}
@@ -1210,41 +2061,106 @@ function InspectorApp() {
               })}
             </div>
           </>
-        )}
+          );
+        })()}
 
-        {phase === "results" && analyzedType === "javascript" && (
+        {phase === "results" && analyzedType === "javascript" && (() => {
+          const taskList = taskCards?.cards ?? [];
+          const findingCount = taskList.length || cards.length || hotspots.length;
+          // A recording of nothing but short work is a real answer, not an
+          // empty one: say so, and show the busiest tasks anyway.
+          const summaryLine = taskCards
+            ? taskCards.noLongTasks
+              ? `No long tasks in this recording; the busiest work was ${findingCount} ${findingCount === 1 ? "task" : "tasks"} of ${formatMs(taskList[0]?.durationMs ?? 0)} and under · ${formatMs(totalMs)} total`
+              : `${findingCount} long ${findingCount === 1 ? "task" : "tasks"} of ${taskCards.taskCount} · ${formatMs(totalMs)} total`
+            : `${findingCount} ${findingCount === 1 ? "finding" : "findings"} · ${formatMs(totalMs)} total`;
+          return (
           <>
             <button className="results-back" type="button" onClick={resetToUpload}><HeaderIcon type="back" /> Back to new analysis</button>
             <div className="results-header">
               <div className="intro">
                 <span className="eyebrow">Analysis results</span>
-                <h1 className="results-title">Bottlenecks, slowest first</h1>
-                <p>
-                  {hotspots.length} bottleneck{hotspots.length === 1 ? "" : "s"} · {formatMs(totalMs)} total
-                </p>
-                {analyzerUsage && (
+                <h1 className="results-title">{taskCards ? "Tasks, longest first" : "Bottlenecks, slowest first"}</h1>
+                <p>{summaryLine}</p>
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
                   </p>
                 )}
               </div>
               <div className="result-actions">
-                {analyzerUsage && <ResultModel model={analysisModel} usage={analyzerUsage} />}
+                {taskCards ? <ChartSwitch kind={chartKind} onChange={setChartKind} /> : null}
+                {analyzerUsage && analyzerUsage.totalTokens > 0 && <ResultModel model={analysisModel} usage={analyzerUsage} />}
                 {!saved && analysisId ? <Button variant="outline" onClick={() => void saveCurrentAnalysis()}>Save analysis</Button> : null}
               </div>
             </div>
 
             <div className="hotspot-list">
-              {hotspots.map((hotspot, index) => {
-                const { rows, footnote } = hotspotRows(hotspot);
+              {taskCards ? taskList.map((card, index) => {
+                const footnotes = taskCardFootnotes(card);
+                // No frame of their own means nothing to divide the task into.
+                const rows = card.boundaryFrames.length === 0
+                  ? taskFallbackRows(card, (nodeId) => exploreTask(card, nodeId))
+                  : [];
+                return (
+                  <AnalysisResultCard
+                    key={card.id}
+                    rank={index + 1}
+                    title={card.pathline ?? card.headline}
+                    shape={card.shapeline}
+                    timeLabel={formatMs(card.durationMs)}
+                    chart={rows.length === 0
+                      ? <TaskContribution card={card} kind={chartKind} onFocus={(nodeId) => exploreTask(card, nodeId)} />
+                      : undefined}
+                    insight={card.insight?.findings}
+                    onExplain={analysisId && !isSample ? () => void explainTask(card) : undefined}
+                    explainDisabledReason={modelStatus?.configured ? undefined : "Configure the model from settings"}
+                    explaining={explainingId === card.id}
+                    insightError={insightErrors[card.id]}
+                    rows={rows}
+                    footnotes={footnotes}
+                    loading={promptLoadingId === card.id}
+                    error={promptErrors[card.id]}
+                    copied={copiedId === card.id}
+                    busy={isSample || promptLoadingId !== null}
+                    onCopy={() => void copyHandoff(card.id)}
+                    onExplore={analysisId ? () => exploreTask(card) : undefined}
+                  />
+                );
+              }) : null}
+              {/* The node-descent engine, served under TRACESIFT_CPU_ENGINE=cards. */}
+              {!taskCards && cards.map((card, index) => {
+                const { rows, footnotes } = cardRows(card);
+                return (
+                <AnalysisResultCard
+                  key={card.id}
+                  rank={index + 1}
+                  title={card.headline}
+                  timeLabel={formatMs(card.totalMs)}
+                  subtitle={cardSubtitle(card, callCountIsExact)}
+                  rows={rows}
+                  footnotes={footnotes}
+                  loading={promptLoadingId === card.id}
+                  error={promptErrors[card.id]}
+                  copied={copiedId === card.id}
+                  busy={isSample || promptLoadingId !== null}
+                  onCopy={() => void copyHandoff(card.id)}
+                  onExplore={analysisId ? () => exploreCard(card) : undefined}
+                />
+                );
+              })}
+              {/* Analyses saved before the call-tree engine still hold the old shape. */}
+              {!taskCards && cards.length === 0 && hotspots.map((hotspot, index) => {
+                const { rows, footnotes } = hotspotRows(hotspot);
                 return (
                 <AnalysisResultCard
                   key={hotspot.id}
                   rank={index + 1}
                   title={hotspot.title}
                   timeLabel={formatMs(hotspot.combinedTimeMs)}
+                  subtitle={occurrenceLabel(hotspot)}
                   rows={rows}
-                  footnote={footnote}
+                  footnotes={footnotes}
                   loading={promptLoadingId === hotspot.id}
                   error={promptErrors[hotspot.id]}
                   copied={copiedId === hotspot.id}
@@ -1255,7 +2171,8 @@ function InspectorApp() {
               })}
             </div>
           </>
-        )}
+          );
+        })()}
       </section>
       </PluginShell.Body>
     </PluginShell>

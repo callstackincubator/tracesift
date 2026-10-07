@@ -1,6 +1,6 @@
 import { normalizeHotspots, type AnalysisModel, type Hotspot, type TokenUsage } from "./analysis.ts";
 import type { Bottleneck } from "./bottlenecks.ts";
-import { runAgent, type RunAgentOptions, type RunAgentResult } from "./pi-agent.ts";
+import { ANALYSIS_MAX_OUTPUT_TOKENS, runAgent, type RunAgentOptions, type RunAgentResult } from "./pi-agent.ts";
 import { ANALYST_SYSTEM_PROMPT, analystUserPrompt } from "./prompts.ts";
 import { analysisPromptData } from "./prompt-data.ts";
 
@@ -83,7 +83,7 @@ export async function analyzeCpuBottlenecks(
     cwd,
     builtinTools: [],
     customTools: [],
-    maxOutputTokens: 4_096,
+    maxOutputTokens: ANALYSIS_MAX_OUTPUT_TOKENS,
     timeoutMs: 480_000,
     inputBreakdown,
   });

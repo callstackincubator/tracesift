@@ -44,7 +44,12 @@ test('offline catalog contains only supported providers and native adapters', as
   assert(models.some(m => m.provider === 'openai-codex' && m.api === 'openai-codex-responses'));
   assert(models.some(m => m.provider === 'openai' && m.api === 'openai-responses'));
   assert(models.some(m => m.provider === 'anthropic' && m.api === 'anthropic-messages'));
-  assert.equal(models.find(m => m.provider === 'apex').id, 'callstack/Apex');
+  const apex = models.find(m => m.provider === 'apex');
+  assert.equal(apex.id, 'callstack/Apex');
+  assert.equal(apex.reasoning, true);
+  assert.equal(apex.thinkingLevelMap.off, 'low');
+  assert.equal(apex.compat.supportsReasoningEffort, true);
+  assert.equal(apex.compat.supportsDeveloperRole, false);
 });
 
 test('startup freezes configured, missing and malformed states before first agent access', async t => {

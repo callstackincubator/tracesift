@@ -11,6 +11,7 @@ import { parseFrameBudget, validateReactEvidence } from '../src/lib/react-eviden
 import { createReactAnalysisHandler } from '../src/lib/react-analysis-handler.ts';
 import { destroyRecord, getRecord } from '../src/lib/analysis.ts';
 import { buildReactFixPrompt } from '../src/lib/prompts.ts';
+import { ANALYSIS_MAX_OUTPUT_TOKENS } from '../src/lib/pi-agent.ts';
 
 const exec = promisify(execFile);
 const fixture = path.resolve('test-fixtures/react/react-native-v5.synthetic.json');
@@ -30,6 +31,13 @@ const issueReport = (result) => {
     commits: [{ rootID: commit.rootID, commitIndex: commit.commitIndex }],
   }] };
 };
+/** Lower the upload cap around one call so the test needs a small buffer, not a real 512 MB profile. */
+async function withUploadCapMb(mb, run) {
+  const previous = process.env.TRACE_SIFT_MAX_UPLOAD_MB;
+  process.env.TRACE_SIFT_MAX_UPLOAD_MB = String(mb);
+  try { return await run(); }
+  finally { if (previous === undefined) delete process.env.TRACE_SIFT_MAX_UPLOAD_MB; else process.env.TRACE_SIFT_MAX_UPLOAD_MB = previous; }
+}
 async function temporary(t) {
   const dir = await mkdtemp(path.join(tmpdir(), 'react-profile-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -184,7 +192,7 @@ test('mocked analyzer selects issues but cannot change identities or measurement
   const analyzed = await analyzeReactProfile(measured, tmpdir(), async options => {
     assert.deepEqual(options.builtinTools, []);
     assert.deepEqual(options.customTools, []);
-    assert.equal(options.maxOutputTokens, 4096);
+    assert.equal(options.maxOutputTokens, ANALYSIS_MAX_OUTPUT_TOKENS);
     assert.match(options.systemPrompt, /Do not invent/);
     const payload = JSON.parse(options.prompt);
     assert.equal(payload.commitDurations, undefined);
@@ -272,12 +280,15 @@ test('HTTP errors skip the model where appropriate and always remove temporary f
     [request('not JSON'), 400], [request('null'), 400],
 
     [request(await readFile(fixture), { limit: 13 }), 400],
-    [request(''), 400], [request(new Uint8Array(25 * 1024 * 1024 + 1)), 413],
+    [request(''), 400],
     [new Request('http://localhost', { method: 'POST', body: 'not multipart' }), 400],
   ]) {
     assert.equal((await handler(req)).status, status);
     assert.deepEqual(await readdir(root), []);
   }
+  const oversized = await withUploadCapMb(1, () => handler(request(new Uint8Array(1024 * 1024 + 1))));
+  assert.equal(oversized.status, 413);
+  assert.deepEqual(await readdir(root), []);
   assert.equal(calls, 0);
   assert.equal((await handler(request(await readFile(fixture)))).status, 503);
   assert.equal(calls, 1);

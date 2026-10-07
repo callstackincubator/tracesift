@@ -43,3 +43,5 @@ next-env.d.ts
 
 /packages/cli/release.json
 /packages/cli/*.tgz
+
+test-fixtures/local/

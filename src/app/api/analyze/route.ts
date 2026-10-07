@@ -1,23 +1,25 @@
 import { readFile } from "node:fs/promises";
 import {
+  clientCards,
   clientHotspots,
   createAnalysisFiles,
   destroyRecord,
-  MAX_UPLOAD_BYTES,
+  maxUploadBytes,
   PROFILE_FILE_NAME,
+  uploadTooLargeMessage,
   putRecord,
   getAnalysisSettings,
   saveAnalysis,
-  type AnalysisModel,
-  type Hotspot,
-  type TokenUsage,
 } from "@/lib/analysis";
+import { getModelSettings } from "@callstack/tracesift/runtime";
 import { summarizeCpuProfile } from "@/lib/js-profile";
-import { MIN_HOTSPOT_TIME_MS } from "@/lib/bottlenecks";
-import { CpuAnalysisError, analyzeCpuBottlenecks } from "@/lib/cpu-analyzer";
+import { CpuAnalysisError } from "@/lib/cpu-analyzer";
+import { legacyEngineRequested, nodeCardEngineRequested, runLegacyCpuAnalysis } from "@/lib/legacy-cpu-analysis";
+import { classifyFrames, ruleClassTable } from "@/lib/frame-classes";
+import { selectTaskCards } from "@/lib/task-cards";
 import { AgentError } from "@/lib/pi-agent";
-import { analysisPromptData } from "@/lib/prompt-data";
 import { debugLog } from "@/lib/debug-log";
+import type { AnalysisModel, Hotspot, TokenUsage } from "@/lib/analysis";
 
 const LOG = "api/analyze";
 
@@ -43,9 +45,9 @@ export async function POST(request: Request): Promise<Response> {
     log("rejected: no profile file in request");
     return json({ error: "A CPU profile file is required." }, 400);
   }
-  if (profile.size > MAX_UPLOAD_BYTES) {
+  if (profile.size > maxUploadBytes()) {
     log(`rejected: profile too large (${profile.size} bytes)`);
-    return json({ error: "The profile file is too large (max 25 MB)." }, 413);
+    return json({ error: uploadTooLargeMessage() }, 413);
   }
 
   log(`request received: profile="${profile.name}" (${profile.size} bytes)`);
@@ -62,21 +64,19 @@ export async function POST(request: Request): Promise<Response> {
 
   let summary;
   let queriedHotspots;
-  let bottlenecks;
+  let cards;
+  let parsedProfile;
+  let tasks;
+  let legacyBottlenecks;
   try {
     const rawProfile = JSON.parse(await readFile(`${dir}/${PROFILE_FILE_NAME}`, "utf8")) as unknown;
-    ({ summary, hotspots: queriedHotspots, bottlenecks } = summarizeCpuProfile(rawProfile, id, profile.name));
+    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tasks, legacyBottlenecks } =
+      summarizeCpuProfile(rawProfile, id, profile.name));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     log(`failed to parse profile: ${reason}`);
     await destroyRecord(id, dir);
-    return json(
-      {
-        error: "The uploaded file could not be parsed as a CPU profile.",
-        detail: reason,
-      },
-      400
-    );
+    return json({ error: "The uploaded file could not be parsed as a CPU profile.", detail: reason }, 400);
   }
   const totalMs = summary.session.durationMs;
   const top = queriedHotspots.items[0];
@@ -84,64 +84,54 @@ export async function POST(request: Request): Promise<Response> {
     `profile summary: total=${Math.round(totalMs)} ms, samples=${summary.session.sampleCount}, hotspots=${queriedHotspots.total}, topSelf=${top ? `${top.functionName} (${top.selfTimeMs} ms)` : "n/a"}`
   );
 
-  if (bottlenecks.length === 0) {
-    log(`no actionable hotspots reached ${MIN_HOTSPOT_TIME_MS} ms — skipping analyzer`);
-    await destroyRecord(id, dir);
-    return json({ error: `No actionable hotspots of at least ${MIN_HOTSPOT_TIME_MS} ms were found in this profile. Work spent entirely inside React and scheduler internals is excluded.` }, 422);
+  // One classification pass over the distinct frames of the upload, cached by
+  // name and url. Everything a task card says about which code is whose is a
+  // lookup in this table, so the same file always produces the same cards.
+  // With no model configured it is the rule table rather than a provider call
+  // that can only fail — the same fallback a failed model already produced.
+  const settings = await getAnalysisSettings();
+  const modelConfigured = (await getModelSettings()).configured;
+  const classes = nodeCardEngineRequested() || !modelConfigured ? ruleClassTable() : await classifyFrames(
+    parsedProfile.nodes.map((node) => node.callFrame), dir,
+  );
+  const taskCards = nodeCardEngineRequested()
+    ? undefined
+    : selectTaskCards(parsedProfile, totalMs, tasks, classes);
+  if (taskCards) {
+    log(
+      `tasks: ${tasks.tasks.length} (${tasks.boundaries}) — ${taskCards.cards.length} cards` +
+      `${taskCards.noLongTasks ? ", none over the long-task floor" : ""}` +
+      `${classes.degraded ? ", frame classes degraded to rules" : ""}`
+    );
   }
 
-  let hotspots: Hotspot[];
-  let usage: TokenUsage;
-  let model: AnalysisModel | undefined;
-
-  const suppliedGroups = analysisPromptData(bottlenecks);
-  const inputBreakdown = {
-    profile: {
-      totalDurationMs: totalMs,
-      sampleCount: summary.session.sampleCount,
-      extractedHotspotCount: queriedHotspots.total,
-      actionableBottleneckCount: bottlenecks.length,
-    },
-    selection: {
-      suppliedGroupCount: suppliedGroups.length,
-      omittedGroupCount: Math.max(0, bottlenecks.length - suppliedGroups.length),
-      maximumGroups: 12,
-    },
-    groups: suppliedGroups.map((group) => {
-      const source = bottlenecks.find((candidate) => candidate.id === group.id);
-      return {
-        id: group.id,
-        groupingCaller: group.groupingCaller,
-        combinedTimeMs: group.combinedTimeMs,
-        percentOfTotal: group.percentOfTotal,
-        sourceFunctionCount: source?.functions.length ?? group.functions.length + group.omittedFunctionCount,
-        suppliedFunctionCount: group.functions.length,
-        omittedFunctionCount: group.omittedFunctionCount,
-        otherSelfTimeMs: group.otherSelfTimeMs,
-        groupStackFramesSupplied: group.stack.length,
-        functions: group.functions.map((fn) => ({
-          id: fn.id,
-          title: fn.title,
-          selfTimeMs: fn.selfTimeMs,
-          percentOfGroup: fn.percentOfGroup,
-          sourceLocation: fn.sourceLocation,
-          stackFramesSupplied: fn.stack.length,
-        })),
-        serializedBytes: Buffer.byteLength(JSON.stringify(group), "utf8"),
-      };
-    }),
-  };
-
-  try {
-    ({ hotspots, usage, model } = await analyzeCpuBottlenecks(bottlenecks, totalMs, dir, inputBreakdown));
-  } catch (error) {
-    log(`agent run failed: ${error instanceof Error ? error.message : error}`);
-    await destroyRecord(id, dir);
-    if (error instanceof AgentError || error instanceof CpuAnalysisError) {
-      return json({ error: error.message }, error.status);
+  // `TRACESIFT_CPU_ENGINE=legacy` runs the engine cards replace, so a suspicious
+  // profile can be checked against it.
+  let legacyHotspots: Hotspot[] = [];
+  let usage: TokenUsage = classes.usage;
+  let model: AnalysisModel | undefined = classes.model;
+  if (legacyEngineRequested()) {
+    const groups = legacyBottlenecks();
+    log(`TRACESIFT_CPU_ENGINE=legacy — running the previous engine over ${groups.length} groups`);
+    try {
+      ({ hotspots: legacyHotspots, usage, model } = await runLegacyCpuAnalysis(
+        groups, totalMs, dir, summary.session.sampleCount, queriedHotspots.total,
+      ));
+    } catch (error) {
+      log(`legacy engine failed: ${error instanceof Error ? error.message : error}`);
+      await destroyRecord(id, dir);
+      if (error instanceof AgentError || error instanceof CpuAnalysisError) {
+        return json({ error: error.message }, error.status);
+      }
+      return json({ error: "Unexpected server error while running the legacy analysis engine." }, 500);
     }
-    console.error("[tracesift] analyze failed", error);
-    return json({ error: "Unexpected server error while running the analysis agent." }, 500);
+    log(`legacy engine titles: ${legacyHotspots.map((entry) => `${entry.title} (${entry.combinedTimeMs} ms)`).join(" | ")}`);
+  }
+
+  if ((taskCards?.cards.length ?? 0) === 0 && cards.cards.length === 0 && legacyHotspots.length === 0) {
+    log("no task and no subtree carried measurable work — nothing to report");
+    await destroyRecord(id, dir);
+    return json({ error: "No measured work was found in this profile. Time spent entirely idle, or in frames the profiler could not name, is excluded." }, 422);
   }
 
   const record = {
@@ -149,7 +139,10 @@ export async function POST(request: Request): Promise<Response> {
     createdAt: Date.now(),
     dir,
     totalMs,
-    hotspots,
+    hotspots: legacyHotspots,
+    taskCards,
+    cards: cards.cards,
+    callCountIsExact: cards.callCountIsExact,
     reactIssues: [],
     prompts: {},
     usage,
@@ -160,15 +153,29 @@ export async function POST(request: Request): Promise<Response> {
     saved: false,
   };
   putRecord(record);
-  const settings = await getAnalysisSettings();
   let saved = false;
   if (settings.autoSave) {
     try { await saveAnalysis(record); saved = true; }
     catch (error) { log("could not auto-save analysis:", error instanceof Error ? error.message : error); }
   }
 
-  log(`analysis ${id} complete in ${Math.round((Date.now() - startedAt) / 1000)}s — ${hotspots.length} hotspots (analyzer tokens: ${usage.totalTokens}) — ` + hotspots.map((h) => `${h.title} (${h.combinedTimeMs} ms)`).join(" | "));
-  const response = { analysisId: id, profileType: "cpu", title: profile.name, saved, totalMs, hotspots: clientHotspots(hotspots), usage, model };
+  const headlines = taskCards
+    ? taskCards.cards.map((card) => `${card.headline} [${card.boundaryFrames.map((entry) => entry.name).join(", ")}]`)
+    : cards.cards.map((card) => `${card.title} (${card.totalMs} ms)`);
+  log(`analysis ${id} complete in ${Date.now() - startedAt}ms — ${headlines.length} cards — ` + headlines.join(" | "));
+  const response = {
+    analysisId: id,
+    profileType: "cpu",
+    title: profile.name,
+    saved,
+    totalMs,
+    taskCards,
+    cards: clientCards(cards.cards),
+    callCountIsExact: cards.callCountIsExact,
+    hotspots: clientHotspots(legacyHotspots),
+    usage,
+    model,
+  };
   log("SANITIZED_ANALYSIS_RESULT", JSON.stringify(response));
   return json(response);
 }

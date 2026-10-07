@@ -1,7 +1,8 @@
-import { getRecord, getSavedAnalysis, updateSavedAnalysis } from "@/lib/analysis";
+import { findAnalysis, updateSavedAnalysis } from "@/lib/analysis";
 import { debugLog } from "@/lib/debug-log";
 import { ZERO_REACT_USAGE } from "@/lib/react-analyzer";
 import { buildReactFixPrompt } from "@/lib/prompts";
+import { buildReactCardPrompt } from "@/lib/react-card-prompt";
 
 export const runtime = "nodejs";
 
@@ -30,12 +31,16 @@ export async function POST(request: Request): Promise<Response> {
   if (!analysisId || !issueId) {
     return json({ error: "analysisId and issueId are required." }, 400);
   }
-  const record = getRecord(analysisId) ?? await getSavedAnalysis(analysisId);
+  const record = await findAnalysis(analysisId);
   if (!record) {
     return json({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
   }
-  const issue = record.reactIssues.find((entry) => entry.id === issueId);
-  if (!issue) {
+  // Either engine's finding, keyed the same way: a measured card and a
+  // model-selected issue both use `react-commit-<root>-<index>` as their id, so
+  // a saved analysis from before the measured engine still renders a hand-off.
+  const card = record.reactCards?.cards.find((entry) => entry.id === issueId);
+  const issue = card ? undefined : record.reactIssues.find((entry) => entry.id === issueId);
+  if (!card && !issue) {
     return json({ error: "Unknown issue id for this analysis." }, 404);
   }
 
@@ -44,8 +49,8 @@ export async function POST(request: Request): Promise<Response> {
     log(`analysis=${analysisId} issue=${issueId}: serving cached prompt (${cached.length} chars)`);
     return json({ prompt: cached, usage: record.promptUsage[issueId] });
   }
-  log(`analysis=${analysisId} issue=${issueId} ("${issue.summary}"): rendering prompt`);
-  const prompt = buildReactFixPrompt(issue);
+  log(`analysis=${analysisId} issue=${issueId} ("${card?.headline ?? issue?.summary}"): rendering prompt`);
+  const prompt = card ? buildReactCardPrompt(card, record.reactCards) : buildReactFixPrompt(issue!);
   const usage = { ...ZERO_REACT_USAGE };
 
   record.prompts[issueId] = prompt;
