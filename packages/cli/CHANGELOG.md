@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.4.0
+
+### Minor Changes
+
+- b620953: Add Explore View with Timeline, Flame graph, Call tree and culprits
+
 ## 0.3.1
 
 ### Patch Changes
