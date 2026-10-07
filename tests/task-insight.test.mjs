@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { ruleClassTable } from '../src/lib/frame-classes.ts';
 import { selectTaskCards } from '../src/lib/task-cards.ts';
 import { attachMeasuredTasks, extractTasks } from '../src/lib/tasks.ts';
+import { AgentError } from '../src/lib/pi-agent.ts';
 import { inferTaskInsights, insightPrompt, parseInsight, timelineDigest } from '../src/lib/task-insight.ts';
 
 const node = (id, name, children = [], url = 'app.js', line = 0) => ({
@@ -105,6 +106,52 @@ test('one inference per task, and a failed one costs that task nothing but its b
   // Only the run that happened is billed.
   assert.equal(usage.totalTokens, 15);
   assert.equal(model.provider, 'Anthropic');
+});
+
+test('an empty reasoning-budget truncation gets one roomier retry', async () => {
+  const attempts = [];
+  const result = await inferTaskInsights([card], '/tmp', async (options) => {
+    attempts.push(options);
+    if (attempts.length === 1) {
+      throw new AgentError(502, 'reasoning used the whole budget', 'reasoning_budget_exhausted');
+    }
+    return {
+      finalText: '{"title":"Re-formatting every row","findings":["toLocaleString runs per row inside applyMerge."]}',
+      turns: 1, toolCalls: [], lastStopReason: 'stop', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, costUsd: 0 },
+    };
+  });
+
+  assert.equal(attempts.length, 2);
+  assert.deepEqual(
+    attempts.map(({ maxOutputTokens, timeoutMs }) => ({ maxOutputTokens, timeoutMs })),
+    [
+      { maxOutputTokens: 8192, timeoutMs: 120_000 },
+      { maxOutputTokens: 16_384, timeoutMs: 240_000 },
+    ],
+  );
+  assert.equal(result.insights.get(card.id).title, 'Re-formatting every row');
+});
+
+test('a second empty reasoning-budget truncation ends after two attempts', async () => {
+  let attempts = 0;
+  const result = await inferTaskInsights([card], '/tmp', async () => {
+    attempts += 1;
+    throw new AgentError(502, 'reasoning used the whole budget', 'reasoning_budget_exhausted');
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.insights.size, 0);
+});
+
+test('other provider failures are not retried', async () => {
+  let attempts = 0;
+  const result = await inferTaskInsights([card], '/tmp', async () => {
+    attempts += 1;
+    throw new AgentError(502, 'provider unavailable');
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(result.insights.size, 0);
 });
 
 test('no model is contacted when there is nothing to read', async () => {

@@ -30,11 +30,13 @@ const TRUNCATED = "length";
 /** Error with an HTTP status so route handlers can map failures 1:1. */
 export class AgentError extends Error {
   readonly status: number;
+  readonly code?: "reasoning_budget_exhausted";
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: "reasoning_budget_exhausted") {
     super(message);
     this.name = "AgentError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -389,7 +391,11 @@ export async function runAgent(options: RunAgentOptions): Promise<RunAgentResult
       throw new AgentError(502, "The analysis agent failed. Check provider access and try again.");
     }
     if (lastStopReason === TRUNCATED) {
-      throw new AgentError(502, truncationMessage(finalText));
+      throw new AgentError(
+        502,
+        truncationMessage(finalText),
+        finalText ? undefined : "reasoning_budget_exhausted",
+      );
     }
 
     return {

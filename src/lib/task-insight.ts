@@ -20,7 +20,7 @@
  */
 
 import { debugLog } from "./debug-log.ts";
-import { runAgent, type RunAgentOptions, type RunAgentResult } from "./pi-agent.ts";
+import { AgentError, runAgent, type RunAgentOptions, type RunAgentResult } from "./pi-agent.ts";
 import { formatMs } from "./format.ts";
 import type { AnalysisModel, TokenUsage } from "./analysis.ts";
 import type { TaskCard } from "./task-cards.ts";
@@ -71,6 +71,10 @@ const MAX_PROMPT_CULPRITS = 12;
 const INSIGHT_MAX_OUTPUT_TOKENS = 8_192;
 
 const INSIGHT_TIMEOUT_MS = 120_000;
+
+/** One recovery attempt when a reasoning model spends the first cap before writing JSON. */
+const INSIGHT_RETRY_MAX_OUTPUT_TOKENS = 16_384;
+const INSIGHT_RETRY_TIMEOUT_MS = 240_000;
 
 const NO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 };
 
@@ -245,7 +249,7 @@ export async function inferTaskInsights(
 
   const settled = await Promise.all(cards.map(async (card) => {
     try {
-      const response = await run({
+      const options: RunAgentOptions = {
         label: `task-insight:${card.id}`,
         systemPrompt: INSIGHT_SYSTEM_PROMPT,
         prompt: insightPrompt(card),
@@ -254,7 +258,19 @@ export async function inferTaskInsights(
         customTools: [],
         maxOutputTokens: INSIGHT_MAX_OUTPUT_TOKENS,
         timeoutMs: INSIGHT_TIMEOUT_MS,
-      });
+      };
+      let response: RunAgentResult;
+      try {
+        response = await run(options);
+      } catch (error) {
+        if (!(error instanceof AgentError) || error.code !== "reasoning_budget_exhausted") throw error;
+        debugLog(LOG, `${card.id}: reasoning exhausted the first output budget; retrying once with more room`);
+        response = await run({
+          ...options,
+          maxOutputTokens: INSIGHT_RETRY_MAX_OUTPUT_TOKENS,
+          timeoutMs: INSIGHT_RETRY_TIMEOUT_MS,
+        });
+      }
       const insight = parseInsight(response.finalText);
       if (!insight) debugLog(LOG, `${card.id}: the model returned no usable inference, keeping the measured heading`);
       return { card, insight, response };
