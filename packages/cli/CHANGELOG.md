@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.4.1
+
+### Patch Changes
+
+- 624c272: pick the busiest CPU profile in multi-thread traces instead of an idle one
+
 ## 0.4.0
 
 ### Minor Changes
