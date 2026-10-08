@@ -156,7 +156,7 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
 
   const assembled = [...profiles.values()]
     .filter((acc) => acc.nodes.size > 0)
-    .sort((a, b) => b.samples.length - a.samples.length)[0];
+    .sort((a, b) => activeSampleCount(b) - activeSampleCount(a))[0];
 
   if (!assembled) {
     const durationProfile = extractFromDurationTrace(events);
@@ -220,6 +220,16 @@ function getTraceEvents(raw: unknown): Record<string, unknown>[] | null {
  */
 function profileKey(event: Record<string, unknown>): string {
   return `${event.pid ?? ""}:${event.id ?? ""}`;
+}
+
+// Idle-heavy profiles (e.g. a service worker) can have the most samples while
+// doing almost no work; rank by samples that hit something other than idle.
+function activeSampleCount(acc: TraceProfileAcc): number {
+  let count = 0;
+  for (const id of acc.samples) {
+    if (acc.nodes.get(id)?.callFrame.functionName !== "(idle)") count++;
+  }
+  return count;
 }
 
 function normalizeNode(node: Record<string, unknown>): CdpProfileNode {
