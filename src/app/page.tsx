@@ -2069,10 +2069,15 @@ function InspectorApp() {
           const findingCount = taskList.length || cards.length || hotspots.length;
           // A recording of nothing but short work is a real answer, not an
           // empty one: say so, and show the busiest tasks anyway.
+          // The profiler's own start-up pause is not carded, because there is
+          // nothing in it to act on — but it is part of the recording a reader
+          // is looking at, so the total is told where it went.
+          const overheadMs = taskCards?.profilerOverheadMs ?? 0;
+          const overheadNote = overheadMs > 0 ? ` · ${formatMs(overheadMs)} spent starting the profiler, not shown` : "";
           const summaryLine = taskCards
             ? taskCards.noLongTasks
-              ? `No long tasks in this recording; the busiest work was ${findingCount} ${findingCount === 1 ? "task" : "tasks"} of ${formatMs(taskList[0]?.durationMs ?? 0)} and under · ${formatMs(totalMs)} total`
-              : `${findingCount} long ${findingCount === 1 ? "task" : "tasks"} of ${taskCards.taskCount} · ${formatMs(totalMs)} total`
+              ? `No long tasks in this recording; the busiest work was ${findingCount} ${findingCount === 1 ? "task" : "tasks"} of ${formatMs(taskList[0]?.durationMs ?? 0)} and under · ${formatMs(totalMs)} total${overheadNote}`
+              : `${findingCount} long ${findingCount === 1 ? "task" : "tasks"} of ${taskCards.taskCount} · ${formatMs(totalMs)} total${overheadNote}`
             : `${findingCount} ${findingCount === 1 ? "finding" : "findings"} · ${formatMs(totalMs)} total`;
           return (
           <>

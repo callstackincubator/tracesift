@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ruleClassTable } from '../src/lib/frame-classes.ts';
 import { CULPRIT_MIN_MS, focusedTree, pathlineFor, selectTaskCards, shapelineFor } from '../src/lib/task-cards.ts';
-import { attachMeasuredTasks, extractTasks } from '../src/lib/tasks.ts';
+import { attachMeasuredTasks, attachProfilerOverhead, extractTasks } from '../src/lib/tasks.ts';
 
 const node = (id, name, children = [], url = 'app.js', line = 0) => ({
   id, children, callFrame: { functionName: name, scriptId: '1', url, lineNumber: line, columnNumber: 0 },
@@ -533,4 +533,32 @@ test('a diffuse task says so, and says how thin the heaviest frame was', () => {
 
 test('neither line claims a figure on a block with no measurable duration', () => {
   assert.equal(shapelineFor(bare({ durationMs: 0 })), 'no measurable work in this block');
+});
+
+
+test('the profiler\'s own start-up is reported as a total, not spent on a card', () => {
+  // It is the third-longest block on the local trace and holds 6 ms of real
+  // JS, so it reads as "no code of your own ran in this block" — true, and
+  // useless. Dropping it silently would be its own error: a reader looking at
+  // a 400 ms recording is owed an account of where 200 ms of it went.
+  const samples = Array.from({ length: 400 }, (_, index) => (index % 10 === 0 ? 3 : 4));
+  const raw = attachProfilerOverhead(
+    attachMeasuredTasks(profile(nodes, samples), [
+      { ts: 1000, dur: 200_000 },
+      { ts: 201_000, dur: 200_000 },
+    ]),
+    [{ ts: 1000, dur: 200_000 }],
+  );
+  const set = cardsFor(raw, 400);
+  assert.equal(set.profilerOverheadMs, 200);
+  // Only the second task is carded, and the count it is reported "of" leaves
+  // the excluded block out too rather than promising a card that never comes.
+  assert.deepEqual(set.cards.map((card) => card.taskIndex), [1]);
+  assert.equal(set.taskCount, 1);
+});
+
+test('a recording the profiler did not stall reports no start-up time', () => {
+  const set = cardsFor(oneTask, 200);
+  assert.equal(set.profilerOverheadMs, 0);
+  assert.equal(set.cards.length, 1);
 });

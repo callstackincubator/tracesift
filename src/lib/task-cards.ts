@@ -351,6 +351,14 @@ export interface TaskCardSet {
   /** Tasks that cleared the cut but ranked past `MAX_TASK_CARDS`, kept as a number. */
   omittedTaskCount: number;
   omittedTaskMs: number;
+  /**
+   * Wall time the tracer spent starting its own profiler, which V8 bills to
+   * whichever task was running at the time. Reported rather than carded: there
+   * is nothing in it a reader can act on, but 2.9 s of a 16.7 s recording
+   * going unmentioned is its own kind of wrong. Optional because analyses
+   * saved before it existed do not carry it.
+   */
+  profilerOverheadMs?: number;
 }
 
 /** Keep the entry point and the frames nearest the cost; say how many went missing. */
@@ -984,7 +992,17 @@ export function selectTaskCards(
   classes: FrameClassTable,
 ): TaskCardSet {
   const { tasks, boundaries } = taskSet;
-  const byDuration = [...tasks].sort((a, b) => b.durationMs - a.durationMs || a.index - b.index);
+  // Starting the profiler stops the world for as long as it takes, and the
+  // pause is billed to the task that was running. On the local trace that is
+  // 2908 ms — the third-longest block in the recording, holding 6 ms of real
+  // JS, and it reads as "no code of your own ran in this block" because that
+  // is literally true. Ranking it would spend a card telling a reader about
+  // the act of measurement.
+  const rankable = tasks.filter((task) => !task.overhead);
+  const profilerOverheadMs = round1(
+    tasks.filter((task) => task.overhead).reduce((sum, task) => sum + task.durationMs, 0),
+  );
+  const byDuration = [...rankable].sort((a, b) => b.durationMs - a.durationMs || a.index - b.index);
   const cut = Math.max(LONG_TASK_MS, TASK_SHARE_MIN * durationMs);
   const long = byDuration.filter((task) => task.durationMs >= cut);
   // Falling through to the same ranking without the floor is the insurance
@@ -997,10 +1015,11 @@ export function selectTaskCards(
   return {
     cards: shown.map((task) => buildCard(profile, task, classes, durationMs)),
     boundaries,
+    profilerOverheadMs,
     noLongTasks: long.length === 0,
     classesDegraded: classes.degraded,
     durationMs,
-    taskCount: tasks.length,
+    taskCount: rankable.length,
     omittedTaskCount: omitted.length,
     omittedTaskMs: round1(omitted.reduce((sum, task) => sum + task.durationMs, 0)),
   };

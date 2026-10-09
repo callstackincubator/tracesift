@@ -51,6 +51,12 @@ export interface ProfileTask {
    * and the samples after the cut are still work that has to be accounted for.
    */
   boundaries: TaskBoundaryKind;
+  /**
+   * The tracer's own work rather than the app's. Starting a CPU profiler stops
+   * the world, and V8 bills the pause to the task that happened to be running,
+   * so this block is a measurement artefact and nothing in it is actionable.
+   */
+  overhead?: boolean;
 }
 
 export interface TaskSet {
@@ -144,6 +150,72 @@ export function attachMeasuredTasks(profile: CdpProfile, intervals: RawTaskInter
 export function measuredTasks(profile: CdpProfile): RawTaskInterval[] | undefined {
   const value = (profile as unknown as Record<symbol, unknown>)[MEASURED_TASKS];
   return Array.isArray(value) && value.length > 0 ? (value as RawTaskInterval[]) : undefined;
+}
+
+/**
+ * Events in which the tracer was busy with itself.
+ *
+ * `CpuProfiler::StartProfiling` is emitted inside whichever task was running
+ * when the profiler was switched on, and on the local Chrome trace it accounts
+ * for 2899 ms of a 2908 ms first task — the recording's third-largest block is
+ * the act of starting the recording. Keying on the event rather than guessing
+ * from a `(program)`-heavy call tree keeps this a fact the tracer stated.
+ */
+const PROFILER_OVERHEAD_EVENTS = new Set(["CpuProfiler::StartProfiling", "CpuProfiler::StopProfiling"]);
+
+/** Profiler-overhead intervals, grouped by the thread that paid for them. */
+export function profilerOverheadIntervals(
+  events: readonly Record<string, unknown>[],
+): Map<string, RawTaskInterval[]> {
+  const byThread = new Map<string, RawTaskInterval[]>();
+  for (const event of events) {
+    if (typeof event.name !== "string" || !PROFILER_OVERHEAD_EVENTS.has(event.name)) continue;
+    if (typeof event.ts !== "number") continue;
+    const dur = typeof event.dur === "number" ? event.dur : 0;
+    if (dur <= 0) continue;
+    const key = threadKey(event);
+    const list = byThread.get(key);
+    if (list) list.push({ ts: event.ts, dur });
+    else byThread.set(key, [{ ts: event.ts, dur }]);
+  }
+  return byThread;
+}
+
+const PROFILER_OVERHEAD = Symbol.for("tracesift.profilerOverhead");
+
+export function attachProfilerOverhead(profile: CdpProfile, intervals: RawTaskInterval[]): CdpProfile {
+  Object.defineProperty(profile, PROFILER_OVERHEAD, { value: intervals, enumerable: false, configurable: true });
+  return profile;
+}
+
+function profilerOverhead(profile: CdpProfile): RawTaskInterval[] {
+  const value = (profile as unknown as Record<symbol, unknown>)[PROFILER_OVERHEAD];
+  return Array.isArray(value) ? (value as RawTaskInterval[]) : [];
+}
+
+/**
+ * A task is the profiler's own if more than half its wall time was spent
+ * inside one. Half rather than all of it because the pause lands in the middle
+ * of a real task: the few milliseconds of application code around it are not
+ * worth carding on their own, and reporting the block as the app's work is the
+ * larger error.
+ */
+const OVERHEAD_TASK_SHARE = 0.5;
+
+function overlapUs(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
+  return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
+}
+
+function markOverhead(tasks: ProfileTask[], intervals: RawTaskInterval[], startTime: number): ProfileTask[] {
+  if (intervals.length === 0) return tasks;
+  return tasks.map((task) => {
+    const taskStart = startTime + task.startMs * 1000;
+    const taskEnd = taskStart + task.durationMs * 1000;
+    let covered = 0;
+    for (const interval of intervals) covered += overlapUs(taskStart, taskEnd, interval.ts, interval.ts + interval.dur);
+    const span = taskEnd - taskStart;
+    return span > 0 && covered / span > OVERHEAD_TASK_SHARE ? { ...task, overhead: true } : task;
+  });
 }
 
 const IDLE = "(idle)";
@@ -334,13 +406,15 @@ function withGapTasks(profile: CdpProfile, measured: ProfileTask[]): ProfileTask
 }
 
 export function extractTasks(profile: CdpProfile): TaskSet {
+  const overhead = profilerOverhead(profile);
+  const mark = (tasks: ProfileTask[]) => markOverhead(tasks, overhead, profile.startTime);
   const measured = measuredTasks(profile);
   if (measured) {
     const tasks = measuredTaskSet(profile, measured);
-    if (tasks.length > 0) return { tasks: withGapTasks(profile, tasks), boundaries: "measured" };
+    if (tasks.length > 0) return { tasks: mark(withGapTasks(profile, tasks)), boundaries: "measured" };
   }
   const total = (profile.samples ?? []).length;
-  return { tasks: inferredRuns(profile, 0, total, idleNodeIds(profile)), boundaries: "inferred" };
+  return { tasks: mark(inferredRuns(profile, 0, total, idleNodeIds(profile))), boundaries: "inferred" };
 }
 
 /**

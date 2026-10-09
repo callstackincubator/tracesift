@@ -101,6 +101,7 @@ export async function POST(request: Request): Promise<Response> {
     log(
       `tasks: ${tasks.tasks.length} (${tasks.boundaries}) — ${taskCards.cards.length} cards` +
       `${taskCards.noLongTasks ? ", none over the long-task floor" : ""}` +
+      `${taskCards.profilerOverheadMs ? `, ${taskCards.profilerOverheadMs} ms of profiler start-up excluded` : ""}` +
       `${classes.degraded ? ", frame classes degraded to rules" : ""}`
     );
   }

@@ -2,7 +2,15 @@ import { groupBottlenecks, type Bottleneck } from "./bottlenecks.ts";
 import { buildCallTree } from "./call-tree.ts";
 import { selectCards, type CardSelection } from "./profile-cards.ts";
 import { extractFromDurationTrace } from "./hermes-duration-profile.ts";
-import { attachMeasuredTasks, extractTasks, runTaskIntervals, threadKey, type TaskSet } from "./tasks.ts";
+import {
+  attachMeasuredTasks,
+  attachProfilerOverhead,
+  extractTasks,
+  profilerOverheadIntervals,
+  runTaskIntervals,
+  threadKey,
+  type TaskSet,
+} from "./tasks.ts";
 import { normalizeProfile } from "../app/js-profiler/normalize.ts";
 import { queryHotspots, querySummary } from "../app/js-profiler/query.ts";
 import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "../app/js-profiler/types.ts";
@@ -182,7 +190,11 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
   // thread it recorded, and the browser's other threads ran their own tasks
   // against a clock these samples know nothing about.
   const tasks = runTaskIntervals(events).get(assembled.threadKey);
-  return tasks && tasks.length > 0 ? attachMeasuredTasks(profile, tasks) : profile;
+  const withTasks = tasks && tasks.length > 0 ? attachMeasuredTasks(profile, tasks) : profile;
+  // Same reasoning for the profiler's own pauses: they are billed to the thread
+  // that was stopped, and only this one's samples are affected by them.
+  const overhead = profilerOverheadIntervals(events).get(assembled.threadKey);
+  return overhead && overhead.length > 0 ? attachProfilerOverhead(withTasks, overhead) : withTasks;
 }
 
 interface TraceProfileAcc {
