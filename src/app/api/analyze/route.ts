@@ -17,6 +17,7 @@ import { CpuAnalysisError } from "@/lib/cpu-analyzer";
 import { legacyEngineRequested, nodeCardEngineRequested, runLegacyCpuAnalysis } from "@/lib/legacy-cpu-analysis";
 import { classifyFrames, ruleClassTable } from "@/lib/frame-classes";
 import { selectTaskCards } from "@/lib/task-cards";
+import { selectProfileFunctions } from "@/lib/profile-functions";
 import { AgentError } from "@/lib/pi-agent";
 import { debugLog } from "@/lib/debug-log";
 import type { AnalysisModel, Hotspot, TokenUsage } from "@/lib/analysis";
@@ -66,11 +67,12 @@ export async function POST(request: Request): Promise<Response> {
   let queriedHotspots;
   let cards;
   let parsedProfile;
+  let tree;
   let tasks;
   let legacyBottlenecks;
   try {
     const rawProfile = JSON.parse(await readFile(`${dir}/${PROFILE_FILE_NAME}`, "utf8")) as unknown;
-    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tasks, legacyBottlenecks } =
+    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tree, tasks, legacyBottlenecks } =
       summarizeCpuProfile(rawProfile, id, profile.name));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -97,6 +99,15 @@ export async function POST(request: Request): Promise<Response> {
   const taskCards = nodeCardEngineRequested()
     ? undefined
     : selectTaskCards(parsedProfile, totalMs, tasks, classes);
+  // Built here rather than in the parser because it needs the classified
+  // frames, and classification is what tells framework apart from the
+  // reader's own code.
+  const profileFunctions = selectProfileFunctions(tree, classes, totalMs);
+  log(
+    `profile functions: ${profileFunctions.functions.length} shown` +
+    `${profileFunctions.omittedCount ? `, ${profileFunctions.omittedCount} below the cut` : ""}` +
+    `${profileFunctions.functions[0] ? ` — top ${profileFunctions.functions[0].name} (${profileFunctions.functions[0].totalMs} ms total)` : ""}`
+  );
   if (taskCards) {
     log(
       `tasks: ${tasks.tasks.length} (${tasks.boundaries}) — ${taskCards.cards.length} cards` +
@@ -142,6 +153,7 @@ export async function POST(request: Request): Promise<Response> {
     totalMs,
     hotspots: legacyHotspots,
     taskCards,
+    profileFunctions,
     cards: cards.cards,
     callCountIsExact: cards.callCountIsExact,
     reactIssues: [],
@@ -171,6 +183,7 @@ export async function POST(request: Request): Promise<Response> {
     saved,
     totalMs,
     taskCards,
+    profileFunctions,
     cards: clientCards(cards.cards),
     callCountIsExact: cards.callCountIsExact,
     hotspots: clientHotspots(legacyHotspots),

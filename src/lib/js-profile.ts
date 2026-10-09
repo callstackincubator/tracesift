@@ -1,5 +1,5 @@
 import { groupBottlenecks, type Bottleneck } from "./bottlenecks.ts";
-import { buildCallTree } from "./call-tree.ts";
+import { buildCallTree, type CallTree } from "./call-tree.ts";
 import { selectCards, type CardSelection } from "./profile-cards.ts";
 import { extractFromDurationTrace } from "./hermes-duration-profile.ts";
 import {
@@ -13,7 +13,13 @@ import {
 } from "./tasks.ts";
 import { normalizeProfile } from "../app/js-profiler/normalize.ts";
 import { queryHotspots, querySummary } from "../app/js-profiler/query.ts";
-import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "../app/js-profiler/types.ts";
+import type {
+  CdpCallFrame,
+  CdpProfile,
+  CdpProfileNode,
+  JsHotspotsResult,
+  JsProfileSummary,
+} from "../app/js-profiler/types.ts";
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -290,6 +296,13 @@ export function summarizeCpuProfile(
    * back is not an option.
    */
   profile: CdpProfile;
+  /**
+   * The merged call tree for the whole recording. Returned because the
+   * per-function view is built from it and that has to happen after the frames
+   * have been classified — a step this function knows nothing about — and
+   * because re-walking a profile of this size to get it back is not free.
+   */
+  tree: CallTree;
   /** The recording cut into tasks, which is the unit a card is built on. */
   tasks: TaskSet;
   cards: CardSelection;
@@ -314,12 +327,15 @@ export function summarizeCpuProfile(
   });
   const durationMs = session.durationMs;
 
+  const tree = buildCallTree(profile, durationMs, { callCountIsExact: recordsInvocations(profile) });
+
   return {
     summary: querySummary(session),
+    tree,
     profile,
     tasks: extractTasks(profile),
     legacyBottlenecks: () => groupBottlenecks(profile, durationMs),
-    cards: selectCards(buildCallTree(profile, durationMs, { callCountIsExact: recordsInvocations(profile) })),
+    cards: selectCards(tree),
     hotspots: queryHotspots(session, {
       limit: 20,
       offset: 0,

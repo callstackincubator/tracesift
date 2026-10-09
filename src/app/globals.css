@@ -1969,6 +1969,55 @@ body {
 .explore-table .explore-table-callers { white-space: normal; }
 /* The name column takes what is left, and wraps inside itself. */
 .explore-table tbody th { width: 100%; }
+/* The whole-recording function table under the task cards. `.explore-table`
+   above already carries the grid, the monospace figures and the name column
+   that takes what is left; these rules only place the section and set the
+   second line of the name cell, which `tbody th` stacks for us. */
+.profile-functions { margin-top: 32px; display: flex; flex-direction: column; gap: 12px; }
+.profile-functions-head h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+.profile-functions-head p {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+.profile-function-name { overflow-wrap: anywhere; }
+.profile-function-module {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.profile-functions-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.profile-functions-more {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.profile-functions-more:hover { border-color: var(--primary); color: var(--primary); }
+.profile-functions-footnote { margin: 0; font-size: 12px; color: var(--muted-foreground); }
+
+/* The header's way down to the table above. A link in everything but the
+   markup: it moves the page rather than navigating, so it is a button. */
+.results-jump {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.results-jump:hover { text-decoration: underline; }
+
 /* Every frame name in Explore is a way to refocus the view on that frame. */
 .explore-tree-focus {
   padding: 0;

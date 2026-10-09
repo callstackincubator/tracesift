@@ -22,6 +22,7 @@ import type { Hotspot } from "@/lib/analysis";
 import type { ProfileCard } from "@/lib/profile-cards";
 import { reactExploreHref, storeCardForExplore, taskExploreHref } from "@/lib/card-handoff";
 import { type TaskCard, type TaskCardSet } from "@/lib/task-cards";
+import { type ProfileFunctionSet } from "@/lib/profile-functions";
 import { CHART_SLICES } from "@/lib/contribution";
 import { formatMs } from "@/lib/format";
 import { profileCardLocations, taskCardLocations } from "@/lib/frame-location";
@@ -44,13 +45,14 @@ interface AnalyzeResponse {
   totalMs: number;
   hotspots: Hotspot[];
   taskCards?: TaskCardSet;
+  profileFunctions?: ProfileFunctionSet;
   cards?: ProfileCard[];
   callCountIsExact?: boolean;
   usage?: TokenUsage;
   model?: AnalysisModel;
 }
 interface HistoryItem { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; totalTokens: number; issueCount: number; }
-interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; taskCards?: TaskCardSet; cards?: ProfileCard[]; callCountIsExact?: boolean; reactCards?: ReactCardSet; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
+interface SavedAnalysis { id: string; createdAt: number; profileType: "cpu" | "react"; title: string; saved: boolean; totalMs: number; hotspots: Hotspot[]; taskCards?: TaskCardSet; profileFunctions?: ProfileFunctionSet; cards?: ProfileCard[]; callCountIsExact?: boolean; reactCards?: ReactCardSet; reactIssues: ReactIssue[]; prompts: Record<string, string>; usage: TokenUsage; model?: AnalysisModel; }
 interface AuthMethod { type: 'api_key' | 'oauth'; label: string; configured: boolean; subscription: boolean; }
 interface ModelProvider { id: string; name: string; authMethods: AuthMethod[]; models: Array<{ id: string; name: string }>; }
 interface ModelSettings {
@@ -769,6 +771,82 @@ function CausesNotice() {
   );
 }
 
+/**
+ * The recording merged into one row per function.
+ *
+ * A task card is scoped to one block of work, which is what lets it carry a
+ * start offset and a duration a reader can scrub to. The cost is that a
+ * function called from several tasks never appears as itself: measured in
+ * another tool it is one number, and measured here it is split across however
+ * many cards it happened to run in. This table is the other half of that —
+ * the per-function totals, which are the figures that line up.
+ */
+/** Addresses the whole-recording table, which the results header links down to. */
+const PROFILE_FUNCTIONS_ID = "profile-functions";
+
+/** Rows revealed per expansion, and the size of the first page. */
+const FUNCTION_PAGE_SIZE = 15;
+
+function ProfileFunctionTable({ set }: { set: ProfileFunctionSet }) {
+  const [shown, setShown] = useState(FUNCTION_PAGE_SIZE);
+  const rows = set.functions.slice(0, shown);
+  const remaining = set.functions.length - rows.length;
+  const nextPage = Math.min(FUNCTION_PAGE_SIZE, remaining);
+
+  return (
+    <section className="profile-functions" id={PROFILE_FUNCTIONS_ID}>
+      <div className="profile-functions-head">
+        <h2>Across the whole recording</h2>
+        <p>
+          Every task merged, one row per function, heaviest first. A card above counts only the part
+          of a function that ran inside that one block; these are its totals across the whole
+          profile, which is what another flame-graph tool reports.
+        </p>
+      </div>
+      <table className="explore-table">
+        <thead>
+          <tr>
+            <th scope="col">Function</th>
+            <th scope="col">Total</th>
+            <th scope="col">Self</th>
+            <th scope="col">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((fn) => (
+            <tr key={fn.id}>
+              <th scope="row">
+                <span className="profile-function-name">{fn.name}</span>
+                {fn.location ? <span className="profile-function-module">{fn.location}</span> : null}
+              </th>
+              <td>{formatMs(fn.totalMs)}</td>
+              <td>{formatMs(fn.selfMs)}</td>
+              <td>{fn.totalPercent}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="profile-functions-foot">
+        {remaining > 0 ? (
+          <button
+            className="profile-functions-more"
+            type="button"
+            onClick={() => setShown((current) => current + FUNCTION_PAGE_SIZE)}
+          >
+            Show {nextPage} more
+          </button>
+        ) : null}
+        <p className="profile-functions-footnote">
+          {`Showing ${rows.length} of ${set.functions.length}`}
+          {set.omittedCount > 0
+            ? `, with ${set.omittedCount} more ${set.omittedCount === 1 ? "function" : "functions"} ranked below them.`
+            : "."}
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function ChartSwitch({
   kind,
   onChange,
@@ -1202,6 +1280,7 @@ function InspectorApp() {
   const [totalMs, setTotalMs] = useState(0);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [taskCards, setTaskCards] = useState<TaskCardSet | null>(null);
+  const [profileFunctions, setProfileFunctions] = useState<ProfileFunctionSet | null>(null);
   const [cards, setCards] = useState<ProfileCard[]>([]);
   const [callCountIsExact, setCallCountIsExact] = useState(false);
   const [frameBudget, setFrameBudget] = useState("16");
@@ -1263,6 +1342,7 @@ function InspectorApp() {
         totalMs?: number;
         hotspots?: Hotspot[];
         taskCards?: TaskCardSet;
+        profileFunctions?: ProfileFunctionSet;
         cards?: ProfileCard[];
         callCountIsExact?: boolean;
         usage?: TokenUsage;
@@ -1305,6 +1385,7 @@ function InspectorApp() {
         setAnalysisId(data.analysisId ?? null);
         setHotspots([]);
         setTaskCards(null);
+        setProfileFunctions(null);
         setCards([]);
         setReactCards(data.reactCards ?? null);
         setReactIssues(data.issues ?? []);
@@ -1321,6 +1402,7 @@ function InspectorApp() {
         totalMs: data.totalMs ?? 0,
         hotspots: data.hotspots ?? [],
         taskCards: data.taskCards,
+        profileFunctions: data.profileFunctions,
         cards: data.cards ?? [],
         callCountIsExact: data.callCountIsExact === true,
         usage: data.usage,
@@ -1335,6 +1417,7 @@ function InspectorApp() {
       setTotalMs(result.totalMs);
       setHotspots(result.hotspots);
       setTaskCards(result.taskCards ?? null);
+      setProfileFunctions(result.profileFunctions ?? null);
       setCards(result.cards ?? []);
       setCallCountIsExact(result.callCountIsExact === true);
       setReactSummary(null);
@@ -1540,6 +1623,7 @@ function InspectorApp() {
     setAnalyzedType("javascript");
     setHotspots([]);
     setTaskCards(null);
+    setProfileFunctions(null);
     setCards([]);
     setCallCountIsExact(false);
     setReactSummary(null);
@@ -1567,7 +1651,7 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType(analysis.profileType === "react" ? "react" : "javascript");
-    setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
+    setTotalMs(analysis.totalMs); setHotspots(analysis.hotspots ?? []); setTaskCards(analysis.taskCards ?? null); setProfileFunctions(analysis.profileFunctions ?? null); setCards(analysis.cards ?? []);
     setCallCountIsExact(analysis.callCountIsExact === true); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues ?? []);
     setPrompts(analysis.prompts ?? {}); setAnalyzerUsage(analysis.usage ?? null); setAnalysisModel(analysis.model ?? null);
     setReactSummary(null); setSaved(true); setPhase("results"); setHistoryOpen(false);
@@ -1694,7 +1778,7 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis } = await response.json() as { analysis: SavedAnalysis };
     setAnalysisId(analysis.id); setAnalyzedType("javascript"); setTotalMs(analysis.totalMs);
-    setHotspots(analysis.hotspots); setTaskCards(analysis.taskCards ?? null); setCards(analysis.cards ?? []);
+    setHotspots(analysis.hotspots); setTaskCards(analysis.taskCards ?? null); setProfileFunctions(analysis.profileFunctions ?? null); setCards(analysis.cards ?? []);
     setCallCountIsExact(analysis.callCountIsExact === true); setReactCards(null); setReactIssues([]); setReactSummary(null);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
@@ -1705,7 +1789,7 @@ function InspectorApp() {
     if (!response.ok) return;
     const { analysis, summary } = await response.json() as { analysis: SavedAnalysis; summary: ReactSummary & { frameBudgetMs: number } };
     setAnalysisId(analysis.id); setAnalyzedType("react"); setTotalMs(analysis.totalMs);
-    setHotspots([]); setTaskCards(null); setCards([]); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
+    setHotspots([]); setTaskCards(null); setProfileFunctions(null); setCards([]); setReactCards(analysis.reactCards ?? null); setReactIssues(analysis.reactIssues); setReactSummary(summary); setAppliedBudget(summary.frameBudgetMs);
     setPrompts({}); setAnalyzerUsage(analysis.usage); setAnalysisModel(analysis.model ?? null); setSaved(true); setIsSample(true); setPhase("results");
   };
 
@@ -1984,6 +2068,20 @@ function InspectorApp() {
                 <span className="eyebrow">Analysis results</span>
                 <h1 className="results-title">{reactCards ? "Commits, longest first" : "React issues"}</h1>
                 <p>{summaryLine}</p>
+                {/* The cards are scoped to one task each, so the figure a
+                    reader brought from another tool is not on any of them.
+                    Below the cards is the right place for the merged table —
+                    the cards are the finding — but not a discoverable one, so
+                    the header says it is there. */}
+                {profileFunctions && profileFunctions.functions.length > 0 ? (
+                  <button
+                    className="results-jump"
+                    type="button"
+                    onClick={() => document.getElementById(PROFILE_FUNCTIONS_ID)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  >
+                    Across the whole recording ↓
+                  </button>
+                ) : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
@@ -2087,6 +2185,20 @@ function InspectorApp() {
                 <span className="eyebrow">Analysis results</span>
                 <h1 className="results-title">{taskCards ? "Tasks, longest first" : "Bottlenecks, slowest first"}</h1>
                 <p>{summaryLine}</p>
+                {/* The cards are scoped to one task each, so the figure a
+                    reader brought from another tool is not on any of them.
+                    Below the cards is the right place for the merged table —
+                    the cards are the finding — but not a discoverable one, so
+                    the header says it is there. */}
+                {profileFunctions && profileFunctions.functions.length > 0 ? (
+                  <button
+                    className="results-jump"
+                    type="button"
+                    onClick={() => document.getElementById(PROFILE_FUNCTIONS_ID)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  >
+                    Across the whole recording ↓
+                  </button>
+                ) : null}
                 {analyzerUsage && analyzerUsage.totalTokens > 0 && (
                   <p className="usage-line" title="Tokens consumed by the analyzer agent for this analysis">
                     analyzer · {formatTokens(analyzerUsage.totalTokens)} tokens · {usageBreakdown(analyzerUsage)}
@@ -2175,6 +2287,12 @@ function InspectorApp() {
                 );
               })}
             </div>
+            {profileFunctions && profileFunctions.functions.length > 0 ? (
+              // Keyed by analysis so a new one starts at page one: carrying the
+              // previous list's expansion over would open a reader on page four
+              // of something they have not seen page one of.
+              <ProfileFunctionTable key={analysisId ?? ""} set={profileFunctions} />
+            ) : null}
           </>
           );
         })()}
