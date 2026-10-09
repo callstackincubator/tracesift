@@ -562,3 +562,112 @@ test('a recording the profiler did not stall reports no start-up time', () => {
   assert.equal(set.profilerOverheadMs, 0);
   assert.equal(set.cards.length, 1);
 });
+
+/**
+ * A component band and the chain of hooks underneath it. `useMenuSections` is
+ * the frame a reader is looking for and the one a self-time ranking can never
+ * name: it delegates everything, so its own body is empty.
+ */
+const menuNodes = [
+  node(0, '(root)', [1], ''),
+  node(1, 'performWorkOnRoot', [2], 'node_modules/react-dom/index.js'),
+  node(2, 'Menu_MenuWide', [3], 'src/screens/Menu.tsx', 11),
+  node(3, 'withNavigation', [4], 'src/hooks/nav.ts', 3),
+  node(4, 'useMenuSections', [5], 'src/hooks/sections.ts', 7),
+  node(5, 'getTodoReports', [], 'src/data/todo.ts', 2),
+];
+
+/** One measured 100 ms task over `menuNodes`, with `samples` taken as node ids. */
+const menuTask = (samples) =>
+  attachMeasuredTasks(profile(menuNodes, samples), [{ ts: 1000, dur: samples.length * 1000 }]);
+
+const insideOf = (card, name) =>
+  (card.boundaryFrames.find((frame) => frame.name === name)?.inside ?? []).map(
+    (frame) => [frame.name, frame.totalMs],
+  );
+
+test('a boundary frame names what it called, so a frame that delegates is still reachable', () => {
+  // Half the time in the hook's own body, half below it: the hook did work, so
+  // the path stops there rather than walking on to what it called.
+  const samples = Array.from({ length: 100 }, (_, index) => (index % 2 === 0 ? 4 : 5));
+  const { cards } = cardsFor(menuTask(samples), 200);
+  assert.deepEqual(insideOf(cards[0], 'Menu_MenuWide'), [['withNavigation', 100]]);
+  // The point of the row: self time cannot find this frame, because it has none
+  // to speak of once its callees are excluded.
+  const culprits = cards[0].boundaryFrames[0].culprits.map((culprit) => culprit.name);
+  assert.ok(!culprits.includes('withNavigation'));
+});
+
+test('a nested row is the outermost named frame on its branch, not the busiest below it', () => {
+  // The rule the boundary frames are chosen by, applied one level in. A descent
+  // that walked through frames delegating everything was tried and measured out
+  // again: it named `useSearchTypeMenuSections` on one task and a frame three
+  // levels below it on another, for no reason the recording could justify.
+  const { cards } = cardsFor(menuTask(Array.from({ length: 100 }, () => 5)), 200);
+  assert.deepEqual(insideOf(cards[0], 'Menu_MenuWide'), [['withNavigation', 100]]);
+});
+
+test('a frame that split its time between two callees is a fork, and keeps both names', () => {
+  const forked = [
+    node(0, '(root)', [1], ''),
+    node(1, 'performWorkOnRoot', [2], 'node_modules/react-dom/index.js'),
+    node(2, 'Menu_MenuWide', [3], 'src/screens/Menu.tsx', 11),
+    node(3, 'withNavigation', [4, 5], 'src/hooks/nav.ts', 3),
+    node(4, 'useMenuSections', [], 'src/hooks/sections.ts', 7),
+    node(5, 'useMenuBadges', [], 'src/hooks/badges.ts', 9),
+  ];
+  const samples = Array.from({ length: 100 }, (_, index) => (index % 2 === 0 ? 4 : 5));
+  const raw = attachMeasuredTasks(profile(forked, samples), [{ ts: 1000, dur: 100_000 }]);
+  assert.deepEqual(insideOf(cardsFor(raw, 200).cards[0], 'Menu_MenuWide'), [['withNavigation', 100]]);
+});
+
+test('a frame reached through the framework by its own name is not a row into itself', () => {
+  const recursive = [
+    node(0, '(root)', [1], ''),
+    node(1, 'performWorkOnRoot', [2], 'node_modules/react-dom/index.js'),
+    node(2, 'Menu_MenuWide', [3], 'src/screens/Menu.tsx', 11),
+    node(3, 'stripNulls', [4], 'src/data/strip.ts', 5),
+    node(4, 'stripNulls', [5], 'src/data/strip.ts', 5),
+    node(5, 'stripNulls', [], 'src/data/strip.ts', 5),
+  ];
+  const raw = attachMeasuredTasks(
+    profile(recursive, Array.from({ length: 100 }, () => 5)),
+    [{ ts: 1000, dur: 100_000 }],
+  );
+  assert.deepEqual(insideOf(cardsFor(raw, 200).cards[0], 'Menu_MenuWide'), [['stripNulls', 100]]);
+});
+
+test('a boundary frame that called nothing nameable carries no nested rows at all', () => {
+  // The branch below `parseRows` reaches an engine built-in and stops, so there
+  // is no frame to send a reader to and the field is absent rather than empty —
+  // the boundary frame is itself the finding.
+  const leafy = [
+    node(0, '(root)', [1], ''),
+    node(1, 'performWorkOnRoot', [2], 'node_modules/react-dom/index.js'),
+    node(2, 'parseRows', [3], 'src/data/parse.ts', 4),
+    node(3, 'toLocaleString', [], 'native date.js'),
+  ];
+  const raw = attachMeasuredTasks(
+    profile(leafy, Array.from({ length: 100 }, () => 3)),
+    [{ ts: 1000, dur: 100_000 }],
+  );
+  const [boundary] = cardsFor(raw, 200).cards[0].boundaryFrames;
+  assert.equal(boundary.name, 'parseRows');
+  assert.equal(boundary.inside, undefined);
+});
+
+test('a frame that hands everything to one callee still names that callee', () => {
+  // `Search_Search` delegates its whole 200 ms to `applyMerge`. The row repeats
+  // the parent's figure, and it is the only thing on the card that says where
+  // the 200 ms actually went.
+  const card = cardsFor(oneTask, 400).cards[0];
+  assert.deepEqual(insideOf(card, 'Search_Search'), [['applyMerge', 200]]);
+});
+
+test('nested frames are disjoint, so they never claim more than the frame holding them', () => {
+  const samples = Array.from({ length: 100 }, (_, index) => (index % 2 === 0 ? 4 : 5));
+  for (const frame of cardsFor(menuTask(samples), 200).cards[0].boundaryFrames) {
+    const claimed = (frame.inside ?? []).reduce((sum, nested) => sum + nested.totalMs, 0);
+    assert.ok(claimed <= frame.totalMs + 0.1, `${frame.name}: ${claimed} > ${frame.totalMs}`);
+  }
+});

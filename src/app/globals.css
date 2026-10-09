@@ -1186,6 +1186,9 @@ body { background: var(--background, #151419); }
 .slide-preview .contribution-bar { height: 24px; }
 .slide-preview .contribution-detail { gap: 5px; min-height: 0; padding: 10px 12px; }
 .slide-preview .contribution-detail-name { font-size: 13px; }
+/* The share image is one finding at a fixed height; a path into the feature is
+   a thing to follow, which nobody can do from a picture. */
+.slide-preview .contribution-nested { display: none; }
 .slide-preview .contribution-detail-ms { font-size: 16px; }
 
 .slide-cta {
@@ -2604,6 +2607,47 @@ body {
 }
 .contribution-detail-open { color: var(--primary); }
 .contribution-detail-aside { color: var(--muted-foreground); font-weight: 500; }
+
+/* What the open feature called, one band down: the half a self-time chart cannot draw. */
+.contribution-nested { display: grid; gap: 3px; }
+.contribution-nested-label {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.contribution-nested-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.contribution-nested-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 4px;
+  margin-left: -4px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.contribution-nested-row:hover { background: var(--muted); }
+.contribution-nested-row:hover .contribution-nested-name { text-decoration: underline; }
+.contribution-nested-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contribution-nested-ms {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+}
+.contribution-nested-rest { color: var(--muted-foreground); font-size: 10px; }
 .contribution-detail-open:hover,
 .contribution-detail-aside:hover { text-decoration: underline; }
 .contribution-detail-aside:hover { color: var(--foreground); }
