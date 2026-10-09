@@ -1,12 +1,11 @@
-import { groupBottlenecks, type Bottleneck } from "./bottlenecks";
-import { buildCallTree } from "./call-tree";
-import { selectCards, type CardSelection } from "./profile-cards";
-import { extractFromDurationTrace } from "./hermes-duration-profile";
-import { attachMeasuredTasks, extractTasks, runTaskIntervals, threadKey, type TaskSet } from "./tasks";
-import { normalizeProfile } from "@/app/js-profiler/normalize";
-import { queryHotspots, querySummary } from "@/app/js-profiler/query";
-import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "@/app/js-profiler/types";
-
+import { groupBottlenecks, type Bottleneck } from "./bottlenecks.ts";
+import { buildCallTree } from "./call-tree.ts";
+import { selectCards, type CardSelection } from "./profile-cards.ts";
+import { extractFromDurationTrace } from "./hermes-duration-profile.ts";
+import { attachMeasuredTasks, extractTasks, runTaskIntervals, threadKey, type TaskSet } from "./tasks.ts";
+import { normalizeProfile } from "../app/js-profiler/normalize.ts";
+import { queryHotspots, querySummary } from "../app/js-profiler/query.ts";
+import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "../app/js-profiler/types.ts";
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

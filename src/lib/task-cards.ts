@@ -906,11 +906,12 @@ export function shapelineFor(card: Pick<TaskCard,
  * repeated down the page with different numbers, which tells a reader how long
  * each block was and nothing about which of them to open.
  */
-function headlineFor(task: ProfileTask, boundaries: TaskBoundaryKind, frames: BoundaryFrame[]): string {
+function headlineFor(task: ProfileTask, frames: BoundaryFrame[]): string {
   const into = `${formatMs(task.startMs)} into the recording`;
   // An inferred boundary is reconstructed from idle gaps, so the sentence has
-  // to stop short of claiming the runtime drew it there.
-  const block = boundaries === "measured"
+  // to stop short of claiming the runtime drew it there. One set can hold both
+  // kinds, so the wording follows the task and not the set it came in.
+  const block = task.boundaries === "measured"
     ? `a ${Math.round(task.durationMs)} ms task ${into}`
     : `about ${Math.round(task.durationMs)} ms of uninterrupted work ${into}`;
   const subject = frames.slice(0, HEADLINE_FRAMES).map((frame) => frame.name).join(" and ");
@@ -924,7 +925,6 @@ function headlineFor(task: ProfileTask, boundaries: TaskBoundaryKind, frames: Bo
 function buildCard(
   profile: CdpProfile,
   task: ProfileTask,
-  boundaries: TaskBoundaryKind,
   classes: FrameClassTable,
   durationMs: number,
 ): TaskCard {
@@ -954,8 +954,8 @@ function buildCard(
     taskIndex: task.index,
     startMs: round1(task.startMs),
     durationMs: round1(task.durationMs),
-    boundaries,
-    headline: headlineFor(task, boundaries, frames),
+    boundaries: task.boundaries,
+    headline: headlineFor(task, frames),
     percentOfProfile: durationMs > 0 ? round2((task.durationMs / durationMs) * 100) : 0,
     boundaryFrames: frames,
     boundaryTailCount: entries.length - shownEntries.length,
@@ -995,7 +995,7 @@ export function selectTaskCards(
   const omitted = ranked.slice(MAX_TASK_CARDS);
 
   return {
-    cards: shown.map((task) => buildCard(profile, task, boundaries, classes, durationMs)),
+    cards: shown.map((task) => buildCard(profile, task, classes, durationMs)),
     boundaries,
     noLongTasks: long.length === 0,
     classesDegraded: classes.degraded,

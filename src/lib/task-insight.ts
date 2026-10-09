@@ -158,7 +158,7 @@ export function insightPrompt(card: TaskCard): string {
   const sections: string[] = [];
   const block = card.boundaries === "measured"
     ? `one task of ${card.durationMs} ms, starting ${card.startMs} ms into the recording`
-    : `about ${card.durationMs} ms of uninterrupted work, starting around ${card.startMs} ms into the recording (the profiler recorded no task boundaries, so the edges are reconstructed from idle gaps)`;
+    : `about ${card.durationMs} ms of uninterrupted work, starting around ${card.startMs} ms into the recording (the profiler recorded no boundary around this block, so its edges are reconstructed from idle gaps)`;
   sections.push(`## The task\nThe runtime ran ${block}.`);
   if (card.confidence === "low") {
     sections.push("Few samples landed in this task, so treat every figure below as a hint rather than a measurement.");

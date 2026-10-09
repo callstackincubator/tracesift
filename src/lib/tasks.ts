@@ -18,6 +18,12 @@ import type { CdpProfile } from "../app/js-profiler/types";
 export interface RawTaskInterval {
   ts: number;
   dur: number;
+  /**
+   * The tracer recorded where this task began but never where it ended, so
+   * `dur` is a floor reconstructed from the last thing seen on the thread
+   * rather than a measurement. See {@link runTaskIntervals}.
+   */
+  truncated?: boolean;
 }
 
 /**
@@ -38,10 +44,22 @@ export interface ProfileTask {
   /** Samples `[firstSample, endSample)` of the profile fell inside this task. */
   firstSample: number;
   endSample: number;
+  /**
+   * Where this one task's edges came from. It is per task and not per set
+   * because a recording can carry both: a tracer that stops emitting `RunTask`
+   * partway through leaves measured tasks up to the cut and nothing after it,
+   * and the samples after the cut are still work that has to be accounted for.
+   */
+  boundaries: TaskBoundaryKind;
 }
 
 export interface TaskSet {
   tasks: ProfileTask[];
+  /**
+   * How the set's tasks were drawn overall: `measured` once the tracer supplied
+   * any real boundary, even if reconstructed tasks fill gaps around them.
+   * Per-card wording reads {@link ProfileTask.boundaries} instead.
+   */
   boundaries: TaskBoundaryKind;
 }
 
@@ -61,6 +79,8 @@ export function runTaskIntervals(events: readonly Record<string, unknown>[]): Ma
   const byThread = new Map<string, RawTaskInterval[]>();
   /** A `B` whose `E` has not arrived yet, per thread. */
   const open = new Map<string, number>();
+  /** The last timestamp seen on each thread, from events of any name. */
+  const lastSeen = new Map<string, number>();
 
   const push = (key: string, interval: RawTaskInterval) => {
     const list = byThread.get(key);
@@ -69,9 +89,11 @@ export function runTaskIntervals(events: readonly Record<string, unknown>[]): Ma
   };
 
   for (const event of events) {
-    if (event.name !== "RunTask" || typeof event.ts !== "number") continue;
+    if (typeof event.ts !== "number") continue;
     const key = threadKey(event);
     const ts = event.ts;
+    lastSeen.set(key, Math.max(lastSeen.get(key) ?? ts, ts));
+    if (event.name !== "RunTask") continue;
     if (event.ph === "B") {
       open.set(key, ts);
     } else if (event.ph === "E") {
@@ -84,6 +106,24 @@ export function runTaskIntervals(events: readonly Record<string, unknown>[]): Ma
       if (dur > 0) push(key, { ts, dur });
     }
   }
+
+  // A `B` still open when the events run out is a task that was executing when
+  // the recording stopped — Chrome flushes a completed task as `X` with a
+  // duration and one still on the stack as a bare `B`. Dropping it discards the
+  // whole tail of the recording: on the local trace the renderer's last
+  // `RunTask` opens at 11.4 s of a 16.7 s profile and never closes, so an
+  // `E`-only parser decides the thread went quiet and 5.2 s of application work
+  // — a third of the samples — is left belonging to no task at all.
+  //
+  // Closing it at the last timestamp seen on that thread is the most
+  // conservative end available; the task may well have run past the end of the
+  // trace. The interval is marked `truncated` so nothing downstream reports
+  // that floor as a measured duration.
+  for (const [key, start] of open) {
+    const end = lastSeen.get(key);
+    if (end !== undefined && end > start) push(key, { ts: start, dur: end - start, truncated: true });
+  }
+
   return byThread;
 }
 
@@ -189,6 +229,9 @@ function lowerBound(timestamps: number[], value: number): number {
 /**
  * Tasks whose boundaries the tracer measured. A task that caught no sample is
  * dropped: it ran, but this profile has nothing to say about what was in it.
+ *
+ * A truncated interval keeps its measured start and loses the claim on its
+ * duration — the recording stopped inside it, so the figure is a floor.
  */
 function measuredTaskSet(profile: CdpProfile, intervals: RawTaskInterval[]): ProfileTask[] {
   const timestamps = sampleTimestamps(profile);
@@ -204,22 +247,23 @@ function measuredTaskSet(profile: CdpProfile, intervals: RawTaskInterval[]): Pro
       durationMs: interval.dur / 1000,
       firstSample,
       endSample,
+      boundaries: interval.truncated ? "inferred" : "measured",
     });
   }
   return tasks;
 }
 
 /**
- * The fallback for a trace with no `RunTask` on the profiled thread: a run of
- * consecutive non-idle samples is treated as one task. The result is marked
- * `inferred`, and must stay marked — an idle gap is evidence that the loop went
- * quiet, not a record of where the runtime drew a task boundary, and a trace
- * busy enough never to idle collapses into a single enormous "task".
+ * Runs of consecutive non-idle samples within `[from, to)`, each treated as one
+ * task. An idle gap is evidence that the loop went quiet, not a record of where
+ * the runtime drew a task boundary, so everything built here is `inferred` and
+ * must stay marked: a stretch busy enough never to idle collapses into a single
+ * enormous "task", and the wording on the card is the only thing that stops a
+ * reader taking that number for a measurement.
  */
-function inferredTaskSet(profile: CdpProfile): ProfileTask[] {
+function inferredRuns(profile: CdpProfile, from: number, to: number, idle: Set<number>): ProfileTask[] {
   const samples = profile.samples ?? [];
   const timestamps = sampleTimestamps(profile);
-  const idle = idleNodeIds(profile);
   const tasks: ProfileTask[] = [];
   let runStart = -1;
 
@@ -229,31 +273,74 @@ function inferredTaskSet(profile: CdpProfile): ProfileTask[] {
     // The run's last sample timed the interval that ended at it, so the work
     // reaches to that sample's timestamp and no further.
     const endUs = timestamps[end - 1];
-    tasks.push({
-      index: tasks.length,
-      startMs: (startUs - profile.startTime) / 1000,
-      durationMs: Math.max(0, endUs - startUs) / 1000,
-      firstSample: runStart,
-      endSample: end,
-    });
+    const durationMs = Math.max(0, endUs - startUs) / 1000;
+    // A run spanning no time is a sample or two that fell between two measured
+    // tasks, in the microseconds the tracer's own boundaries did not claim: the
+    // local trace carries 203 of them. They are seams, not work, and admitting
+    // them would bury the real gaps under zero-millisecond cards.
+    if (durationMs > 0) {
+      tasks.push({
+        index: tasks.length,
+        startMs: (startUs - profile.startTime) / 1000,
+        durationMs,
+        firstSample: runStart,
+        endSample: end,
+        boundaries: "inferred",
+      });
+    }
     runStart = -1;
   };
 
-  for (let index = 0; index < samples.length; index += 1) {
+  for (let index = from; index < to; index += 1) {
     if (idle.has(samples[index])) close(index);
     else if (runStart < 0) runStart = index;
   }
-  close(samples.length);
+  close(to);
   return tasks;
+}
+
+/**
+ * The samples no measured task claimed, recovered as inferred tasks.
+ *
+ * `RunTask` and the CPU profile are two independent streams, and nothing makes
+ * the tracer keep emitting the first for as long as it samples the second. On
+ * the local Chrome trace the renderer's `RunTask` stream stops 11.4 s into a
+ * 16.7 s profile while sibling threads keep emitting to the end, which leaves
+ * 18,056 consecutive non-idle samples — 5.2 s, a third of the recording, and
+ * real application work — belonging to no task at all. Every card is built from
+ * a task, so without this those samples reach no reader: a function's time is
+ * reported as the part of it that happened to land inside a measured window,
+ * which is how a 206 ms function comes back as 103 ms.
+ *
+ * The recovered tasks are `inferred` and say so on the card. An approximate
+ * boundary around work that ran is a far smaller error than silence about it.
+ */
+function withGapTasks(profile: CdpProfile, measured: ProfileTask[]): ProfileTask[] {
+  const total = (profile.samples ?? []).length;
+  const idle = idleNodeIds(profile);
+  const ordered = [...measured].sort((a, b) => a.firstSample - b.firstSample);
+
+  const filled: ProfileTask[] = [];
+  let cursor = 0;
+  for (const task of ordered) {
+    if (task.firstSample > cursor) filled.push(...inferredRuns(profile, cursor, task.firstSample, idle));
+    filled.push(task);
+    cursor = Math.max(cursor, task.endSample);
+  }
+  if (cursor < total) filled.push(...inferredRuns(profile, cursor, total, idle));
+
+  filled.sort((a, b) => a.startMs - b.startMs || a.firstSample - b.firstSample);
+  return filled.map((task, index) => ({ ...task, index }));
 }
 
 export function extractTasks(profile: CdpProfile): TaskSet {
   const measured = measuredTasks(profile);
   if (measured) {
     const tasks = measuredTaskSet(profile, measured);
-    if (tasks.length > 0) return { tasks, boundaries: "measured" };
+    if (tasks.length > 0) return { tasks: withGapTasks(profile, tasks), boundaries: "measured" };
   }
-  return { tasks: inferredTaskSet(profile), boundaries: "inferred" };
+  const total = (profile.samples ?? []).length;
+  return { tasks: inferredRuns(profile, 0, total, idleNodeIds(profile)), boundaries: "inferred" };
 }
 
 /**

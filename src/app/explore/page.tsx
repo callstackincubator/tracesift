@@ -891,8 +891,8 @@ function TaskExplorer({ handoff, initialFocus }: { handoff: TaskHandoff; initial
         </p>
         {card.boundaries === "inferred" ? (
           <Text className="explore-caveat">
-            The profiler recorded no task boundaries on this thread, so this block was reconstructed from the gaps
-            between sample runs. Its start and duration are approximate.
+            The profiler recorded no boundary around this block, so its edges were reconstructed from the gaps
+            between sample runs. Its start and duration are approximate — the work inside it is not.
           </Text>
         ) : null}
         {/* Under the measurements, not over them: the figures above are what the
