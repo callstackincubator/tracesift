@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import { downloadArtifact, install, validateRelease, verifyInstallation } from '../src/install.js';
 import { acquireLock, launch, alive, run } from '../src/process.js';
 import { parsePort, assertPortAvailable, waitForReady, openBrowser, heapLimitMb, serverNodeArgs } from '../src/start.js';
+import { removeServiceDescriptor, writeServiceDescriptor } from '../src/service.js';
 
 async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const bytes = Buffer.from('fake artifact');
@@ -90,6 +91,19 @@ test('lock excludes parallel operations and recovers stale ownership', async t =
     await assert.rejects(acquireLock(dir), /running/);
   } finally { await orphan.stop(); }
   await (await acquireLock(dir))();
+  assert.deepEqual(await readdir(dir), []);
+});
+
+test('service descriptors are private, atomic, and removed only by their owner', async t => {
+  const dir = await home(t);
+  const descriptor = { version: '0.1.0', apiVersion: 1, pid: 1, childPid: 2, instance: 'owned', baseUrl: 'http://127.0.0.1:3000', token: 'secret', startedAt: 10 };
+  await writeServiceDescriptor(dir, descriptor);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'service.json'), 'utf8')), descriptor);
+  assert.equal((await stat(join(dir, 'service.json'))).mode & 0o777, 0o600);
+  assert.deepEqual(await readdir(dir), ['service.json']);
+  await removeServiceDescriptor(dir, 'different');
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'service.json'), 'utf8')), descriptor);
+  await removeServiceDescriptor(dir, 'owned');
   assert.deepEqual(await readdir(dir), []);
 });
 

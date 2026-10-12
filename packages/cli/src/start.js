@@ -2,11 +2,12 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { totalmem } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { getHome, ensureHome } from './config.js';
 import { readRelease, verifyInstallation } from './install.js';
 import { acquireLock, launch } from './process.js';
+import { removeServiceDescriptor, writeServiceDescriptor } from './service.js';
 
 /**
  * Profiles are parsed whole in memory, so the stock ~4 GB heap is the practical
@@ -63,17 +64,27 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
   await ensureHome(home);
   const unlock = await acquireLock(home);
   let proc;
+  let instance;
   const handlers = new Map();
   let stopping = false;
   try {
     await verifyInstallation(home, release);
     await assertPortAvailable(port);
-    const instance = randomUUID();
+    instance = randomUUID();
+    const integrationToken = randomBytes(32).toString('base64url');
     const url = `http://127.0.0.1:${port}`;
     const app = join(home, 'app');
     proc = launch(process.execPath, [...serverNodeArgs(), '--import', '@callstack/tracesift/bootstrap', join(app, 'server.js')], {
       cwd: app,
-      env: { ...process.env, HOSTNAME: '127.0.0.1', PORT: String(port), TRACE_SIFT_HOME: home, TRACE_SIFT_INSTANCE: instance },
+      env: {
+        ...process.env,
+        HOSTNAME: '127.0.0.1',
+        PORT: String(port),
+        TRACE_SIFT_HOME: home,
+        TRACE_SIFT_INSTANCE: instance,
+        TRACE_SIFT_VERSION: release.version,
+        TRACE_SIFT_INTEGRATION_TOKEN: integrationToken,
+      },
     });
     for (const signal of ['SIGINT', 'SIGTERM']) {
       const handler = () => { stopping = true; void proc.stop(signal); };
@@ -81,6 +92,16 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
     }
     await unlock.trackChild(proc.child.pid);
     await waitForReady(proc, url, instance);
+    await writeServiceDescriptor(home, {
+      version: release.version,
+      apiVersion: 1,
+      pid: process.pid,
+      childPid: proc.child.pid,
+      instance,
+      baseUrl: url,
+      token: integrationToken,
+      startedAt: Date.now(),
+    });
     console.log(`TraceSift is ready at ${url}\nPress Ctrl+C to stop. Restarting clears analysis results unless saved.`);
     if (open && !stopping) openBrowser(url);
     const result = await proc.done;
@@ -88,6 +109,7 @@ export async function start({ home = getHome(), port = 3000, open = true } = {})
   } catch (error) { if (!stopping) throw error; }
   finally {
     if (proc) await proc.stop();
+    await removeServiceDescriptor(home, instance);
     for (const [signal, handler] of handlers) process.off(signal, handler);
     await unlock();
   }
