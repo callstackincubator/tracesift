@@ -39,6 +39,7 @@ const { saveAnalysisSettings, findAnalysis, destroyRecord } = await import('../s
 const { GET: health } = await import('../src/app/api/integration/v1/health/route.ts');
 const { POST: analyzeRoute } = await import('../src/app/api/integration/v1/analyze/route.ts');
 const { POST: handoffRoute } = await import('../src/app/api/integration/v1/handoff/route.ts');
+const { GET: taskRoute } = await import('../src/app/api/integration/v1/task/route.ts');
 
 await saveAnalysisSettings({ autoSave: false });
 test.after(() => rm(home, { recursive: true, force: true }));
@@ -69,20 +70,22 @@ test('profile detection accepts analyzer-supported CPU and React shapes and reje
 });
 
 test('CPU normalization preserves task-card order and publishes compact summary metadata', () => {
-  const first = { id: 'task-2', headline: 'first measured card' };
+  // The two drill-down fields are the bulk of a card and nothing on one draws
+  // them, so a normalized card is the card without them; `/task` serves them.
+  const first = { id: 'task-2', headline: 'first measured card', tree: { id: 'n0' }, timeline: { boxes: [] } };
   const second = { id: 'task-5', headline: 'second measured card' };
   assert.deepEqual(normalizedIntegrationAnalysis({
     analysisId: 'cpu-analysis', profileType: 'cpu', title: 'profile.cpuprofile', totalMs: 800,
     callCountIsExact: false, profileFunctions: { functions: [] },
-    taskCards: { cards: [first, second], omittedTaskCount: 3, noLongTasks: false, profilerOverheadMs: 20 },
+    taskCards: { cards: [first, second], taskCount: 870, omittedTaskCount: 3, noLongTasks: false, profilerOverheadMs: 20 },
     cards: [{ id: 'retired-engine-card' }], hotspots: [],
   }), {
     apiVersion: 1, analysisId: 'cpu-analysis', profileType: 'cpu', title: 'profile.cpuprofile',
     summary: {
       totalMs: 800, callCountIsExact: false, profileFunctions: { functions: [] },
-      omittedTaskCount: 3, noLongTasks: false, profilerOverheadMs: 20,
+      taskCount: 870, omittedTaskCount: 3, noLongTasks: false, profilerOverheadMs: 20,
     },
-    cards: [first, second],
+    cards: [{ id: 'task-2', headline: 'first measured card' }, second],
   });
 });
 
@@ -156,4 +159,62 @@ test('authenticated CPU route analysis returns a card whose route handoff is det
   const secondResponse = await getHandoff();
   assert.equal(secondResponse.status, 200);
   assert.equal((await secondResponse.json()).handoff, first.handoff);
+});
+
+test('integration task route guards its credentials, its parameters, and missing analyses', async () => {
+  const unauthenticated = await taskRoute(new Request('http://localhost/api/integration/v1/task?analysisId=any&taskIndex=0'));
+  assert.equal(unauthenticated.status, 401);
+  assert.deepEqual(await unauthenticated.json(), { error: 'Unauthorized.' });
+
+  const badRequests = [
+    'http://localhost/api/integration/v1/task?taskIndex=0',
+    'http://localhost/api/integration/v1/task?analysisId=%20%20&taskIndex=0',
+    'http://localhost/api/integration/v1/task?analysisId=some-analysis',
+    'http://localhost/api/integration/v1/task?analysisId=some-analysis&taskIndex=not-a-number',
+    'http://localhost/api/integration/v1/task?analysisId=some-analysis&taskIndex=1.5',
+  ];
+  for (const url of badRequests) {
+    const response = await taskRoute(authorized(url));
+    assert.equal(response.status, 400, url);
+    assert.match((await response.json()).error, /taskIndex/);
+  }
+
+  const missing = await taskRoute(authorized('http://localhost/api/integration/v1/task?analysisId=no-such-analysis&taskIndex=0'));
+  assert.equal(missing.status, 404);
+  assert.match((await missing.json()).error, /no longer available/);
+});
+
+test('integration task route serves one card whole, including the tree and timeline /analyze omits', async t => {
+  const profile = await readFile(path.resolve('sample-profiles/cpu/hermes-release-1.json'));
+  const form = new FormData();
+  form.set('profile', new File([profile], 'hermes-release-1.json', { type: 'application/json' }));
+  const analyzed = await analyzeRoute(authorized('http://localhost/api/integration/v1/analyze', {
+    method: 'POST', body: form,
+  }));
+  assert.equal(analyzed.status, 200);
+  const analysis = await analyzed.json();
+  t.after(() => destroyRecord(analysis.analysisId));
+  assert.ok(analysis.cards.length > 0);
+
+  const { taskIndex } = analysis.cards[0];
+  const response = await taskRoute(authorized(`http://localhost/api/integration/v1/task?analysisId=${analysis.analysisId}&taskIndex=${taskIndex}`));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.apiVersion, 1);
+  assert.equal(body.analysisId, analysis.analysisId);
+  assert.equal(body.title, 'hermes-release-1.json');
+  assert.equal(typeof body.totalMs, 'number');
+  assert.equal(body.card.taskIndex, taskIndex);
+  assert.equal(body.card.id, analysis.cards[0].id);
+
+  const record = await findAnalysis(analysis.analysisId);
+  const stored = record.taskCards.cards.find(entry => entry.taskIndex === taskIndex);
+  assert.ok(body.card.tree);
+  assert.ok(body.card.timeline);
+  assert.deepEqual(body.card.tree, JSON.parse(JSON.stringify(stored.tree)));
+  assert.deepEqual(body.card.timeline, JSON.parse(JSON.stringify(stored.timeline)));
+
+  const unknownTask = await taskRoute(authorized(`http://localhost/api/integration/v1/task?analysisId=${analysis.analysisId}&taskIndex=4242`));
+  assert.equal(unknownTask.status, 404);
+  assert.deepEqual(await unknownTask.json(), { error: 'That task is not part of this analysis.' });
 });

@@ -46,6 +46,23 @@ export function detectIntegrationProfileType(raw: unknown): IntegrationProfileTy
   throw new Error("The uploaded JSON is not a supported CPU profile or React DevTools profiling export.");
 }
 
+/**
+ * One card without the two fields only a drill-down reads.
+ *
+ * A task card ships the task's call tree untruncated, which is several
+ * megabytes on a long task, and an analysis carries up to twelve of them. None
+ * of it is drawn on a card, and a client that renders cards inline — in a chat
+ * transcript, say — would be handed tens of megabytes to show a bar and a
+ * legend. `/api/integration/v1/task` serves the whole task to whoever opens
+ * one, which is the only reader those fields have.
+ */
+const DRILL_DOWN_ONLY = ["tree", "timeline"];
+
+function summarizedCard(card: unknown): unknown {
+  if (typeof card !== "object" || card === null) return card;
+  return Object.fromEntries(Object.entries(card).filter(([key]) => !DRILL_DOWN_ONLY.includes(key)));
+}
+
 export function normalizedIntegrationAnalysis(result: Record<string, unknown>) {
   const profileType = result.profileType as IntegrationProfileType;
   if (profileType === "react") {
@@ -59,7 +76,7 @@ export function normalizedIntegrationAnalysis(result: Record<string, unknown>) {
       cards: reactCards?.cards ?? result.issues ?? [],
     };
   }
-  const taskCards = result.taskCards as { cards?: unknown[]; omittedTaskCount?: number; noLongTasks?: boolean; profilerOverheadMs?: number } | undefined;
+  const taskCards = result.taskCards as { cards?: unknown[]; taskCount?: number; omittedTaskCount?: number; noLongTasks?: boolean; profilerOverheadMs?: number } | undefined;
   return {
     apiVersion: INTEGRATION_API_VERSION,
     analysisId: result.analysisId,
@@ -69,10 +86,13 @@ export function normalizedIntegrationAnalysis(result: Record<string, unknown>) {
       totalMs: result.totalMs,
       callCountIsExact: result.callCountIsExact,
       profileFunctions: result.profileFunctions,
+      // How many tasks the recording held in all. A client's header says "3
+      // long tasks of 870", and nothing on a card can tell it the 870.
+      taskCount: taskCards?.taskCount,
       omittedTaskCount: taskCards?.omittedTaskCount,
       noLongTasks: taskCards?.noLongTasks,
       profilerOverheadMs: taskCards?.profilerOverheadMs,
     },
-    cards: taskCards?.cards ?? result.cards ?? result.hotspots ?? [],
+    cards: ((taskCards?.cards ?? result.cards ?? result.hotspots ?? []) as unknown[]).map(summarizedCard),
   };
 }
