@@ -99,3 +99,43 @@ test('a profile that never left idle does not beat an empty field', () => {
   });
   assert.equal(profile.samples.length, 3);
 });
+
+/**
+ * The same two profiles, except the idle thread's samples land on a frame
+ * *under* `(idle)` rather than on `(idle)` itself.
+ *
+ * V8 emits `(idle)` childless, so no recording to hand is shaped like this. It
+ * is here because the rule used to be local to this module and tested the
+ * sampled frame's own name, which made these samples active here and idle in
+ * every module downstream — and nothing in the suite would have noticed.
+ */
+const idleWithChildren = ({ pid, id, tid, samples }) => [
+  { name: 'Profile', ph: 'P', id, pid, tid, ts: 100, args: { data: { startTime: 100 } } },
+  {
+    name: 'ProfileChunk', ph: 'P', id, pid, tid: tid + 1, ts: 100,
+    args: {
+      data: {
+        timeDeltas: samples.map(() => 1000),
+        cpuProfile: {
+          nodes: [
+            { id: 1, callFrame: frame('(root)'), children: [2, 3] },
+            { id: 2, callFrame: frame('handlePress') },
+            { id: 3, callFrame: frame('(idle)'), children: [4] },
+            { id: 4, callFrame: frame('pollForWork') },
+          ],
+          samples,
+        },
+      },
+    },
+  },
+];
+
+test('a sample under an idle frame is idle here too, not just downstream', () => {
+  const traceEvents = [
+    ...idleWithChildren({ pid: 2, id: '0x2', tid: 50, samples: Array(20).fill(4) }),
+    ...idleWithChildren({ pid: 1, id: '0x1', tid: 10, samples: [2, 2, 2, 3] }),
+  ];
+  const profile = coerceCdpProfile({ traceEvents });
+  // Three real samples beat twenty parked under `(idle)`.
+  assert.deepEqual(profile.samples, [2, 2, 2, 3]);
+});

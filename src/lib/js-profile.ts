@@ -6,6 +6,7 @@ import {
   attachMeasuredTasks,
   attachProfilerOverhead,
   extractTasks,
+  idleNodeIds,
   profilerOverheadIntervals,
   runTaskIntervals,
   threadKey,
@@ -167,9 +168,14 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
     }
   }
 
+  // Counted once per profile rather than once per comparison. It is a scan of
+  // every sample, and inside a comparator `sort` pays for it O(n log n) times —
+  // on a 60 MB trace that is a quarter of a million samples re-walked to decide
+  // each pair.
   const assembled = [...profiles.values()]
     .filter((acc) => acc.nodes.size > 0)
-    .sort((a, b) => activeSampleCount(b) - activeSampleCount(a))[0];
+    .map((acc) => ({ acc, active: activeSampleCount(acc) }))
+    .sort((a, b) => b.active - a.active)[0]?.acc;
 
   if (!assembled) {
     const durationProfile = extractFromDurationTrace(events);
@@ -239,12 +245,22 @@ function profileKey(event: Record<string, unknown>): string {
   return `${event.pid ?? ""}:${event.id ?? ""}`;
 }
 
-// Idle-heavy profiles (e.g. a service worker) can have the most samples while
-// doing almost no work; rank by samples that hit something other than idle.
+/**
+ * Idle-heavy profiles (e.g. a service worker) can have the most samples while
+ * doing almost no work; rank by samples that hit something other than idle.
+ *
+ * Idle is `idleNodeIds`' definition rather than a local one, so a sample is
+ * counted the same way here as it is everywhere downstream. This used to test
+ * the sampled node's own name, which calls a sample landing *under* an `(idle)`
+ * frame active while the task splitter and the call tree both call it idle.
+ * V8 emits `(idle)` as a childless frame, so no trace to hand shows the
+ * difference — the three only have to agree the moment one does.
+ */
 function activeSampleCount(acc: TraceProfileAcc): number {
+  const idle = idleNodeIds([...acc.nodes.values()]);
   let count = 0;
   for (const id of acc.samples) {
-    if (acc.nodes.get(id)?.callFrame.functionName !== "(idle)") count++;
+    if (!idle.has(id)) count++;
   }
   return count;
 }

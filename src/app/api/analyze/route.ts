@@ -11,11 +11,10 @@ import {
   getAnalysisSettings,
   saveAnalysis,
 } from "@/lib/analysis";
-import { getModelSettings } from "@callstack/tracesift/runtime";
 import { summarizeCpuProfile } from "@/lib/js-profile";
 import { CpuAnalysisError } from "@/lib/cpu-analyzer";
 import { legacyEngineRequested, nodeCardEngineRequested, runLegacyCpuAnalysis } from "@/lib/legacy-cpu-analysis";
-import { classifyFrames, ruleClassTable } from "@/lib/frame-classes";
+import { ruleClassTable } from "@/lib/frame-classes";
 import { selectTaskCards } from "@/lib/task-cards";
 import { selectProfileFunctions } from "@/lib/profile-functions";
 import { AgentError } from "@/lib/pi-agent";
@@ -23,6 +22,8 @@ import { debugLog } from "@/lib/debug-log";
 import type { AnalysisModel, Hotspot, TokenUsage } from "@/lib/analysis";
 
 const LOG = "api/analyze";
+
+const ZERO_CPU_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 };
 
 function log(...parts: unknown[]): void {
   debugLog(LOG, ...parts);
@@ -86,16 +87,12 @@ export async function POST(request: Request): Promise<Response> {
     `profile summary: total=${Math.round(totalMs)} ms, samples=${summary.session.sampleCount}, hotspots=${queriedHotspots.total}, topSelf=${top ? `${top.functionName} (${top.selfTimeMs} ms)` : "n/a"}`
   );
 
-  // One classification pass over the distinct frames of the upload, cached by
-  // name and url. Everything a task card says about which code is whose is a
-  // lookup in this table, so the same file always produces the same cards.
-  // With no model configured it is the rule table rather than a provider call
-  // that can only fail — the same fallback a failed model already produced.
+  // One classification pass over the frames of the upload. Everything a task
+  // card says about which code is whose is a lookup in this table, and the
+  // table is rules alone — so the same file always produces the same cards,
+  // and uploading a profile costs nothing but the measurement.
   const settings = await getAnalysisSettings();
-  const modelConfigured = (await getModelSettings()).configured;
-  const classes = nodeCardEngineRequested() || !modelConfigured ? ruleClassTable() : await classifyFrames(
-    parsedProfile.nodes.map((node) => node.callFrame), dir,
-  );
+  const classes = ruleClassTable(parsedProfile.nodes.map((node) => node.callFrame));
   const taskCards = nodeCardEngineRequested()
     ? undefined
     : selectTaskCards(parsedProfile, totalMs, tasks, classes);
@@ -113,15 +110,17 @@ export async function POST(request: Request): Promise<Response> {
       `tasks: ${tasks.tasks.length} (${tasks.boundaries}) — ${taskCards.cards.length} cards` +
       `${taskCards.noLongTasks ? ", none over the long-task floor" : ""}` +
       `${taskCards.profilerOverheadMs ? `, ${taskCards.profilerOverheadMs} ms of profiler start-up excluded` : ""}` +
-      `${classes.degraded ? ", frame classes degraded to rules" : ""}`
+      `${classes.degraded ? `, ${classes.unresolvedCount} bundled frames unresolved` : ""}`
     );
   }
 
   // `TRACESIFT_CPU_ENGINE=legacy` runs the engine cards replace, so a suspicious
   // profile can be checked against it.
   let legacyHotspots: Hotspot[] = [];
-  let usage: TokenUsage = classes.usage;
-  let model: AnalysisModel | undefined = classes.model;
+  // Zero unless the legacy engine below runs: the measured path never calls a
+  // model, so a CPU upload reports no spend and the results header says so.
+  let usage: TokenUsage = ZERO_CPU_USAGE;
+  let model: AnalysisModel | undefined;
   if (legacyEngineRequested()) {
     const groups = legacyBottlenecks();
     log(`TRACESIFT_CPU_ENGINE=legacy — running the previous engine over ${groups.length} groups`);

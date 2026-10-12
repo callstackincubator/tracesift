@@ -89,11 +89,25 @@ export function isEngineStateName(name: string): boolean {
 }
 
 /**
- * `t`, `_r`, `Ci` — a real name from a minified bundle that still says nothing.
- * Two characters, not three: `map`, `get`, `run` and `top` are far more often
- * something a developer wrote than a mangled identifier.
+ * `t`, `_r`, `Ci`, `t.A`, `n.Z`, `eK.H` — a real name from a minified bundle
+ * that still says nothing.
+ *
+ * Two characters per segment, not three: `map`, `get`, `run` and `top` are far
+ * more often something a developer wrote than a mangled identifier.
+ *
+ * Every segment has to be mangled for the name to be. `eK.useMemo` is not
+ * matched, because the part that identifies it survived minification, and
+ * neither is `foo.id` — a short tail does not make a name meaningless when
+ * what it hangs off is readable.
+ *
+ * This lived in `frame-location.ts` and guarded only whether a frame needed a
+ * file position printed beside it, while the tier test here tested the whole
+ * string and so let every dotted form through. Three places assumed otherwise:
+ * that module's own comment, its test, and `frame-classes.ts`, which says
+ * mangled identifiers "stay residue for the model to decide" and then promoted
+ * `t.A` to `app` because this test did not catch it.
  */
-const MINIFIED = /^[_$A-Za-z][_$A-Za-z0-9]?$/;
+const MANGLED = /^(?:[_$A-Za-z][_$A-Za-z0-9]?\.)*[_$A-Za-z][_$A-Za-z0-9]?$/;
 
 /**
  * 0 — never a title.
@@ -125,7 +139,7 @@ export function isMeaningfulName(name: string): boolean {
   ) {
     return false;
   }
-  return !MINIFIED.test(name);
+  return !MANGLED.test(name);
 }
 
 export function frameNameTier(frame: CdpCallFrame): NameTier {
@@ -140,7 +154,7 @@ export function frameNameTier(frame: CdpCallFrame): NameTier {
   }
   // Framework internals are demoted rather than banned: they still carry real
   // information inside a call tree or a hot path, they just cannot head one.
-  if (MINIFIED.test(name) || isFrameworkInternalFrame(frame)) return 1;
+  if (MANGLED.test(name) || isFrameworkInternalFrame(frame)) return 1;
   return 2;
 }
 

@@ -12,7 +12,7 @@
 
 import { isAttributedToParentFrame } from "./frame-names.ts";
 import type { CallTreeNode } from "./call-tree.ts";
-import type { CdpProfile } from "../app/js-profiler/types";
+import type { CdpProfile, CdpProfileNode } from "../app/js-profiler/types";
 
 /** A task boundary exactly as the tracer recorded it: profile-clock microseconds. */
 export interface RawTaskInterval {
@@ -257,16 +257,34 @@ function sampleTimestamps(profile: CdpProfile): number[] {
   return out;
 }
 
-/** Raw node ids that sit inside an `(idle)` subtree, which is absence of work rather than work. */
-function idleNodeIds(profile: CdpProfile): Set<number> {
-  const byId = new Map(profile.nodes.map((node) => [node.id, node]));
+/**
+ * Raw node ids that sit inside an `(idle)` subtree, which is absence of work
+ * rather than work.
+ *
+ * The one place this question is answered for a raw node id. `call-tree.ts`
+ * reaches the same rule from the other side — once a merge hits `(idle)` it
+ * maps that node and every descendant to `null` — and `js-profile.ts` calls
+ * this directly, so the three paths that care cannot drift into three
+ * different ideas of idle.
+ *
+ * What it deliberately does not do: `(root)` carries no special meaning here,
+ * and `(program)` and `(garbage collector)` are work. The engine is doing
+ * something in both of those; it is doing nothing in `(idle)`.
+ *
+ * Takes the nodes rather than the profile because one caller holds them as a
+ * map while assembling a profile that does not exist yet.
+ */
+export function idleNodeIds(nodes: readonly CdpProfileNode[]): Set<number> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
   const parentById = new Map<number, number>();
-  for (const node of profile.nodes) {
-    if (typeof node.parentId === "number") parentById.set(node.id, node.parentId);
+  for (const node of nodes) {
+    // Profiles link parent to child in either direction and sometimes both.
+    // A negative id is V8's "no parent" rather than a node to look up.
+    if (typeof node.parentId === "number" && node.parentId >= 0) parentById.set(node.id, node.parentId);
     for (const childId of node.children ?? []) parentById.set(childId, node.id);
   }
   const idle = new Set<number>();
-  for (const node of profile.nodes) {
+  for (const node of nodes) {
     let current: number | undefined = node.id;
     const seen = new Set<number>();
     while (current !== undefined && !seen.has(current)) {
@@ -389,7 +407,7 @@ function inferredRuns(profile: CdpProfile, from: number, to: number, idle: Set<n
  */
 function withGapTasks(profile: CdpProfile, measured: ProfileTask[]): ProfileTask[] {
   const total = (profile.samples ?? []).length;
-  const idle = idleNodeIds(profile);
+  const idle = idleNodeIds(profile.nodes);
   const ordered = [...measured].sort((a, b) => a.firstSample - b.firstSample);
 
   const filled: ProfileTask[] = [];
@@ -414,7 +432,7 @@ export function extractTasks(profile: CdpProfile): TaskSet {
     if (tasks.length > 0) return { tasks: mark(withGapTasks(profile, tasks)), boundaries: "measured" };
   }
   const total = (profile.samples ?? []).length;
-  return { tasks: mark(inferredRuns(profile, 0, total, idleNodeIds(profile))), boundaries: "inferred" };
+  return { tasks: mark(inferredRuns(profile, 0, total, idleNodeIds(profile.nodes))), boundaries: "inferred" };
 }
 
 /**

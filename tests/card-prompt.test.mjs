@@ -297,7 +297,12 @@ test('a shared chain above the culprits is drawn once, not once per culprit', ()
 });
 
 test('every culprit row carries the callers that locate it in the codebase', () => {
-  assert.match(minifiedPrompt, /- `getReportSections`.*Called via Search_Search › t\.A\./);
+  // `t.A` sits between these two on the stack and is deliberately not named:
+  // the caller line exists to place a function in the feature that reached it,
+  // and a mangled member path places nothing. It used to appear here because
+  // the name tiers tested the whole string and let dotted forms through.
+  assert.match(minifiedPrompt, /- `getReportSections`.*Called via Search_Search\./);
+  assert.doesNotMatch(minifiedPrompt, /Called via [^.\n]*t\.A/);
   assert.match(minifiedPrompt, /- `removeNestedNullValues`.*Called via Search_Search › setWithRetry\./);
 });
 
