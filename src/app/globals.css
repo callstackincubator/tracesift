@@ -1186,6 +1186,9 @@ body { background: var(--background, #151419); }
 .slide-preview .contribution-bar { height: 24px; }
 .slide-preview .contribution-detail { gap: 5px; min-height: 0; padding: 10px 12px; }
 .slide-preview .contribution-detail-name { font-size: 13px; }
+/* The share image is one finding at a fixed height; a path into the feature is
+   a thing to follow, which nobody can do from a picture. */
+.slide-preview .contribution-nested { display: none; }
 .slide-preview .contribution-detail-ms { font-size: 16px; }
 
 .slide-cta {
@@ -1969,6 +1972,55 @@ body {
 .explore-table .explore-table-callers { white-space: normal; }
 /* The name column takes what is left, and wraps inside itself. */
 .explore-table tbody th { width: 100%; }
+/* The whole-recording function table under the task cards. `.explore-table`
+   above already carries the grid, the monospace figures and the name column
+   that takes what is left; these rules only place the section and set the
+   second line of the name cell, which `tbody th` stacks for us. */
+.profile-functions { margin-top: 32px; display: flex; flex-direction: column; gap: 12px; }
+.profile-functions-head h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+.profile-functions-head p {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+.profile-function-name { overflow-wrap: anywhere; }
+.profile-function-module {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.profile-functions-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.profile-functions-more {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.profile-functions-more:hover { border-color: var(--primary); color: var(--primary); }
+.profile-functions-footnote { margin: 0; font-size: 12px; color: var(--muted-foreground); }
+
+/* The header's way down to the table above. A link in everything but the
+   markup: it moves the page rather than navigating, so it is a button. */
+.results-jump {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.results-jump:hover { text-decoration: underline; }
+
 /* Every frame name in Explore is a way to refocus the view on that frame. */
 .explore-tree-focus {
   padding: 0;
@@ -2555,6 +2607,47 @@ body {
 }
 .contribution-detail-open { color: var(--primary); }
 .contribution-detail-aside { color: var(--muted-foreground); font-weight: 500; }
+
+/* What the open feature called, one band down: the half a self-time chart cannot draw. */
+.contribution-nested { display: grid; gap: 3px; }
+.contribution-nested-label {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.contribution-nested-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.contribution-nested-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 4px;
+  margin-left: -4px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.contribution-nested-row:hover { background: var(--muted); }
+.contribution-nested-row:hover .contribution-nested-name { text-decoration: underline; }
+.contribution-nested-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contribution-nested-ms {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+}
+.contribution-nested-rest { color: var(--muted-foreground); font-size: 10px; }
 .contribution-detail-open:hover,
 .contribution-detail-aside:hover { text-decoration: underline; }
 .contribution-detail-aside:hover { color: var(--foreground); }

@@ -165,6 +165,27 @@ const MAX_BOUNDARY_CULPRITS = 8;
 const BOUNDARY_CULPRIT_MIN_SHARE = 0.02;
 const BOUNDARY_CULPRIT_MIN_MS = 1;
 
+/**
+ * The nested breakdown's floor. Higher than the culprit floor beside it,
+ * because the two rank by different things and a row has to earn its place
+ * differently in each: a culprit at 2% of the frame is a function that burned
+ * that time and can be gone and looked at, where a band at 2% is a branch the
+ * feature barely entered.
+ *
+ * Measured, the difference is between a readable list and a shrug. The 64 ms
+ * `run` frame on the local trace has twenty-two branches under it and none
+ * above 7%; at 2% it printed five rows, three of them called `process`, while
+ * 78% of the frame sat in the residual underneath them.
+ */
+const NESTED_MIN_SHARE = 0.05;
+const NESTED_MIN_MS = BOUNDARY_CULPRIT_MIN_MS;
+
+/**
+ * Nested frames a boundary ships. Measured over both local traces the floor
+ * above already cuts every set to five or fewer, so this binds on nothing in
+ * practice and exists for the same reason the other caps do.
+ */
+const MAX_NESTED_FRAMES = 6;
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -202,6 +223,55 @@ export interface BoundaryFrame {
    * that subtree's total exactly.
    */
   culprits: BoundaryCulprit[];
+  /**
+   * What this frame *called*, as against what burned its time.
+   *
+   * `culprits` ranks by self time, which is the right answer to "what do I go
+   * and change" and structurally cannot name a frame that delegates. On a React
+   * profile that is most of the frames a reader came looking for:
+   * `useSearchTypeMenuSections` holds 629 ms across the big task of the local
+   * trace, carries 0.1 ms of its own, and appears in no culprit list anywhere in
+   * the recording. The component band above it was the only thing the card could
+   * say, which is the complaint this answers.
+   *
+   * Like the boundary frames themselves these are an antichain — the first
+   * drawable, nameable frame on each branch below this one — so their inclusive
+   * times are disjoint and the residual below them is a real figure rather than
+   * an artefact of double counting.
+   *
+   * Optional because analyses saved before it existed do not carry it.
+   */
+  inside?: NestedFrame[];
+}
+
+/**
+ * A named frame one band below a boundary frame.
+ *
+ * The outermost one on its branch, which is the same rule the boundary frames
+ * themselves are chosen by — the question is the same question asked one level
+ * in, so it gets the same answer rather than a second one.
+ *
+ * It was worth one attempt to do better. A frame that delegates everything to a
+ * single callee reads as a wrapper, so the descent walked through those and
+ * named what they arrived at. Measured on two real traces it had to be taken
+ * back out: unbounded, the row was decided by sampling noise — two tasks
+ * running the same code named different frames because a 0.4 ms sibling landed
+ * in one sample stream and not the other — and bounded to a single step it
+ * walked past `useSearchTypeMenuSections`, which delegates everything and is
+ * not a wrapper. Nothing in a profile tells those two apart, so the honest row
+ * is the outermost frame and the rest is Explore's.
+ */
+export interface NestedFrame {
+  name: string;
+  location?: string;
+  frameClass: FrameClass;
+  nodeId: string;
+  /** Inclusive time across this frame's calls inside the boundary frame. */
+  totalMs: number;
+  selfMs: number;
+  invocations: number;
+  longestCallMs: number;
+  shapeText: string;
 }
 
 /**
@@ -351,6 +421,14 @@ export interface TaskCardSet {
   /** Tasks that cleared the cut but ranked past `MAX_TASK_CARDS`, kept as a number. */
   omittedTaskCount: number;
   omittedTaskMs: number;
+  /**
+   * Wall time the tracer spent starting its own profiler, which V8 bills to
+   * whichever task was running at the time. Reported rather than carded: there
+   * is nothing in it a reader can act on, but 2.9 s of a 16.7 s recording
+   * going unmentioned is its own kind of wrong. Optional because analyses
+   * saved before it existed do not carry it.
+   */
+  profilerOverheadMs?: number;
 }
 
 /** Keep the entry point and the frames nearest the cost; say how many went missing. */
@@ -408,9 +486,18 @@ interface BoundaryEntry {
   best: CallTreeNode;
 }
 
-function boundaryEntries(root: CallTreeNode, classes: FrameClassTable): BoundaryEntry[] {
+/**
+ * The first drawable, nameable frame on each branch below `starts`, walking
+ * through everything that is neither.
+ *
+ * Shared by the boundary search and the nested search under it, because they
+ * are the same question asked at two depths — the only difference is where the
+ * walk begins. Whatever it returns is an antichain: the walk stops on a branch
+ * the moment it finds one, so no result can be an ancestor of another.
+ */
+function firstNamedBelow(starts: readonly CallTreeNode[], classes: FrameClassTable): CallTreeNode[] {
   const found: CallTreeNode[] = [];
-  const stack = [...root.children];
+  const stack = [...starts];
   while (stack.length > 0) {
     const node = stack.pop()!;
     if (DRAWABLE.has(classes.classOf(node.frame)) && isMeaningfulFrame(node.frame)) {
@@ -419,11 +506,16 @@ function boundaryEntries(root: CallTreeNode, classes: FrameClassTable): Boundary
     }
     stack.push(...node.children);
   }
+  return found;
+}
 
-  // Merged by frame identity, because one component reached from three places
-  // is one finding carrying all three. The antichain property survives the
-  // merge: none of the nodes behind an entry is an ancestor of another, so
-  // their inclusive times still do not overlap.
+/**
+ * Merged by frame identity, because one component reached from three places is
+ * one finding carrying all three. The antichain property survives the merge:
+ * none of the nodes behind an entry is an ancestor of another, so their
+ * inclusive times still do not overlap.
+ */
+function mergeEntries(found: readonly CallTreeNode[]): BoundaryEntry[] {
   const merged = new Map<string, BoundaryEntry>();
   for (const node of found) {
     const entry = merged.get(node.key);
@@ -440,10 +532,15 @@ function boundaryEntries(root: CallTreeNode, classes: FrameClassTable): Boundary
   return [...merged.values()].sort((a, b) => b.totalMs - a.totalMs || compareByWeight(a.best, b.best));
 }
 
+function boundaryEntries(root: CallTreeNode, classes: FrameClassTable): BoundaryEntry[] {
+  return mergeEntries(firstNamedBelow(root.children, classes));
+}
+
 function boundaryFrame(
   entry: BoundaryEntry,
   shapes: Map<string, InvocationShape>,
   culprits: BoundaryCulprit[],
+  inside: NestedFrame[],
 ): BoundaryFrame {
   const shape = shapes.get(entry.key);
   const totalMs = round1(entry.totalMs);
@@ -459,6 +556,11 @@ function boundaryFrame(
     longestCallMs,
     shapeText: shapeText(invocations, totalMs, longestCallMs),
     culprits,
+    // Omitted rather than empty when the frame called nothing nameable. A
+    // consumer has to handle the missing case anyway — analyses saved before
+    // this field existed do not carry it — and the two mean the same thing to
+    // every reader of it, so there is nothing to be gained by shipping both.
+    ...(inside.length > 0 ? { inside } : {}),
   };
 }
 
@@ -526,6 +628,68 @@ function boundaryCulprits(
         callers: callers(found.best, classes),
       };
     });
+}
+
+/**
+ * One band below a boundary frame: what it called, ranked by inclusive time.
+ *
+ * The companion to `boundaryCulprits`, which ranks the same subtree by self
+ * time. Both are needed because they answer different questions and neither can
+ * answer the other's: self time says what to go and change and is structurally
+ * blind to any frame that delegates, inclusive time says which part of the
+ * feature the cost sits under and is blind to where inside it the cost landed.
+ *
+ * These are an antichain, so unlike a flattened inclusive ranking their figures
+ * do not overlap and a residual measured against the parent is meaningful. The
+ * views print that residual, because a list of three bands covering a fifth of
+ * a frame reads as the whole answer unless something says otherwise.
+ */
+function nestedFrames(
+  entry: BoundaryEntry,
+  sampleNodes: readonly (CallTreeNode | null)[],
+  weights: readonly number[],
+  classes: FrameClassTable,
+): NestedFrame[] {
+  const bands = mergeEntries(firstNamedBelow(entry.nodes.flatMap((node) => node.children), classes));
+  const floorMs = Math.max(NESTED_MIN_MS, NESTED_MIN_SHARE * entry.totalMs);
+  const shown = bands.filter((band) => band.totalMs >= floorMs).slice(0, MAX_NESTED_FRAMES);
+  if (shown.length === 0) return [];
+  // A recursive component reaches itself through the framework, so its only
+  // band carries its own name and the row reads as a link into the frame the
+  // reader is already looking at. The culprits below it still say where the
+  // time went.
+  if (shown.length === 1 && shown[0].key === entry.key) return [];
+
+  // Masked to this boundary's subtree for the same reason the culprits are:
+  // `ran 60 times` under a feature that accounts for 29 of them is the wrong
+  // figure. The inclusive total comes from the band rather than the shape,
+  // because a frame reached twice inside one boundary would otherwise be
+  // counted once by the antichain and twice by the shape table.
+  const inside = new Set<CallTreeNode>();
+  for (const node of entry.nodes) for (const descendant of preOrder(node)) inside.add(descendant);
+  const scopedShapes = invocationShapes(
+    sampleNodes.map((node) => (node && inside.has(node) ? node : null)),
+    weights,
+    (node) => node.key,
+  );
+
+  return shown.map((found) => {
+    const shape = scopedShapes.get(found.key);
+    const totalMs = round1(found.totalMs);
+    const invocations = shape?.invocations ?? 1;
+    const longestCallMs = round1(shape?.longestCallMs ?? found.totalMs);
+    return {
+      name: nodeName(found.best),
+      location: nodeLocation(found.best),
+      frameClass: classes.classOf(found.best.frame),
+      nodeId: found.best.id,
+      totalMs,
+      selfMs: round1(found.selfMs),
+      invocations,
+      longestCallMs,
+      shapeText: shapeText(invocations, totalMs, longestCallMs, "inside this frame"),
+    };
+  });
 }
 
 function shapeText(
@@ -906,11 +1070,12 @@ export function shapelineFor(card: Pick<TaskCard,
  * repeated down the page with different numbers, which tells a reader how long
  * each block was and nothing about which of them to open.
  */
-function headlineFor(task: ProfileTask, boundaries: TaskBoundaryKind, frames: BoundaryFrame[]): string {
+function headlineFor(task: ProfileTask, frames: BoundaryFrame[]): string {
   const into = `${formatMs(task.startMs)} into the recording`;
   // An inferred boundary is reconstructed from idle gaps, so the sentence has
-  // to stop short of claiming the runtime drew it there.
-  const block = boundaries === "measured"
+  // to stop short of claiming the runtime drew it there. One set can hold both
+  // kinds, so the wording follows the task and not the set it came in.
+  const block = task.boundaries === "measured"
     ? `a ${Math.round(task.durationMs)} ms task ${into}`
     : `about ${Math.round(task.durationMs)} ms of uninterrupted work ${into}`;
   const subject = frames.slice(0, HEADLINE_FRAMES).map((frame) => frame.name).join(" and ");
@@ -924,7 +1089,6 @@ function headlineFor(task: ProfileTask, boundaries: TaskBoundaryKind, frames: Bo
 function buildCard(
   profile: CdpProfile,
   task: ProfileTask,
-  boundaries: TaskBoundaryKind,
   classes: FrameClassTable,
   durationMs: number,
 ): TaskCard {
@@ -945,7 +1109,12 @@ function buildCard(
   const floorMs = BOUNDARY_MIN_SHARE * task.durationMs;
   const shownEntries = entries.filter((entry) => entry.totalMs >= floorMs).slice(0, MAX_BOUNDARY_FRAMES);
   const frames = shownEntries.map((entry) =>
-    boundaryFrame(entry, shapes, boundaryCulprits(entry, tree.sampleNodes ?? [], weights, classes)),
+    boundaryFrame(
+      entry,
+      shapes,
+      boundaryCulprits(entry, tree.sampleNodes ?? [], weights, classes),
+      nestedFrames(entry, tree.sampleNodes ?? [], weights, classes),
+    ),
   );
   const shownMs = shownEntries.reduce((sum, entry) => sum + entry.totalMs, 0);
 
@@ -954,8 +1123,8 @@ function buildCard(
     taskIndex: task.index,
     startMs: round1(task.startMs),
     durationMs: round1(task.durationMs),
-    boundaries,
-    headline: headlineFor(task, boundaries, frames),
+    boundaries: task.boundaries,
+    headline: headlineFor(task, frames),
     percentOfProfile: durationMs > 0 ? round2((task.durationMs / durationMs) * 100) : 0,
     boundaryFrames: frames,
     boundaryTailCount: entries.length - shownEntries.length,
@@ -984,7 +1153,17 @@ export function selectTaskCards(
   classes: FrameClassTable,
 ): TaskCardSet {
   const { tasks, boundaries } = taskSet;
-  const byDuration = [...tasks].sort((a, b) => b.durationMs - a.durationMs || a.index - b.index);
+  // Starting the profiler stops the world for as long as it takes, and the
+  // pause is billed to the task that was running. On the local trace that is
+  // 2908 ms — the third-longest block in the recording, holding 6 ms of real
+  // JS, and it reads as "no code of your own ran in this block" because that
+  // is literally true. Ranking it would spend a card telling a reader about
+  // the act of measurement.
+  const rankable = tasks.filter((task) => !task.overhead);
+  const profilerOverheadMs = round1(
+    tasks.filter((task) => task.overhead).reduce((sum, task) => sum + task.durationMs, 0),
+  );
+  const byDuration = [...rankable].sort((a, b) => b.durationMs - a.durationMs || a.index - b.index);
   const cut = Math.max(LONG_TASK_MS, TASK_SHARE_MIN * durationMs);
   const long = byDuration.filter((task) => task.durationMs >= cut);
   // Falling through to the same ranking without the floor is the insurance
@@ -995,12 +1174,13 @@ export function selectTaskCards(
   const omitted = ranked.slice(MAX_TASK_CARDS);
 
   return {
-    cards: shown.map((task) => buildCard(profile, task, boundaries, classes, durationMs)),
+    cards: shown.map((task) => buildCard(profile, task, classes, durationMs)),
     boundaries,
+    profilerOverheadMs,
     noLongTasks: long.length === 0,
     classesDegraded: classes.degraded,
     durationMs,
-    taskCount: tasks.length,
+    taskCount: rankable.length,
     omittedTaskCount: omitted.length,
     omittedTaskMs: round1(omitted.reduce((sum, task) => sum + task.durationMs, 0)),
   };

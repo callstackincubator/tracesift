@@ -28,18 +28,14 @@ import { isMeaningfulName } from "./frame-names.ts";
 import { isSourceLabel } from "./source-location.ts";
 
 /**
- * Minified identifiers the name tiers let through. `MINIFIED` in
- * `frame-names.ts` guards card titles, where one or two characters is the whole
- * question; a bundle also produces `t.A`, `n.Z` and `eK.H` — mangled member
- * paths long enough to pass that test and still naming nothing a developer can
- * search for. `eK.useMemo` is not matched: the part that identifies it survived
- * minification.
+ * A name that locates the frame by itself, needing no position beside it.
+ *
+ * This used to carry its own mangled-member-path test, because the tier rule in
+ * `frame-names.ts` tested the whole string and let `t.A` through. That rule now
+ * holds the stricter one, so the two questions have one answer again.
  */
-const MANGLED = /^(?:[_$A-Za-z][_$A-Za-z0-9]?\.)*[_$A-Za-z][_$A-Za-z0-9]?$/;
-
-/** A name that locates the frame by itself, needing no position beside it. */
 export function namesItself(name: string): boolean {
-  return isMeaningfulName(name) && !MANGLED.test(name);
+  return isMeaningfulName(name);
 }
 
 export interface FrameLocations {

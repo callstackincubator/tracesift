@@ -11,17 +11,19 @@ import {
   getAnalysisSettings,
   saveAnalysis,
 } from "@/lib/analysis";
-import { getModelSettings } from "@callstack/tracesift/runtime";
 import { summarizeCpuProfile } from "@/lib/js-profile";
 import { CpuAnalysisError } from "@/lib/cpu-analyzer";
 import { legacyEngineRequested, nodeCardEngineRequested, runLegacyCpuAnalysis } from "@/lib/legacy-cpu-analysis";
-import { classifyFrames, ruleClassTable } from "@/lib/frame-classes";
+import { ruleClassTable } from "@/lib/frame-classes";
 import { selectTaskCards } from "@/lib/task-cards";
+import { selectProfileFunctions } from "@/lib/profile-functions";
 import { AgentError } from "@/lib/pi-agent";
 import { debugLog } from "@/lib/debug-log";
 import type { AnalysisModel, Hotspot, TokenUsage } from "@/lib/analysis";
 
 const LOG = "api/analyze";
+
+const ZERO_CPU_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 };
 
 function log(...parts: unknown[]): void {
   debugLog(LOG, ...parts);
@@ -66,11 +68,12 @@ export async function POST(request: Request): Promise<Response> {
   let queriedHotspots;
   let cards;
   let parsedProfile;
+  let tree;
   let tasks;
   let legacyBottlenecks;
   try {
     const rawProfile = JSON.parse(await readFile(`${dir}/${PROFILE_FILE_NAME}`, "utf8")) as unknown;
-    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tasks, legacyBottlenecks } =
+    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tree, tasks, legacyBottlenecks } =
       summarizeCpuProfile(rawProfile, id, profile.name));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -84,32 +87,40 @@ export async function POST(request: Request): Promise<Response> {
     `profile summary: total=${Math.round(totalMs)} ms, samples=${summary.session.sampleCount}, hotspots=${queriedHotspots.total}, topSelf=${top ? `${top.functionName} (${top.selfTimeMs} ms)` : "n/a"}`
   );
 
-  // One classification pass over the distinct frames of the upload, cached by
-  // name and url. Everything a task card says about which code is whose is a
-  // lookup in this table, so the same file always produces the same cards.
-  // With no model configured it is the rule table rather than a provider call
-  // that can only fail — the same fallback a failed model already produced.
+  // One classification pass over the frames of the upload. Everything a task
+  // card says about which code is whose is a lookup in this table, and the
+  // table is rules alone — so the same file always produces the same cards,
+  // and uploading a profile costs nothing but the measurement.
   const settings = await getAnalysisSettings();
-  const modelConfigured = (await getModelSettings()).configured;
-  const classes = nodeCardEngineRequested() || !modelConfigured ? ruleClassTable() : await classifyFrames(
-    parsedProfile.nodes.map((node) => node.callFrame), dir,
-  );
+  const classes = ruleClassTable(parsedProfile.nodes.map((node) => node.callFrame));
   const taskCards = nodeCardEngineRequested()
     ? undefined
     : selectTaskCards(parsedProfile, totalMs, tasks, classes);
+  // Built here rather than in the parser because it needs the classified
+  // frames, and classification is what tells framework apart from the
+  // reader's own code.
+  const profileFunctions = selectProfileFunctions(tree, classes, totalMs);
+  log(
+    `profile functions: ${profileFunctions.functions.length} shown` +
+    `${profileFunctions.omittedCount ? `, ${profileFunctions.omittedCount} below the cut` : ""}` +
+    `${profileFunctions.functions[0] ? ` — top ${profileFunctions.functions[0].name} (${profileFunctions.functions[0].totalMs} ms total)` : ""}`
+  );
   if (taskCards) {
     log(
       `tasks: ${tasks.tasks.length} (${tasks.boundaries}) — ${taskCards.cards.length} cards` +
       `${taskCards.noLongTasks ? ", none over the long-task floor" : ""}` +
-      `${classes.degraded ? ", frame classes degraded to rules" : ""}`
+      `${taskCards.profilerOverheadMs ? `, ${taskCards.profilerOverheadMs} ms of profiler start-up excluded` : ""}` +
+      `${classes.degraded ? `, ${classes.unresolvedCount} bundled frames unresolved` : ""}`
     );
   }
 
   // `TRACESIFT_CPU_ENGINE=legacy` runs the engine cards replace, so a suspicious
   // profile can be checked against it.
   let legacyHotspots: Hotspot[] = [];
-  let usage: TokenUsage = classes.usage;
-  let model: AnalysisModel | undefined = classes.model;
+  // Zero unless the legacy engine below runs: the measured path never calls a
+  // model, so a CPU upload reports no spend and the results header says so.
+  let usage: TokenUsage = ZERO_CPU_USAGE;
+  let model: AnalysisModel | undefined;
   if (legacyEngineRequested()) {
     const groups = legacyBottlenecks();
     log(`TRACESIFT_CPU_ENGINE=legacy — running the previous engine over ${groups.length} groups`);
@@ -141,6 +152,7 @@ export async function POST(request: Request): Promise<Response> {
     totalMs,
     hotspots: legacyHotspots,
     taskCards,
+    profileFunctions,
     cards: cards.cards,
     callCountIsExact: cards.callCountIsExact,
     reactIssues: [],
@@ -170,6 +182,7 @@ export async function POST(request: Request): Promise<Response> {
     saved,
     totalMs,
     taskCards,
+    profileFunctions,
     cards: clientCards(cards.cards),
     callCountIsExact: cards.callCountIsExact,
     hotspots: clientHotspots(legacyHotspots),

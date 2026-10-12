@@ -96,6 +96,13 @@ export function TaskContribution({
         )}
       </p>
 
+      {/* Once a feature is open the chart below divides it by self time, which
+          cannot name a frame that delegated its work — so the frames it called
+          belong beside the sentence that just promised to say how it divides,
+          not in the detail panel under it, which is describing one of the
+          functions inside it rather than the feature itself. */}
+      {open?.inside?.length ? <NestedRows boundary={open} onExplore={onFocus} /> : null}
+
       <ContributionChart kind={kind} {...chart} />
 
       <SliceDetail card={card} open={open} slice={active} onOpen={() => activate(active)} onExplore={onFocus} />
@@ -133,6 +140,85 @@ function residualText(open: BoundaryFrame | null, slice: ContributionSlice): str
  * It keeps a fixed footprint whichever slice is showing, so hovering across a
  * bar does not make the page jump under the cursor.
  */
+/**
+ * Rows past this are a list rather than an answer, and the panel they sit in
+ * has to keep roughly the height it had before the reader hovered.
+ */
+const MAX_DETAIL_NESTED = 3;
+
+/**
+ * Below this the residual is rounding and a line about it is noise; at or above
+ * it the rows are a minority of the frame and have to say so. A frame that
+ * delegates cleanly sits at 0-2% and stays silent; `run` on the local trace is
+ * 78% and would otherwise show five small rows as if they were the answer.
+ */
+const MIN_NESTED_RESIDUAL = 0.1;
+
+/**
+ * Where a feature's time went, one band down.
+ *
+ * The chart beside this divides the feature by self time, which is the right
+ * ranking for "what do I change" and structurally cannot name a frame that
+ * delegates — so on a React profile the component band was the last thing the
+ * card could say about itself. These rows are the other half: the frames the
+ * feature *called*, by inclusive time, with the wrappers between folded into
+ * the path. `useSearchTypeMenuSections` is 629 ms of the local trace's longest
+ * task and appears in no culprit list in the recording; this is where a reader
+ * finds it.
+ *
+ * Inclusive time against a self-time chart is two decompositions of one whole,
+ * which the rest of this view is careful never to do. It is not one here
+ * because only one of them is drawn: the chart is the partition, and these are
+ * a path into it.
+ */
+function NestedRows({
+  boundary,
+  onExplore,
+}: {
+  boundary: BoundaryFrame;
+  onExplore: (nodeId: string) => void;
+}) {
+  const frames = boundary.inside ?? [];
+  const shown = frames.slice(0, MAX_DETAIL_NESTED);
+  const rest = frames.length - shown.length;
+  // What these rows do not account for: the frame's own body, the branches too
+  // small to name, and the ones that never reached a frame worth naming at all.
+  // Rows that stop at 22% of a frame with no mark for the other 78% read as the
+  // whole answer, which is the one thing this list must not do — `run` on the
+  // local trace is exactly that shape.
+  const claimed = frames.reduce((sum, frame) => sum + frame.totalMs, 0);
+  const residualMs = Math.max(0, boundary.totalMs - claimed);
+  const residual = boundary.totalMs > 0 && residualMs / boundary.totalMs >= MIN_NESTED_RESIDUAL ? residualMs : 0;
+  return (
+    <div className="contribution-nested">
+      <p className="contribution-nested-label">what it called</p>
+      <ul className="contribution-nested-list">
+        {shown.map((frame) => (
+          <li key={frame.nodeId}>
+            <button
+              type="button"
+              className="contribution-nested-row"
+              onClick={() => onExplore(frame.nodeId)}
+              title={`${frame.name} — ${frame.shapeText}`}
+            >
+              <span className="contribution-nested-name">{frame.name}</span>
+              <span className="contribution-nested-ms">{formatMs(frame.totalMs)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {rest > 0 || residual > 0 ? (
+        <p className="contribution-nested-rest">
+          {rest > 0 ? `${rest === 1 ? "1 more frame" : `${rest} more frames`} below it. ` : null}
+          {residual > 0
+            ? `${formatMs(residual)} of ${boundary.name} is not in this list — its own body, and branches that reached nothing worth naming.`
+            : null}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function SliceDetail({
   card,
   open,
@@ -195,6 +281,10 @@ function SliceDetail({
       ) : (
         <p className="contribution-detail-shape">{residualText(open, slice)}</p>
       )}
+
+      {slice.boundary?.inside?.length ? (
+        <NestedRows boundary={slice.boundary} onExplore={onExplore} />
+      ) : null}
 
       <div className="contribution-detail-actions">
         <button type="button" className="contribution-detail-open" onClick={onOpen}>

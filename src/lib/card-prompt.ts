@@ -38,6 +38,16 @@ const round1 = (value: number) => Math.round(value * 10) / 10;
  */
 const MAX_PROMPT_CULPRITS = 25;
 
+/**
+ * Frames a boundary line names underneath itself. Eight boundary frames times
+ * the whole nested set would turn one section into a tree; three is the fork a
+ * reader has to know about, and the rest is reported as a count.
+ */
+const MAX_PROMPT_NESTED = 3;
+
+/** Below this the unaccounted remainder is rounding, and a clause about it is noise. */
+const MIN_PROMPT_RESIDUAL = 0.1;
+
 /** The classes a frame can be named by: a reader acts on their own code and their dependencies. */
 const DRAWABLE = new Set<FrameClass>(SHOWN_CLASSES);
 
@@ -86,7 +96,34 @@ function boundaryLine(frame: BoundaryFrame, taskMs: number, locate: Locator): st
     ? ` Ran ${frame.invocations} times, longest single call ${frame.longestCallMs} ms.`
     : " Ran once.";
   const own = frame.selfMs >= 1 ? ` ${frame.selfMs} ms of it in this frame's own body.` : "";
-  return `- \`${frame.name}\`${where} — ${frame.totalMs} ms including everything it called${share}.${shape}${own}`;
+  return `- \`${frame.name}\`${where} — ${frame.totalMs} ms including everything it called${share}.${shape}${own}${nestedClause(frame)}`;
+}
+
+/**
+ * What the frame called, for a reader that cannot see the chart.
+ *
+ * A boundary frame on a React profile delegates everything, so the two lines
+ * above describe a component and then report that none of the time was its
+ * own — which leaves the model to guess what was underneath it. The culprit
+ * section further down lists frames by self time and structurally omits every
+ * delegating frame between the two, so without this the chain from a component
+ * to the work it caused is simply absent from the hand-off.
+ */
+function nestedClause(frame: BoundaryFrame): string {
+  const inside = frame.inside?.slice(0, MAX_PROMPT_NESTED) ?? [];
+  if (inside.length === 0) return "";
+  const parts = inside.map((nested) => `\`${nested.name}\` (${nested.totalMs} ms)`);
+  const rest = (frame.inside?.length ?? 0) - inside.length;
+  const more = rest > 0 ? `, and ${rest} smaller` : "";
+  // The rows are an antichain, so what they leave is a real figure rather than
+  // an overlap — and without it the list reads as the whole of the frame when
+  // it can be a sixth of it.
+  const claimed = (frame.inside ?? []).reduce((sum, nested) => sum + nested.totalMs, 0);
+  const residual = Math.max(0, Math.round((frame.totalMs - claimed) * 10) / 10);
+  const left = frame.totalMs > 0 && residual / frame.totalMs >= MIN_PROMPT_RESIDUAL
+    ? ` The other ${residual} ms was its own body and branches that reached no named frame.`
+    : "";
+  return ` It spent that time in ${parts.join(", ")}${more}.${left}`;
 }
 
 function selfRecursive(culprit: TaskCulprit): boolean {

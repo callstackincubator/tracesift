@@ -1,12 +1,26 @@
-import { groupBottlenecks, type Bottleneck } from "./bottlenecks";
-import { buildCallTree } from "./call-tree";
-import { selectCards, type CardSelection } from "./profile-cards";
-import { extractFromDurationTrace } from "./hermes-duration-profile";
-import { attachMeasuredTasks, extractTasks, runTaskIntervals, threadKey, type TaskSet } from "./tasks";
-import { normalizeProfile } from "@/app/js-profiler/normalize";
-import { queryHotspots, querySummary } from "@/app/js-profiler/query";
-import type { CdpCallFrame, CdpProfile, CdpProfileNode, JsHotspotsResult, JsProfileSummary } from "@/app/js-profiler/types";
-
+import { groupBottlenecks, type Bottleneck } from "./bottlenecks.ts";
+import { buildCallTree, type CallTree } from "./call-tree.ts";
+import { selectCards, type CardSelection } from "./profile-cards.ts";
+import { extractFromDurationTrace } from "./hermes-duration-profile.ts";
+import {
+  attachMeasuredTasks,
+  attachProfilerOverhead,
+  extractTasks,
+  idleNodeIds,
+  profilerOverheadIntervals,
+  runTaskIntervals,
+  threadKey,
+  type TaskSet,
+} from "./tasks.ts";
+import { normalizeProfile } from "../app/js-profiler/normalize.ts";
+import { queryHotspots, querySummary } from "../app/js-profiler/query.ts";
+import type {
+  CdpCallFrame,
+  CdpProfile,
+  CdpProfileNode,
+  JsHotspotsResult,
+  JsProfileSummary,
+} from "../app/js-profiler/types.ts";
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -154,9 +168,14 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
     }
   }
 
+  // Counted once per profile rather than once per comparison. It is a scan of
+  // every sample, and inside a comparator `sort` pays for it O(n log n) times —
+  // on a 60 MB trace that is a quarter of a million samples re-walked to decide
+  // each pair.
   const assembled = [...profiles.values()]
     .filter((acc) => acc.nodes.size > 0)
-    .sort((a, b) => activeSampleCount(b) - activeSampleCount(a))[0];
+    .map((acc) => ({ acc, active: activeSampleCount(acc) }))
+    .sort((a, b) => b.active - a.active)[0]?.acc;
 
   if (!assembled) {
     const durationProfile = extractFromDurationTrace(events);
@@ -183,7 +202,11 @@ function extractFromTrace(raw: unknown): CdpProfile | null {
   // thread it recorded, and the browser's other threads ran their own tasks
   // against a clock these samples know nothing about.
   const tasks = runTaskIntervals(events).get(assembled.threadKey);
-  return tasks && tasks.length > 0 ? attachMeasuredTasks(profile, tasks) : profile;
+  const withTasks = tasks && tasks.length > 0 ? attachMeasuredTasks(profile, tasks) : profile;
+  // Same reasoning for the profiler's own pauses: they are billed to the thread
+  // that was stopped, and only this one's samples are affected by them.
+  const overhead = profilerOverheadIntervals(events).get(assembled.threadKey);
+  return overhead && overhead.length > 0 ? attachProfilerOverhead(withTasks, overhead) : withTasks;
 }
 
 interface TraceProfileAcc {
@@ -222,12 +245,22 @@ function profileKey(event: Record<string, unknown>): string {
   return `${event.pid ?? ""}:${event.id ?? ""}`;
 }
 
-// Idle-heavy profiles (e.g. a service worker) can have the most samples while
-// doing almost no work; rank by samples that hit something other than idle.
+/**
+ * Idle-heavy profiles (e.g. a service worker) can have the most samples while
+ * doing almost no work; rank by samples that hit something other than idle.
+ *
+ * Idle is `idleNodeIds`' definition rather than a local one, so a sample is
+ * counted the same way here as it is everywhere downstream. This used to test
+ * the sampled node's own name, which calls a sample landing *under* an `(idle)`
+ * frame active while the task splitter and the call tree both call it idle.
+ * V8 emits `(idle)` as a childless frame, so no trace to hand shows the
+ * difference — the three only have to agree the moment one does.
+ */
 function activeSampleCount(acc: TraceProfileAcc): number {
+  const idle = idleNodeIds([...acc.nodes.values()]);
   let count = 0;
   for (const id of acc.samples) {
-    if (acc.nodes.get(id)?.callFrame.functionName !== "(idle)") count++;
+    if (!idle.has(id)) count++;
   }
   return count;
 }
@@ -279,6 +312,13 @@ export function summarizeCpuProfile(
    * back is not an option.
    */
   profile: CdpProfile;
+  /**
+   * The merged call tree for the whole recording. Returned because the
+   * per-function view is built from it and that has to happen after the frames
+   * have been classified — a step this function knows nothing about — and
+   * because re-walking a profile of this size to get it back is not free.
+   */
+  tree: CallTree;
   /** The recording cut into tasks, which is the unit a card is built on. */
   tasks: TaskSet;
   cards: CardSelection;
@@ -303,12 +343,15 @@ export function summarizeCpuProfile(
   });
   const durationMs = session.durationMs;
 
+  const tree = buildCallTree(profile, durationMs, { callCountIsExact: recordsInvocations(profile) });
+
   return {
     summary: querySummary(session),
+    tree,
     profile,
     tasks: extractTasks(profile),
     legacyBottlenecks: () => groupBottlenecks(profile, durationMs),
-    cards: selectCards(buildCallTree(profile, durationMs, { callCountIsExact: recordsInvocations(profile) })),
+    cards: selectCards(tree),
     hotspots: queryHotspots(session, {
       limit: 20,
       offset: 0,

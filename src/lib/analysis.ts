@@ -7,6 +7,7 @@ import path from "node:path";
 import type { Bottleneck } from "./bottlenecks";
 import type { ProfileCard } from "./profile-cards";
 import type { TaskCardSet } from "./task-cards";
+import type { ProfileFunctionSet } from "./profile-functions";
 import { normalizeStoredReactIssues, type ReactIssue } from "./react-analyzer.ts";
 import type { ReactCardSet } from "./react-cards";
 import type { ReactExplore } from "./react-explore";
@@ -115,6 +116,12 @@ export interface AnalysisRecord {
   taskCards?: TaskCardSet;
   /** Deterministic call-tree cards, the engine task cards replace. */
   cards?: ProfileCard[];
+  /**
+   * The same recording merged into one row per function, which is the figure
+   * another flame-graph tool reports and the task cards by construction cannot.
+   * Optional because analyses saved before it existed do not carry it.
+   */
+  profileFunctions?: ProfileFunctionSet;
   /** Whether this profile's call counts are real invocations rather than call sites. */
   callCountIsExact?: boolean;
   /** Durable history metadata. Raw profile uploads are deliberately never stored here. */

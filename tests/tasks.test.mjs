@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCallTree, preOrder } from '../src/lib/call-tree.ts';
-import { attachMeasuredTasks, extractTasks, invocationShapes, runTaskIntervals, taskProfile } from '../src/lib/tasks.ts';
+import { attachMeasuredTasks, attachProfilerOverhead, extractTasks, invocationShapes, profilerOverheadIntervals, runTaskIntervals, taskProfile } from '../src/lib/tasks.ts';
 import { extractFromDurationTrace } from '../src/lib/hermes-duration-profile.ts';
 
 const node = (id, name, children = [], url = 'app.js', line = 0) => ({
@@ -145,4 +145,134 @@ test('each top-level pair of a Hermes duration trace is already a task', () => {
   const { tasks, boundaries } = extractTasks(hermes);
   assert.equal(boundaries, 'measured');
   assert.deepEqual(tasks.map((task) => Math.round(task.durationMs)), [5, 2]);
+});
+
+test('a RunTask still running when the trace stopped is recovered, not dropped', () => {
+  // Chrome flushes a finished task as `X` with a duration and a task still on
+  // the stack as a bare `B`. The local 16.7 s trace ends inside one: the
+  // renderer's last RunTask opens at 11.4 s and never closes, and dropping it
+  // left 5.2 s of application work — a third of the samples — in no task.
+  const byThread = runTaskIntervals([
+    { name: 'RunTask', ph: 'X', ts: 1000, dur: 1000, pid: 1, tid: 1 },
+    { name: 'RunTask', ph: 'B', ts: 2000, pid: 1, tid: 1 },
+    // Any later event on the thread bounds the open task, not just a RunTask.
+    { name: 'FunctionCall', ph: 'X', ts: 7000, dur: 500, pid: 1, tid: 1 },
+  ]);
+  assert.deepEqual(byThread.get('1:1'), [
+    { ts: 1000, dur: 1000 },
+    { ts: 2000, dur: 5000, truncated: true },
+  ]);
+});
+
+test('an open RunTask with nothing after it on its thread is left alone', () => {
+  // There is no evidence of how long it ran, and a zero-length task is noise.
+  const byThread = runTaskIntervals([{ name: 'RunTask', ph: 'B', ts: 2000, pid: 1, tid: 1 }]);
+  assert.equal(byThread.get('1:1'), undefined);
+});
+
+test('a truncated task keeps its measured start but not the claim on its duration', () => {
+  const raw = attachMeasuredTasks(profile(nodes, [1, 2, 3, 1, 2]), [
+    { ts: 2000, dur: 2000 },
+    { ts: 4000, dur: 3000, truncated: true },
+  ]);
+  const { tasks, boundaries } = extractTasks(raw);
+  // The set still counts as measured: the tracer did supply real boundaries.
+  assert.equal(boundaries, 'measured');
+  assert.deepEqual(tasks.map((task) => task.boundaries), ['measured', 'inferred']);
+});
+
+test('samples the tracer stopped covering become an inferred task rather than vanishing', () => {
+  // Eight samples, one measured task over the first three. Before this the
+  // remaining five were read by nothing at all: every card is built from a
+  // task, so a function's time was reported as whatever part of it happened to
+  // land inside a measured window.
+  const raw = attachMeasuredTasks(profile(nodes, [1, 2, 3, 1, 2, 3, 1, 2]), [{ ts: 2000, dur: 3000 }]);
+  const { tasks } = extractTasks(raw);
+  assert.deepEqual(tasks.map((task) => [task.boundaries, task.firstSample, task.endSample]), [
+    ['measured', 0, 3],
+    ['inferred', 3, 8],
+  ]);
+  // Indices are reassigned in time order, so `task-N` still addresses the Nth
+  // block of the recording.
+  assert.deepEqual(tasks.map((task) => task.index), [0, 1]);
+});
+
+test('a gap between two measured tasks is recovered, and idle inside it still splits', () => {
+  const raw = attachMeasuredTasks(profile(nodes, [1, 1, 4, 1, 1, 1]), [
+    { ts: 2000, dur: 1000 },
+    { ts: 7000, dur: 1000 },
+  ]);
+  const { tasks } = extractTasks(raw);
+  // Samples sit at 2000…7000 µs: task one takes sample 0, task two sample 5,
+  // and samples 1–4 are the gap. Sample 2 is `(idle)`, so the gap yields one
+  // run — samples 3–4 — because a single sample spans no time.
+  assert.deepEqual(tasks.map((task) => [task.boundaries, task.firstSample, task.endSample]), [
+    ['measured', 0, 1],
+    ['inferred', 3, 5],
+    ['measured', 5, 6],
+  ]);
+});
+
+test('a sample landing between two measured tasks is a seam, not a task', () => {
+  // The tracer's own boundaries leave microseconds unclaimed and samples fall
+  // into them: the local trace has 203 such runs. Each spans no time, and
+  // admitting them would bury the real gaps under zero-millisecond cards.
+  // Samples sit at 2000, 3000, 4000, 5000 µs. The first task ends at 2500 and
+  // the second opens at 4000, so the sample at 3000 belongs to neither.
+  const raw = attachMeasuredTasks(profile(nodes, [1, 2, 3, 1]), [
+    { ts: 2000, dur: 500 },
+    { ts: 4000, dur: 2000 },
+  ]);
+  const { tasks } = extractTasks(raw);
+  assert.deepEqual(tasks.map((task) => [task.boundaries, task.firstSample, task.endSample]), [
+    ['measured', 0, 1],
+    ['measured', 2, 4],
+  ]);
+});
+
+
+test('the profiler starting itself is read off the trace, per thread', () => {
+  const byThread = profilerOverheadIntervals([
+    { name: 'CpuProfiler::StartProfiling', ph: 'X', ts: 1000, dur: 2000, pid: 1, tid: 1 },
+    { name: 'CpuProfiler::StopProfiling', ph: 'X', ts: 9000, dur: 500, pid: 1, tid: 1 },
+    { name: 'CpuProfiler::StartProfiling', ph: 'X', ts: 1000, dur: 7000, pid: 1, tid: 2 },
+    // No duration to bill, so nothing to exclude.
+    { name: 'CpuProfiler::StartProfiling', ph: 'X', ts: 1000, pid: 1, tid: 3 },
+    { name: 'RunTask', ph: 'X', ts: 1000, dur: 2000, pid: 1, tid: 1 },
+  ]);
+  assert.deepEqual(byThread.get('1:1'), [{ ts: 1000, dur: 2000 }, { ts: 9000, dur: 500 }]);
+  assert.deepEqual(byThread.get('1:2'), [{ ts: 1000, dur: 7000 }]);
+  assert.equal(byThread.get('1:3'), undefined);
+});
+
+test('a task that was mostly the profiler starting up is marked as the tracer\'s own', () => {
+  // Switching a CPU profiler on stops the world, and V8 bills the pause to
+  // whichever task was running. On the local trace that is a 2908 ms block
+  // holding 6 ms of real JS — the recording's third largest, and entirely an
+  // artefact of measuring it.
+  const raw = attachProfilerOverhead(
+    attachMeasuredTasks(profile(nodes, [1, 2, 3, 1, 2, 3], 1000), [
+      { ts: 2000, dur: 3000 },
+      { ts: 5000, dur: 3000 },
+    ]),
+    [{ ts: 2000, dur: 2900 }],
+  );
+  const { tasks } = extractTasks(raw);
+  assert.deepEqual(tasks.map((task) => Boolean(task.overhead)), [true, false]);
+});
+
+test('a task the profiler only clipped is still the app\'s work', () => {
+  // The pause has to be most of the block before the block stops being about
+  // the app: a task that merely overlaps one still ran the reader's code.
+  const raw = attachProfilerOverhead(
+    attachMeasuredTasks(profile(nodes, [1, 2, 3, 1, 2, 3], 1000), [{ ts: 2000, dur: 6000 }]),
+    [{ ts: 2000, dur: 1000 }],
+  );
+  const { tasks } = extractTasks(raw);
+  assert.deepEqual(tasks.map((task) => Boolean(task.overhead)), [false]);
+});
+
+test('a trace that never names the profiler leaves every task alone', () => {
+  const raw = attachMeasuredTasks(profile(nodes, [1, 2, 3], 1000), [{ ts: 2000, dur: 3000 }]);
+  assert.deepEqual(extractTasks(raw).tasks.map((task) => task.overhead), [undefined]);
 });
