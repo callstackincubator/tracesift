@@ -9,6 +9,7 @@ import type { ReactCard } from "@/lib/react-cards";
 import { shortLocationLabel } from "@/lib/source-location";
 import {
   ContributionChart,
+  ContributionDetailStack,
   SliceLegend,
   sliceColor,
   type ContributionChartKind,
@@ -62,7 +63,11 @@ export function ReactContribution({
 
       <ContributionChart kind={kind} {...chart} />
 
-      <ReactSliceDetail card={card} slice={active} onExplore={onExplore} />
+      <ContributionDetailStack
+        slices={slices}
+        active={active}
+        render={(slice) => <ReactSliceDetail card={card} slice={slice} onExplore={onExplore} />}
+      />
 
       <SliceLegend {...chart} />
     </div>
