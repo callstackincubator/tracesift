@@ -49,15 +49,30 @@ export async function waitForReady(proc, url, instance, timeout = 60000) {
   }
   throw new Error('The web server did not become ready within 60 seconds. See the server logs above.');
 }
-export function openBrowser(url, spawnProcess = spawn) {
+export function openBrowser(url, spawnProcess = spawn, launchTimeoutMs = 1000) {
   // Browser lifetime is independent of the terminal and server process group.
   const failed = () => console.log(`Could not open a browser. Open ${url} manually.`);
   try {
     const browser = spawnProcess(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { stdio: 'ignore', detached: true });
-    browser.once('error', failed);
-    browser.once('exit', code => { if (code !== 0 && code !== null) failed(); });
-    browser.unref();
-  } catch { failed(); }
+    return new Promise(resolve => {
+      let settled = false;
+      let timeout;
+      const finish = opened => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        browser.unref();
+        resolve(opened);
+      };
+      timeout = setTimeout(() => finish(true), launchTimeoutMs);
+      browser.once('error', () => { failed(); finish(false); });
+      browser.once('exit', code => {
+        const opened = code === 0 || code === null;
+        if (!opened) failed();
+        finish(opened);
+      });
+    });
+  } catch { failed(); return Promise.resolve(false); }
 }
 export async function start({ home = getHome(), port = 3000, open = true } = {}) {
   const release = await readRelease();

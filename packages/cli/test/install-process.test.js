@@ -186,17 +186,33 @@ test('SIGTERM reaches the supervised child and the runner exits nonzero', async 
 });
 
 
-test('browser launch detaches and handles opening failures without stopping the server', () => {
+test('browser launch stays referenced until the opener settles', async () => {
   const browser = new EventEmitter();
   let detached = false;
   browser.unref = () => { detached = true; };
-  openBrowser('http://127.0.0.1:3000', (_command, args, options) => {
+  const opening = openBrowser('http://127.0.0.1:3000', (_command, args, options) => {
     assert.deepEqual(args, ['http://127.0.0.1:3000']);
     assert.equal(options.detached, true);
     return browser;
   });
-  assert(detached);
-  assert.doesNotThrow(() => browser.emit('error', new Error('missing opener')));
+  assert.equal(detached, false);
+  browser.emit('exit', 0);
+  assert.equal(await opening, true);
+  assert.equal(detached, true);
+});
+
+test('browser launch handles failures and bounded long-running openers', async () => {
+  const failedBrowser = new EventEmitter();
+  failedBrowser.unref = () => {};
+  const failed = openBrowser('http://127.0.0.1:3000', () => failedBrowser);
+  failedBrowser.emit('error', new Error('missing opener'));
+  assert.equal(await failed, false);
+
+  const longRunningBrowser = new EventEmitter();
+  let detached = false;
+  longRunningBrowser.unref = () => { detached = true; };
+  assert.equal(await openBrowser('http://127.0.0.1:3000', () => longRunningBrowser, 1), true);
+  assert.equal(detached, true);
 });
 
 test('the server heap is sized from physical memory and yields to an explicit NODE_OPTIONS', () => {

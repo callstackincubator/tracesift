@@ -6,11 +6,15 @@ Managed local AI-assisted CPU profile analysis. Requires macOS or Linux and Node
 npm install -g @callstack/tracesift
 tracesift init
 tracesift start
+tracesift explore /path/to/analysis.json --task 0
+tracesift explore /path/to/react-analysis.json --commit 1.2
 ```
 
 `init` downloads the immutable, platform-specific web app archive selected by your CLI release, verifies its size and SHA-256 checksum, and installs it locally. It needs internet access to fetch the release artifact. Supported targets are macOS and Linux on arm64 or x64.
 
 `start` serves the production app on `127.0.0.1:3000`, opens the browser after readiness, and keeps server logs in your terminal. Use `--port 3001` or `--no-open` as needed. Ctrl+C stops the server. Configure the provider, authentication method, and model through **Analysis settings** in the web interface. OpenAI and Callstack use API keys; ChatGPT Codex uses Plus/Pro subscription OAuth; Anthropic supports Claude OAuth or an API key. Codex offers browser or device-code sign-in. PI OAuth is experimental, and Claude extra usage may be billed separately. Model changes apply immediately, without restarting the server. No billable validation request is made; provider availability and account access are checked on the first analysis.
+
+`explore` opens a CPU task or React commit from a compact TraceSift analysis file in the running local web app. Use `--task <index>` for a CPU task, optionally with `--focus <node-id>`, or `--commit <root-id>.<commit-index>` for a React commit. The analysis file carries the measured card and selection metadata; full Explore data remains in the local TraceSift service and does not pass through the invoking integration.
 
 ## Local integrations
 
