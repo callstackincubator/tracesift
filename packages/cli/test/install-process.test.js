@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import { downloadArtifact, install, validateRelease, verifyInstallation } from '../src/install.js';
 import { acquireLock, launch, alive, run } from '../src/process.js';
 import { parsePort, assertPortAvailable, waitForReady, openBrowser, heapLimitMb, serverNodeArgs } from '../src/start.js';
+import { removeServiceDescriptor, writeServiceDescriptor } from '../src/service.js';
 
 async function home(t) { const dir = await mkdtemp(join(tmpdir(), 'tracesift-test-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 const bytes = Buffer.from('fake artifact');
@@ -93,6 +94,19 @@ test('lock excludes parallel operations and recovers stale ownership', async t =
   assert.deepEqual(await readdir(dir), []);
 });
 
+test('service descriptors are private, atomic, and removed only by their owner', async t => {
+  const dir = await home(t);
+  const descriptor = { version: '0.1.0', apiVersion: 1, pid: 1, childPid: 2, instance: 'owned', baseUrl: 'http://127.0.0.1:3000', token: 'secret', startedAt: 10 };
+  await writeServiceDescriptor(dir, descriptor);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'service.json'), 'utf8')), descriptor);
+  assert.equal((await stat(join(dir, 'service.json'))).mode & 0o777, 0o600);
+  assert.deepEqual(await readdir(dir), ['service.json']);
+  await removeServiceDescriptor(dir, 'different');
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'service.json'), 'utf8')), descriptor);
+  await removeServiceDescriptor(dir, 'owned');
+  assert.deepEqual(await readdir(dir), []);
+});
+
 test('process supervisor stops child group and reports command errors', async () => {
   const proc = launch(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   assert(alive(proc.child.pid));
@@ -172,17 +186,33 @@ test('SIGTERM reaches the supervised child and the runner exits nonzero', async 
 });
 
 
-test('browser launch detaches and handles opening failures without stopping the server', () => {
+test('browser launch stays referenced until the opener settles', async () => {
   const browser = new EventEmitter();
   let detached = false;
   browser.unref = () => { detached = true; };
-  openBrowser('http://127.0.0.1:3000', (_command, args, options) => {
+  const opening = openBrowser('http://127.0.0.1:3000', (_command, args, options) => {
     assert.deepEqual(args, ['http://127.0.0.1:3000']);
     assert.equal(options.detached, true);
     return browser;
   });
-  assert(detached);
-  assert.doesNotThrow(() => browser.emit('error', new Error('missing opener')));
+  assert.equal(detached, false);
+  browser.emit('exit', 0);
+  assert.equal(await opening, true);
+  assert.equal(detached, true);
+});
+
+test('browser launch handles failures and bounded long-running openers', async () => {
+  const failedBrowser = new EventEmitter();
+  failedBrowser.unref = () => {};
+  const failed = openBrowser('http://127.0.0.1:3000', () => failedBrowser);
+  failedBrowser.emit('error', new Error('missing opener'));
+  assert.equal(await failed, false);
+
+  const longRunningBrowser = new EventEmitter();
+  let detached = false;
+  longRunningBrowser.unref = () => { detached = true; };
+  assert.equal(await openBrowser('http://127.0.0.1:3000', () => longRunningBrowser, 1), true);
+  assert.equal(detached, true);
 });
 
 test('the server heap is sized from physical memory and yields to an explicit NODE_OPTIONS', () => {

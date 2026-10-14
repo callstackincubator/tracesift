@@ -11,6 +11,8 @@
  * and the detail panel that says what one slice is.
  */
 
+import type { ReactNode } from "react";
+
 import { squarify } from "@/lib/contribution";
 
 /**
@@ -80,6 +82,42 @@ export interface ChartProps<S extends ChartSlice> {
   format: MsFormat;
   onHover: (key: string | null) => void;
   onOpen: (slice: S) => void;
+}
+
+/**
+ * Keeps the card's footprint stable while the active slice changes.
+ *
+ * Rendering only the active detail lets differently-sized answers move the
+ * legend below them. A stationary pointer can then leave the row it just
+ * entered, reset the active slice, and move that row back under itself in a
+ * loop. Keeping every answer in the same grid cell makes the tallest one set
+ * the height while only the active answer is visible and interactive.
+ */
+export function ContributionDetailStack<S extends ChartSlice>({
+  slices,
+  active,
+  render,
+}: {
+  slices: S[];
+  active: S;
+  render: (slice: S) => ReactNode;
+}) {
+  return (
+    <div className="contribution-detail-stack">
+      {slices.map((slice) => {
+        const selected = slice.key === active.key;
+        return (
+          <div
+            key={slice.key}
+            className={`contribution-detail-layer${selected ? " is-active" : ""}`}
+            aria-hidden={selected ? undefined : true}
+          >
+            {render(slice)}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const sliceLabel = (slice: ChartSlice, format: MsFormat) =>

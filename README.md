@@ -165,6 +165,16 @@ Select **Guide** for built-in, step-by-step instructions for capturing and analy
 
 <img src="https://raw.githubusercontent.com/callstackincubator/tracesift/main/assets/guides.png" alt="How to use"/>
 
+## Open a card from the command line
+
+`tracesift explore <analysis-path> --task 0` (or `--commit 1.2`) opens that card's full Explore view — timeline, flame graph, call tree — in your browser, optionally focused on one function with `--focus <node-id>`. `<analysis-path>` can be any saved analysis file, such as one from your local **Analyses** history, not only one produced by an integration. Clicking **Explore** on a card in the web app remains the quicker way to get there; the command is for scripting that same jump, for example from an editor or agent.
+
+## Local integrations
+
+While `tracesift start` is running, agent integrations such as the Codex plugin can drive TraceSift without going through the browser: an authenticated, loopback-only Integration API analyzes an uploaded profile and hands off a card's investigation prompt.
+
+See [Local integrations](packages/cli/CLI.md#local-integrations) in the CLI documentation for the service descriptor, endpoints, and authentication details.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, manual testing, automated checks, and testing the managed CLI installation.

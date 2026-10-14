@@ -13,6 +13,7 @@ import { shortLocationLabel } from "@/lib/source-location";
 import { BOUNDARY_MIN_SHARE, type BoundaryFrame, type TaskCard } from "@/lib/task-cards";
 import {
   ContributionChart,
+  ContributionDetailStack,
   SliceLegend,
   sliceColor,
   type ContributionChartKind,
@@ -105,7 +106,13 @@ export function TaskContribution({
 
       <ContributionChart kind={kind} {...chart} />
 
-      <SliceDetail card={card} open={open} slice={active} onOpen={() => activate(active)} onExplore={onFocus} />
+      <ContributionDetailStack
+        slices={slices}
+        active={active}
+        render={(slice) => (
+          <SliceDetail card={card} open={open} slice={slice} onOpen={() => activate(slice)} onExplore={onFocus} />
+        )}
+      />
 
       <SliceLegend {...chart} />
     </div>

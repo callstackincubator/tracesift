@@ -11,6 +11,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root = resolve(import.meta.dirname, '..');
 const keepOpen = process.argv.includes('--keep-open');
+const persistentHome = process.env.TRACE_SIFT_LOCAL_HOME
+  ? resolve(process.env.TRACE_SIFT_LOCAL_HOME)
+  : undefined;
+const cliPointer = process.env.TRACE_SIFT_LOCAL_CLI_POINTER
+  ? resolve(process.env.TRACE_SIFT_LOCAL_CLI_POINTER)
+  : undefined;
 const unknown = process.argv.slice(2).filter(arg => arg !== '--keep-open');
 if (unknown.length) {
   console.error('Usage: node scripts/test-local-release.mjs [--keep-open]');
@@ -141,7 +147,11 @@ try {
   await run('npm', ['install', '--prefix', prefix, '--ignore-scripts', '--no-audit', '--no-fund', join(temp, tarballName)], { cwd: temp });
 
   const cli = join(prefix, 'node_modules', '@callstack', 'tracesift', 'src', 'cli.js');
-  const home = join(temp, 'home');
+  const cliBin = join(prefix, 'node_modules', '.bin', 'tracesift');
+  const help = await run(cliBin, ['--help'], { cwd: temp });
+  if (!help.includes('tracesift explore <analysis-path>')) throw new Error('The packaged CLI does not include the Explore command');
+  if (cliPointer) await writeFile(cliPointer, `${cliBin}\n`, { mode: 0o600 });
+  const home = persistentHome ?? join(temp, 'home');
   const env = { ...process.env, TRACE_SIFT_HOME: home };
   await run(process.execPath, [cli, 'init'], { cwd: temp, env });
   const installed = join(home, 'app', '.tracesift-install.json');
@@ -168,5 +178,6 @@ try {
 } finally {
   await stopChild(started);
   if (artifactServer) await artifactServer.close();
+  if (cliPointer) await rm(cliPointer, { force: true });
   if (temp) await rm(temp, { recursive: true, force: true });
 }
