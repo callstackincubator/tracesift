@@ -1,5 +1,11 @@
 # @callstack/tracesift
 
+## 0.5.0
+
+### Minor Changes
+
+- c035706: Add `tracesift explore <analysis-path>` with task and function-focus selection for local integrations.
+
 ## 0.4.1
 
 ### Patch Changes
