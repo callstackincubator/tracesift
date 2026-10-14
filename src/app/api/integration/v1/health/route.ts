@@ -1,4 +1,4 @@
-import { authorizeIntegrationRequest, INTEGRATION_API_VERSION } from "../../../../../lib/integration-api.ts";
+import { authorizeIntegrationRequest, INTEGRATION_API_VERSION } from "@/lib/integration-api";
 
 export const dynamic = "force-dynamic";
 

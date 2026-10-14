@@ -44,6 +44,15 @@ export function parseCommit(value) {
   return { rootId, commitIndex };
 }
 
+async function openExplore(home, fetchImpl, browser, params) {
+  const service = await readActiveService(home, fetchImpl);
+  const url = new URL('/explore', service.baseUrl);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const opened = await browser(url.toString());
+  if (opened === false) throw new Error(`Could not open a browser. Open ${url} manually.`);
+  return url.toString();
+}
+
 export async function explore(path, { task, commit, focus, home = getHome(), fetchImpl = fetch, browser = openBrowser } = {}) {
   const analysis = await readExploreAnalysis(path);
   if (task !== undefined && commit !== undefined) throw new Error('Choose either --task or --commit, not both.');
@@ -52,13 +61,7 @@ export async function explore(path, { task, commit, focus, home = getHome(), fet
     const selected = parseCommit(commit);
     const card = analysis.cards.find(entry => entry?.rootId === selected.rootId && entry?.commitIndex === selected.commitIndex);
     if (analysis.cards.length > 0 && !card) throw new Error('That React commit is not present in the analysis file.');
-    const service = await readActiveService(home, fetchImpl);
-    const url = new URL('/explore', service.baseUrl);
-    url.searchParams.set('a', analysis.analysisId);
-    url.searchParams.set('commit', `${selected.rootId}.${selected.commitIndex}`);
-    const opened = await browser(url.toString());
-    if (opened === false) throw new Error(`Could not open a browser. Open ${url} manually.`);
-    return url.toString();
+    return openExplore(home, fetchImpl, browser, { a: analysis.analysisId, commit: `${selected.rootId}.${selected.commitIndex}` });
   }
   const taskIndex = task === undefined
     ? (analysis.cards.length === 1 ? analysis.cards[0]?.taskIndex : undefined)
@@ -78,12 +81,7 @@ export async function explore(path, { task, commit, focus, home = getHome(), fet
     ].filter(Boolean));
     if (!nodeIds.has(focus)) throw new Error('That function is not present in the selected task.');
   }
-  const service = await readActiveService(home, fetchImpl);
-  const url = new URL('/explore', service.baseUrl);
-  url.searchParams.set('a', analysis.analysisId);
-  url.searchParams.set('task', String(taskIndex));
-  if (focus) url.searchParams.set('focus', focus);
-  const opened = await browser(url.toString());
-  if (opened === false) throw new Error(`Could not open a browser. Open ${url} manually.`);
-  return url.toString();
+  const params = { a: analysis.analysisId, task: String(taskIndex) };
+  if (focus) params.focus = focus;
+  return openExplore(home, fetchImpl, browser, params);
 }

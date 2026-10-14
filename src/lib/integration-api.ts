@@ -34,6 +34,16 @@ export function authorizeIntegrationRequest(request: Request): Response | undefi
   }
 }
 
+/** Shared response shape for every Integration API v1 route. */
+export function integrationJson(body: Record<string, unknown>, status = 200): Response {
+  return Response.json(body, { status });
+}
+
+/** The one message every route uses when `findAnalysis` can't locate the id. */
+export function analysisNotFoundResponse(): Response {
+  return integrationJson({ error: "This analysis is no longer available (it may have expired). Run it again." }, 404);
+}
+
 /** Detect only formats the existing analyzers can actually parse. */
 export function detectIntegrationProfileType(raw: unknown): IntegrationProfileType {
   let cpu = false;
