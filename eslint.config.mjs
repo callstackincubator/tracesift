@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // A workspace package's build output: generated, and typed by its source.
+    "**/dist/**",
   ]),
 ]);
 
