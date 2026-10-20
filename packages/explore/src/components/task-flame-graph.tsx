@@ -7,9 +7,90 @@ import { ChartNotes, STRETCH_ZOOM_NOTE, ZOOM_HINT } from "./chart-notes.tsx";
 import { DEFAULT_MIN_FRAME_WIDTH, DEFAULT_MIN_LABEL_WIDTH, FlameLegend, TreeModeToggle, type TreeMode } from "./flame-legend.tsx";
 import { useStretchZoom, ZoomControls } from "./stretch-zoom.tsx";
 import { FlameGraph } from "../flame-graph/flame-graph.tsx";
+import { isPickableName, picking, type FrameSelection } from "./frame-selection.tsx";
 import { formatMs } from "../lib/format.ts";
 import type { CardChildNode } from "../lib/profile-cards.ts";
 import { focusedTree, type TaskTreeNode } from "../lib/task-cards.ts";
+
+/** What makes two rows of the tree the same function: what it is called, and where it is. */
+const frameIdentity = (node: TaskTreeNode) => `${node.name}\u0000${node.location ?? ""}`;
+
+/** Every node of a tree, in whatever order the walk reaches them. */
+function nodesOf(root: TaskTreeNode): TaskTreeNode[] {
+  const found: TaskTreeNode[] = [];
+  const pending: TaskTreeNode[] = [root];
+  while (pending.length > 0) {
+    const here = pending.pop()!;
+    found.push(here);
+    for (const child of here.children) pending.push(child);
+  }
+  return found;
+}
+
+/**
+ * Every box of a flame graph that draws one of the reader's picks, and which pick
+ * each shows.
+ *
+ * The tree merges a function's call sites, which is what makes it answer "what
+ * cost the most" and what makes it disagree with the timeline about how many
+ * boxes one frame has: a function that ran eight times is eight boxes against the
+ * clock and one node here. A reader who rings that frame on the chart, counts
+ * eight, and finds one box in the graph reasonably wonders whether the pick took,
+ * so the ring follows the frame rather than the node — every box drawing this
+ * function carries the same ring and the same number, however many paths the
+ * recorder reached it by.
+ *
+ * A box the tree holds under its own picked id keeps that id's number, so the two
+ * copies of a function picked at two call sites stay numbered as the two picks
+ * they are. The copies nobody clicked take the lowest-numbered pick of that
+ * function: a box has one number to print and the first one is the pick it came from.
+ *
+ * `ownerOf` is the other half of the bargain. A box ringed because it draws a
+ * picked function rather than because it *is* the picked node has an id nobody
+ * chose, so clicking it has to un-pick the frame it shows rather than add a second
+ * pick of the same function — the second click has to undo the first wherever the
+ * reader made it.
+ *
+ * `pickedFrom` is the whole task's tree rather than the subtree being drawn, so a
+ * frame picked while looking at another view still lends its identity to a copy
+ * inside the subtree this graph is rooted at. Both are walked because a pick's
+ * identity is only known from the node that holds it, and the copies that borrow it
+ * can be anywhere: two walks over a tree this size, on a view that is already
+ * laying out its boxes, and cheaper than assuming the two trees share a shape.
+ */
+export function pickedFlamePicks(pickedFrom: TaskTreeNode, drawn: TaskTreeNode, selection: FrameSelection | undefined): {
+  labels: Record<string, string> | undefined;
+  ownerOf: (nodeId: string) => string;
+} {
+  const selected = selection?.selectedNodeIds ?? [];
+  if (selected.length === 0) return { labels: undefined, ownerOf: id => id };
+
+  // The pick each picked frame's identity is, lowest number first: two copies of a
+  // function the reader picked twice are two picks, and each box is one of them.
+  const own = new Map(selected.map((id, at) => [id, { pickedId: id, at }]));
+  const borrowed = new Map<string, { pickedId: string; at: number }>();
+  for (const node of nodesOf(pickedFrom)) {
+    const pick = own.get(node.id);
+    if (pick === undefined || !isPickableName(node.name)) continue;
+    const identity = frameIdentity(node);
+    const held = borrowed.get(identity);
+    if (held === undefined || pick.at < held.at) borrowed.set(identity, pick);
+  }
+
+  const labels: Record<string, string> = {};
+  const owners = new Map<string, string>();
+  for (const here of nodesOf(drawn)) {
+    const pick = own.get(here.id)
+      ?? (isPickableName(here.name) ? borrowed.get(frameIdentity(here)) : undefined);
+    if (pick === undefined) continue;
+    labels[here.id] = String(pick.at + 1);
+    owners.set(here.id, pick.pickedId);
+  }
+  return {
+    labels: Object.keys(labels).length > 0 ? labels : undefined,
+    ownerOf: id => owners.get(id) ?? id,
+  };
+}
 
 /** The captured subtree, in the shape the flame graph reads. */
 export function toFlameNode(name: string, totalMs: number, selfMs: number, children: CardChildNode[], path: string): FlameGraphNode {
@@ -52,11 +133,17 @@ export function taskFlameNode(node: TaskTreeNode): FlameGraphNode {
  * the top of the graph where the eye lands. `Everything` is one click away for
  * the times the reconciler is the thing being read.
  */
-export function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
+export function TaskFlameGraph({ focus, taskTree, selection }: { focus: TaskTreeNode; taskTree: TaskTreeNode; selection?: FrameSelection }) {
   const [mode, setMode] = useState<TreeMode>("focused");
-  const flame = useMemo(() => taskFlameNode(mode === "focused" ? focusedTree(focus) : focus), [mode, focus]);
+  const source = useMemo(() => (mode === "focused" ? focusedTree(focus) : focus), [mode, focus]);
+  const flame = useMemo(() => taskFlameNode(source), [source]);
   const [drill, setDrill] = useState<{ key: string; name: string } | null>(null);
   const { zoom, viewport, canvas, readout, jumpTo, scrollToStart } = useStretchZoom();
+  const pickingNow = picking(selection);
+  // Which pick each box of the graph being drawn shows, and which pick a click on
+  // it is the second click on. See `pickedFlamePicks` for why one pick of a
+  // function is several boxes here.
+  const picks = useMemo(() => pickedFlamePicks(taskTree, source, selection), [taskTree, source, selection]);
 
   // Both the mode toggle and a new focus change which frames exist, so a key
   // taken from the old graph names nothing in the new one and would silently
@@ -106,6 +193,22 @@ export function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
               // more. Its start is the one place worth being.
               scrollToStart();
             }}
+            // A picked frame is drawn with the same ring it carries on the other
+            // three views, numbered with the same figure, on every box that draws
+            // it. While the reader is picking, a click is the pick and nothing
+            // else: zooming into the frame they just chose would move the very
+            // boxes they are working their way through.
+            {...(picks.labels ? { selectedLabels: picks.labels } : {})}
+            {...(pickingNow ? {
+              selectOnly: true,
+              // The graph draws the focused frame as its top box, which at the
+              // top of a task is the synthetic root the timeline never shows.
+              // A box that only carries someone else's ring toggles the pick it
+              // shows rather than adding one the reader never made.
+              onSelect: (key: string, node: FlameGraphNode) => {
+                if (isPickableName(node.name)) selection?.onToggleSelection(picks.ownerOf(key));
+              },
+            } : {})}
             // The library hides frames narrower than a share of its own box,
             // and draws one narrower than another share without its name. That
             // box is now `zoom` times wider than what the reader sees, so the
@@ -118,7 +221,9 @@ export function TaskFlameGraph({ focus }: { focus: TaskTreeNode }) {
       </div>
 
       <ChartNotes
-        controls={`Click a frame to zoom into its subtree \u00B7 Esc to go back \u00B7 ${ZOOM_HINT}`}
+        controls={pickingNow
+          ? `Click a frame to add it to your selection, or click it again to take it out \u00B7 ${ZOOM_HINT}`
+          : `Click a frame to zoom into its subtree \u00B7 Esc to go back \u00B7 ${ZOOM_HINT}`}
         caveats={[
           STRETCH_ZOOM_NOTE,
           mode === "focused" ? (

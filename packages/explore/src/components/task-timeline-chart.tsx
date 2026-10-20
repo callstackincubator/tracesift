@@ -5,6 +5,7 @@ import { EmptyState } from "@rozenite/ui";
 
 import { ChartNotes, STRETCH_ZOOM_NOTE, ZOOM_HINT } from "./chart-notes.tsx";
 import { useStretchZoom, ZoomControls } from "./stretch-zoom.tsx";
+import { pickedClass, pickNumber, picking, PickTick, type FrameSelection } from "./frame-selection.tsx";
 import { formatMs } from "../lib/format.ts";
 import type { TaskTimeline, TimelineBox } from "../lib/task-timeline.ts";
 
@@ -36,10 +37,13 @@ export function TaskTimelineChart({
   timeline,
   focusId,
   onFocus,
+  selection,
 }: {
   timeline: TaskTimeline;
   focusId: string;
   onFocus: (nodeId: string) => void;
+  /** When picking, a click adds this box to the set instead of moving the focus. */
+  selection?: FrameSelection;
 }) {
   const { zoom, viewport, canvas, readout, jumpTo } = useStretchZoom();
   const { durationMs } = timeline;
@@ -94,6 +98,7 @@ export function TaskTimelineChart({
                 percent={percent}
                 selected={box.nodeId === focusId}
                 onFocus={onFocus}
+                {...(selection ? { selection } : {})}
               />
             ))}
           </div>
@@ -148,24 +153,38 @@ export function TimelineBoxView({
   percent,
   selected,
   onFocus,
+  selection,
 }: {
   box: TimelineBox;
   percent: (value: number) => string;
   selected: boolean;
   onFocus: (nodeId: string) => void;
+  /** When picking, a click adds this box to the set instead of moving the focus. */
+  selection?: FrameSelection;
 }) {
+  const pickingNow = picking(selection);
+  const picked = pickedClass(selection, box.nodeId);
+  const number = pickNumber(selection, box.nodeId);
   return (
     <button
       type="button"
-      className={selected ? "timeline-box is-selected" : "timeline-box"}
+      className={[
+        "timeline-box",
+        ...(selected ? ["is-selected"] : []),
+        ...(picked ? [picked] : []),
+      ].join(" ")}
       // A built-in the product called is drawn like any other box and must not
       // read like code the reader wrote: the fill is what says `engine`.
       data-class={box.frameClass}
+      aria-pressed={pickingNow ? number !== undefined : undefined}
       style={{ left: percent(box.startMs), width: percent(box.durationMs), top: `${box.depth * ROW_HEIGHT}px` }}
-      title={`${box.name}\n${timingLine(box)}${box.location ? `\n${box.location}` : ""}`}
-      onClick={() => onFocus(box.nodeId)}
+      title={`${box.name}\n${timingLine(box)}${box.location ? `\n${box.location}` : ""}${number === undefined ? "" : `\nSelected for investigation (#${number})`}`}
+      onClick={() => (pickingNow ? selection?.onToggleSelection(box.nodeId) : onFocus(box.nodeId))}
     >
-      <span>{box.name}</span>
+      <span>
+        <PickTick selection={selection} nodeId={box.nodeId} />
+        {box.name}
+      </span>
     </button>
   );
 }

@@ -6,6 +6,7 @@ import { Button, Tabs, Text } from "@rozenite/ui";
 import { TaskCallTree, TaskCulpritTable } from "./task-views.tsx";
 import { TaskFlameGraph } from "./task-flame-graph.tsx";
 import { TaskTimelineChart } from "./task-timeline-chart.tsx";
+import type { FrameSelection } from "./frame-selection.tsx";
 import { formatMs } from "../lib/format.ts";
 import { taskCardLocations } from "../lib/frame-location.ts";
 import { type TaskHandoff } from "../handoff.ts";
@@ -35,6 +36,13 @@ export interface TaskExplorerProps {
   focusNodeId?: string;
   /** The frame the reader navigated to: a tree row, a culprit, a timeline box. */
   onFocusChange?: (nodeId: string) => void;
+  /**
+   * The set of frames the reader is picking, across all four views. Given, a
+   * click on any frame in any of them adds or removes it and every view rings
+   * it; the focus stays where it was, because the reader is collecting rather
+   * than navigating. See `FrameSelection` for why this is not just another focus.
+   */
+  selection?: FrameSelection;
 }
 
 /**
@@ -48,7 +56,7 @@ export interface TaskExplorerProps {
  * ran above and beside this frame — is the task's own views a click away, not
  * two more rows of links crowding the header.
  */
-export function TaskExplorer({ handoff, focusNodeId, onFocusChange }: TaskExplorerProps) {
+export function TaskExplorer({ handoff, focusNodeId, onFocusChange, selection }: TaskExplorerProps) {
   const { card } = handoff;
   // Controlled when the host names the focus, uncontrolled when it does not.
   // The Next route keeps the address bar in step and so owns the value; a host
@@ -113,16 +121,16 @@ export function TaskExplorer({ handoff, focusNodeId, onFocusChange }: TaskExplor
           <Tabs.Tab value="culprits">Culprits</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="timeline" className="explore-panel">
-          <TaskTimelineChart timeline={card.timeline} focusId={focusId} onFocus={refocus} />
+          <TaskTimelineChart timeline={card.timeline} focusId={focusId} onFocus={refocus} {...(selection ? { selection } : {})} />
         </Tabs.Panel>
         <Tabs.Panel value="flame" className="explore-panel">
-          <TaskFlameGraph focus={focus} />
+          <TaskFlameGraph focus={focus} taskTree={card.tree} {...(selection ? { selection } : {})} />
         </Tabs.Panel>
         <Tabs.Panel value="tree" className="explore-panel">
-          <TaskCallTree focus={focus} taskMs={card.durationMs} onFocus={refocus} locations={locations} />
+          <TaskCallTree focus={focus} taskMs={card.durationMs} onFocus={refocus} locations={locations} {...(selection ? { selection } : {})} />
         </Tabs.Panel>
         <Tabs.Panel value="culprits" className="explore-panel">
-          <TaskCulpritTable culprits={card.culprits} onFocus={refocus} locations={locations} />
+          <TaskCulpritTable culprits={card.culprits} onFocus={refocus} locations={locations} {...(selection ? { selection } : {})} />
         </Tabs.Panel>
       </Tabs>
     </>

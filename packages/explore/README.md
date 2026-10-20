@@ -47,6 +47,7 @@ belongs in a component.
 | `focusNodeId`, `onFocusChange` | The host, when it has an address bar to keep in step. Both optional: without them the view holds its own focus. |
 | `commitKey`, `defaultCommitKey`, `onCommitChange` | Same, for a recording's selected commit. Keys are `<rootId>.<commitIndex>`. |
 | `onClose` | The host. Given, a `Close` button is rendered; the action is the host's. |
+| `selection` | The host, for a task explorer. Given, the four task views ring and number the picked frames and a click adds or removes one instead of navigating; `onToggleSelection` reports the click. Omitted, the views behave as they always did. |
 
 Theme likewise belongs to the host: `PluginShell` applies its own `.dark` class
 and the sheet styles both. The Next app gates its first paint on the stored
@@ -58,10 +59,16 @@ theme before mounting the views; a panel inherits whatever its host decided.
   case, the footer.
 - `TaskExplorer`, `ReactExplorer`, `CardExplorer` — the drill-downs on their own,
   for a host that arranges its own page around them.
-- `FlameGraph` — the library's graph with one addition, `minLabelWidth`, which
-  lets Explore scale the label threshold by its own zoom. Vendored because
-  patching a peer dependency is not something a consumer can be asked to do; see
-  the header of `src/flame-graph/flame-graph.tsx`.
+- `FlameGraph` — the library's graph with two additions: `minLabelWidth`, which
+  lets Explore scale the label threshold by its own zoom, and `selectedLabels`
+  plus `selectOnly`, which let a host ring several frames at once and take a click
+  as a pick rather than a zoom. Vendored because patching a peer dependency is not
+  something a consumer can be asked to do; see the header of
+  `src/flame-graph/flame-graph.tsx`.
+- `FrameSelection`, and the helpers a host needs to draw its own picking:
+  `pickNumber`, `pickedClass`, `picking`, `isPickableName`, `PickTick`, and
+  `pickedFlamePicks` for a host drawing its own flame graph, which is what decides
+  that one pick of a function rings every box drawn of it.
 - The model the views read: `TaskCard`, `TaskTreeNode`, `TaskCardSet`,
   `TaskTimeline`, `TimelineBox`, `ReactExplore`, `ReactExploreCommit`,
   `ReactExploreNode`, `ReactCard`, `ReactComponentClass`, `FrameClass`,

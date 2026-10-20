@@ -26,7 +26,16 @@ export { ZoomControls, formatZoom, useStretchZoom, ZOOM_STEPS, type StretchZoom 
 export { FlameLegend, TreeModeToggle, type TreeMode } from "./components/flame-legend.tsx";
 export { TaskTimelineChart } from "./components/task-timeline-chart.tsx";
 export { TaskCallTree, TaskCulpritTable } from "./components/task-views.tsx";
-export { TaskFlameGraph } from "./components/task-flame-graph.tsx";
+export { TaskFlameGraph, pickedFlamePicks } from "./components/task-flame-graph.tsx";
+export {
+  PickTick,
+  isSelected,
+  pickedClass,
+  pickNumber,
+  picking,
+  isPickableName,
+  type FrameSelection,
+} from "./components/frame-selection.tsx";
 export { CommitChart, ReactComponentTable, ReactRenderTree, commitKey, reactMs } from "./components/react-views.tsx";
 
 /** The patched `FlameGraph`, exported so a host's graphs and these stay the same component. */

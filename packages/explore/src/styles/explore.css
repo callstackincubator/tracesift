@@ -441,6 +441,106 @@
 .timeline-box:hover { filter: brightness(1.12); }
 .timeline-box.is-selected { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
 
+/* ── Picking frames out of the four views ────────────────────────────────────
+   A picked frame is a frame the reader has set aside to ask about, so it reads
+   as one thing wherever it appears: the same tint, the same inset ring and the
+   same count on a timeline box, a tree row, a culprit row and a flame box. It is
+   deliberately not the focus ring. Focus is where a view is standing and stays
+   exactly one frame; a pick is a set the reader is building, and the two land on
+   the same frame often enough that they need separate channels. Every view here
+   already spends `outline` on its focus, so a pick rides on `box-shadow`
+   instead, and a frame that is both shows both.
+
+   A pick never recolors a fill. On the timeline the fill is the frame's class
+   and in the flame graph it is its heat, and in both a pick is a comment on the
+   frame rather than a measurement of it. */
+/* The ring and the tint, on the one view that draws both on the element itself.
+   The timeline and the flame graph are handled below and in the component, and a
+   table row cannot carry this at all — a `tr` in a collapsed table paints no
+   shadow — so the culprit table draws its ring per cell. Written against the row
+   rather than as a bare `.is-picked` rule, which would silently do nothing on
+   half the elements that carry the class. */
+.explore-tree-row.is-picked {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 62%, transparent);
+  border-radius: 8px;
+}
+/* Hover has the same specificity as the rule above and used to be the later of
+   the two, so a picked row stopped answering the pointer. Deepen the tint instead
+   of replacing it, so the pick survives the hover it now also reports. */
+.explore-tree-row.is-picked:hover { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+/* A collapsed table cannot paint a shadow across a row, and these cells are flex
+   containers rather than table cells, so the ring is built from the cells' own
+   inset shadows: the top and bottom edges tile across the row, and the ends
+   close it at either side. Same two pixels and colour as the ring the other
+   three views draw, so one picked frame looks picked wherever it appeared. */
+.explore-table tr.is-picked > th,
+.explore-table tr.is-picked > td {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent);
+}
+.explore-table tr.is-picked > th:first-child {
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 2px 0 0 color-mix(in srgb, var(--primary) 62%, transparent);
+}
+.explore-table tr.is-picked > td:last-child {
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset -2px 0 0 color-mix(in srgb, var(--primary) 62%, transparent);
+}
+/* The count says which of the reader's picks this is — the one thing a ring
+   cannot say once four of them are spread across two tabs. The same pill in all
+   four views, so a reader learns it once. A timeline box drawn one pixel wide
+   clips it behind `overflow: hidden`, leaving the ring to carry the pick there. */
+.explore-picked-tick {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground, var(--background));
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+/* A built-in keeps its own paler fill, so its picked box has to keep the hairline
+   that says `engine` too — and the two shadows are written out together, since
+   `box-shadow` replaces rather than adds. */
+.timeline-box.is-picked {
+  box-shadow:
+    inset -1px 0 0 color-mix(in srgb, var(--background) 65%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, var(--primary) 75%, transparent);
+  z-index: 1;
+}
+.timeline-box.is-picked[data-class="native"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, var(--primary) 75%, transparent);
+}
+/* The name and its pick number, on the row that stacks the source line beneath
+   them. The cell is a column flex container, so an ungrouped pill would be a flex
+   item of its own — stretched to the cell's width, on its own line, reading as a
+   bar with a digit in it rather than the number of the frame beside it. One block
+   around the two lets them flow as they do in a call-tree row, which is the row
+   the culprit table is meant to match. */
+.explore-culprit-name { display: block; min-width: 0; }
+/* A culprit row answers to a click only while the reader is picking, so the
+   pointer appears only when the click would do something. */
+.explore-pickable-row { cursor: pointer; }
+/* The frame name is still a button while picking, but the row is the target and
+   link styling would promise the focus it no longer moves. */
+.explore-pickable-row .explore-tree-focus {
+  color: inherit;
+  text-decoration: none;
+  cursor: inherit;
+}
+.explore-pickable-row .explore-tree-focus:hover { color: inherit; text-decoration: underline; }
+
 /* ── The React commit chart ──────────────────────────────────────────────────
    One bar per commit, evenly spaced. The plot grows downwards from a baseline
    at its foot, because bar height is duration against the tallest commit and a

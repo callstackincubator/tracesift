@@ -5,6 +5,7 @@ import { Button, EmptyState } from "@rozenite/ui";
 import { CardExplorer } from "./card-explorer.tsx";
 import { ReactExplorer } from "./react-explorer.tsx";
 import { TaskExplorer } from "./task-explorer.tsx";
+import type { FrameSelection } from "./frame-selection.tsx";
 import type { CardHandoff, ReactExploreHandoff, TaskHandoff } from "../handoff.ts";
 
 /**
@@ -36,6 +37,12 @@ export interface ExploreViewProps {
   onFocusChange?: (nodeId: string) => void;
   /** `ReactExplorer.commitKey`, for hosts that hold the selected commit. */
   commitKey?: string;
+  /**
+   * `TaskExplorer.selection`, for a host that lets its reader pick frames out of
+   * the task views and wants them back. Task views only: a React recording's
+   * components are addressed some other way.
+   */
+  selection?: FrameSelection;
   /** `ReactExplorer.defaultCommitKey`, for hosts that only name where to open. */
   defaultCommitKey?: string;
   onCommitChange?: (key: string) => void;
@@ -66,6 +73,7 @@ export function ExploreView({
   card,
   focusNodeId,
   onFocusChange,
+  selection,
   commitKey,
   defaultCommitKey,
   onCommitChange,
@@ -93,7 +101,7 @@ export function ExploreView({
         <ReactExplorer handoff={react.handoff} commitKey={commitKey} defaultCommitKey={defaultCommitKey} onCommitChange={onCommitChange} />
       ) : null}
       {task?.state === "ready" ? (
-        <TaskExplorer handoff={task.handoff} focusNodeId={focusNodeId} onFocusChange={onFocusChange} />
+        <TaskExplorer handoff={task.handoff} focusNodeId={focusNodeId} onFocusChange={onFocusChange} selection={selection} />
       ) : null}
       {!task && !react && card ? <CardExplorer handoff={card} /> : null}
       {!task && !react && !card ? (

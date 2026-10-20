@@ -11,6 +11,11 @@
  * 2. The layout helpers (`layoutFlameGraph`, `getHeatBucket`, the heat-bucket
  *    class tables) are internal to the library's bundle and are not part of its
  *    public exports, so a patched graph cannot be assembled from outside.
+ * 3. `selectedLabels`. Explore lets a reader pick several frames at once and
+ *    carry them into a question, which needs a set rather than the library's
+ *    single `selectedKey`, and a way to say which pick each ringed box is. The
+ *    ring itself is the library's own styling question, so this stays an addition
+ *    rather than a change to anything it already does.
  *
  * TODO(upstream): land `minLabelWidth` in @rozenite/ui and delete this file plus
  * `flame-graph-utils.ts`, importing both from the library instead. Anything else
@@ -55,6 +60,25 @@ export type FlameGraphProps = Omit<ComponentProps<'div'>, 'onSelect'> & {
   onFocusedKeyChange?: (key: string | null, node: FlameGraphNode | null) => void;
   /** Key of the frame rendered as selected. */
   selectedKey?: string;
+  /**
+   * Frames selected beyond `selectedKey`, as `{ [frameKey]: label }`. A frame
+   * named here is drawn with the same ring `selectedKey` draws, plus `label`.
+   *
+   * A map rather than a second list of keys because a box already has exactly one
+   * way to say "selected", and a renderer holding two sources of truth about one
+   * frame is a renderer waiting to disagree with itself. The label is what a list
+   * of keys cannot carry and a reader needs: the same frame is the fourth row
+   * here and the first row in the table beside it, so only the order the reader
+   * chose in can number them.
+   */
+  selectedLabels?: Readonly<Record<string, string>>;
+  /**
+   * When true, clicking a frame reports it through `onSelect` and nothing else —
+   * the graph does not zoom into it. A host using this is collecting frames
+   * rather than navigating, and a view that re-rooted itself under every click
+   * would keep pulling frames out from under the reader's cursor.
+   */
+  selectOnly?: boolean;
   onSelect?: (key: string, node: FlameGraphNode) => void;
   /** Row height in pixels. @default 20 */
   rowHeight?: number;
@@ -83,6 +107,8 @@ function FlameGraphRoot({
   focusedKey: focusedKeyProp,
   onFocusedKeyChange,
   selectedKey,
+  selectedLabels,
+  selectOnly,
   onSelect,
   rowHeight = DEFAULT_ROW_HEIGHT,
   formatValue = defaultFormatValue,
@@ -115,6 +141,13 @@ function FlameGraphRoot({
   };
 
   const handleFrameClick = (frame: FlameGraphFrame) => {
+    // A host that is collecting frames rather than navigating gets the click and
+    // nothing else; every other host sees exactly the behaviour this file had
+    // before, including the order the two callbacks fire in.
+    if (selectOnly) {
+      onSelect?.(frame.key, frame.node);
+      return;
+    }
     setUncontrolledFocusedKey(frame.key);
     onFocusedKeyChange?.(frame.key, frame.node);
     onSelect?.(frame.key, frame.node);
@@ -153,17 +186,25 @@ function FlameGraphRoot({
       >
         {rows.map((rowFrames, depth) => (
           <div key={depth} className="relative" style={{ height: rowHeight }}>
-            {rowFrames.map((frame) => (
-              <FlameGraphFrameButton
-                key={frame.key}
-                frame={frame}
-                formatValue={formatValue}
-                highlight={highlight}
-                minLabelWidth={minLabelWidth}
-                selected={frame.key === selectedKey}
-                onClick={handleFrameClick}
-              />
-            ))}
+            {rowFrames.map((frame) => {
+              // A plain lookup, guarded: a frame key is a caller's string and an
+              // inherited `Object.prototype` name would otherwise read as picked.
+              const selectedLabel = Object.prototype.hasOwnProperty.call(selectedLabels ?? {}, frame.key)
+                ? selectedLabels?.[frame.key]
+                : undefined;
+              return (
+                <FlameGraphFrameButton
+                  key={frame.key}
+                  frame={frame}
+                  formatValue={formatValue}
+                  highlight={highlight}
+                  minLabelWidth={minLabelWidth}
+                  selected={frame.key === selectedKey || selectedLabel !== undefined}
+                  selectedLabel={selectedLabel}
+                  onClick={handleFrameClick}
+                />
+              );
+            })}
           </div>
         ))}
       </div>
@@ -177,6 +218,8 @@ type FlameGraphFrameButtonProps = {
   highlight: string | undefined;
   minLabelWidth: number;
   selected: boolean;
+  /** Rendered before the name when a multi-select names which pick this is. */
+  selectedLabel?: string;
   onClick: (frame: FlameGraphFrame) => void;
 };
 
@@ -186,6 +229,7 @@ function FlameGraphFrameButton({
   highlight,
   minLabelWidth,
   selected,
+  selectedLabel,
   onClick,
 }: FlameGraphFrameButtonProps) {
   const { node, left, width, heat } = frame;
@@ -219,11 +263,24 @@ function FlameGraphFrameButton({
         selected && 'ring-2 ring-ring ring-inset',
       )}
     >
+      {/* A pick is numbered in the order the reader chose them, which no label
+          can carry on its own: the same frame reads as the fourth row here and
+          the first row in the table beside it. Absolutely positioned so the
+          number never eats the name it shares a box with. */}
+      {selectedLabel !== undefined && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-[2px] left-[2px] z-[1] flex min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] leading-none font-medium text-primary-foreground"
+        >
+          {selectedLabel}
+        </span>
+      )}
       {width > minLabelWidth && (
         <span
           className={cn(
             'block truncate text-[11px] leading-none',
             highlight && matched && 'font-medium',
+            selectedLabel !== undefined && 'pl-4',
           )}
         >
           {node.name}
