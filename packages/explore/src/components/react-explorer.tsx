@@ -5,6 +5,7 @@ import { EmptyState, Text } from "@rozenite/ui";
 import { Tabs } from "@rozenite/ui";
 
 import { CommitChart, commitKey, reactMs, ReactComponentTable, ReactRenderTree } from "./react-views.tsx";
+import type { FrameSelection } from "./frame-selection.tsx";
 import type { ReactExploreHandoff } from "../handoff.ts";
 
 export interface ReactExplorerProps {
@@ -19,9 +20,20 @@ export interface ReactExplorerProps {
   defaultCommitKey?: string;
   /** The commit the reader picked, in the same `<rootId>.<commitIndex>` form. */
   onCommitChange?: (key: string) => void;
+  /**
+   * The set of components the reader is picking, across both views of a commit
+   * and across commits. Given, a click on a component in the render tree or the
+   * table adds or removes it instead of zooming, and both views ring it.
+   *
+   * The commit picker is untouched by this: choosing a commit is navigation, the
+   * way moving the focus is on the task side, and a reader assembling a question
+   * about a cascade has to be able to walk it. See `reactNodeKey` for why a pick
+   * survives that walk.
+   */
+  selection?: FrameSelection;
 }
 
-export function ReactExplorer({ handoff, commitKey: heldKey, defaultCommitKey, onCommitChange }: ReactExplorerProps) {
+export function ReactExplorer({ handoff, commitKey: heldKey, defaultCommitKey, onCommitChange, selection }: ReactExplorerProps) {
   const { explore } = handoff;
   const byKey = useMemo(
     () => new Map(explore.commits.map((commit) => [commitKey(commit), commit])),
@@ -94,10 +106,10 @@ export function ReactExplorer({ handoff, commitKey: heldKey, defaultCommitKey, o
           <Tabs.Tab value="components">Components</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="tree" className="explore-panel">
-          <ReactRenderTree commit={commit} />
+          <ReactRenderTree commit={commit} {...(selection ? { selection } : {})} />
         </Tabs.Panel>
         <Tabs.Panel value="components" className="explore-panel">
-          <ReactComponentTable commit={commit} />
+          <ReactComponentTable commit={commit} {...(selection ? { selection } : {})} />
         </Tabs.Panel>
       </Tabs>
     </>

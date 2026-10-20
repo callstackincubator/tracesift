@@ -34,9 +34,19 @@ export {
   pickNumber,
   picking,
   isPickableName,
+  reactNodeKey,
+  reactNodeKeyParts,
   type FrameSelection,
 } from "./components/frame-selection.tsx";
-export { CommitChart, ReactComponentTable, ReactRenderTree, commitKey, reactMs } from "./components/react-views.tsx";
+export {
+  CommitChart,
+  ReactComponentTable,
+  ReactRenderTree,
+  commitKey,
+  pickedReactFlame,
+  reactMs,
+  reactPicksInCommit,
+} from "./components/react-views.tsx";
 
 /** The patched `FlameGraph`, exported so a host's graphs and these stay the same component. */
 export { FlameGraph, type FlameGraphProps } from "./flame-graph/flame-graph.tsx";

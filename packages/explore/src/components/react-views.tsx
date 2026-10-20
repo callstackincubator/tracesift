@@ -5,6 +5,7 @@ import type { FlameGraphNode } from "@rozenite/ui";
 import { EmptyState } from "@rozenite/ui";
 
 import { ChartNotes, ZOOM_HINT } from "./chart-notes.tsx";
+import { pickedClass, pickNumber, picking, PickTick, reactNodeKey, reactNodeKeyParts, type FrameSelection } from "./frame-selection.tsx";
 import { FlameLegend, TreeModeToggle, type TreeMode } from "./flame-legend.tsx";
 import { FlameGraph } from "../flame-graph/flame-graph.tsx";
 import { formatMs } from "../lib/format.ts";
@@ -87,6 +88,72 @@ export function reactFlameNode(node: ReactExploreNode, path: string): FlameGraph
       + `\n${cause}${node.sourceHint ? `\n${node.sourceHint}` : ""}`,
     children,
   };
+}
+
+/**
+ * Which box of a commit's icicle draws which of the reader's picks, and which
+ * component a click on a box is a pick of.
+ *
+ * Simpler than the task side's equivalent, and for a reason worth writing down.
+ * A task's tree merges a function's call sites, so one pick is several boxes and
+ * the ring has to follow the function rather than the node. React's tree merges
+ * nothing: a fiber is one box, in one commit, and a component rendered twice is
+ * two fibers that are genuinely two renders — each with its own cause, its own
+ * changed props and its own time. Ringing both because they share a name would
+ * claim a sameness React did not record.
+ *
+ * Boxes are addressed by `reactFlameNode`'s own id, `<path>:<fiberId>`, so the
+ * fiber is read back off the end of it. The commit's synthetic root is skipped
+ * by starting at its children: it is the reconciler's own walk rather than
+ * anything a reader can go and change, and it carries a fiber id of 0 that names
+ * no fiber at all.
+ */
+export function pickedReactFlame(
+  flame: FlameGraphNode,
+  commit: { rootId: number; commitIndex: number },
+  selection: FrameSelection | undefined,
+): { labels: Record<string, string> | undefined; keyOf: (boxId: string) => string | undefined; drawnPicks: number } {
+  const at = new Map((selection?.selectedNodeIds ?? []).map((id, index) => [id, index] as const));
+  const labels: Record<string, string> = {};
+  const keys = new Map<string, string>();
+  const walk = (nodes: readonly FlameGraphNode[]) => {
+    for (const node of nodes) {
+      // `reactFlameNode` names every node, and the graph keys a frame by its id
+      // when it has one, so a box's key is the id read here. A node without one
+      // is not something this file built, and it carries no fiber to pick.
+      const boxId = node.id;
+      if (boxId !== undefined) {
+        const fiberId = Number(boxId.slice(boxId.lastIndexOf(":") + 1));
+        if (Number.isInteger(fiberId)) {
+          const key = reactNodeKey(commit, fiberId);
+          keys.set(boxId, key);
+          const pick = at.get(key);
+          if (pick !== undefined) labels[boxId] = String(pick + 1);
+        }
+      }
+      walk(node.children ?? []);
+    }
+  };
+  walk(flame.children ?? []);
+  const drawnPicks = Object.keys(labels).length;
+  return {
+    labels: drawnPicks > 0 ? labels : undefined,
+    keyOf: (boxId: string) => keys.get(boxId),
+    drawnPicks,
+  };
+}
+
+/** How many of the reader's picks name a component of this commit. */
+export function reactPicksInCommit(
+  commit: { rootId: number; commitIndex: number },
+  selection: FrameSelection | undefined,
+): number {
+  let found = 0;
+  for (const id of selection?.selectedNodeIds ?? []) {
+    const parts = reactNodeKeyParts(id);
+    if (parts && parts.rootId === commit.rootId && parts.commitIndex === commit.commitIndex) found += 1;
+  }
+  return found;
 }
 
 /** Every rendered fiber of one commit, flattened and ranked by self time. */
@@ -329,8 +396,9 @@ export function CommitChart({
  * partition of the commit, and a reader who opened it asked what React
  * rendered, not what of it is theirs.
  */
-export function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) {
+export function ReactComponentTable({ commit, selection }: { commit: ReactExploreCommit; selection?: FrameSelection }) {
   const [mode, setMode] = useState<TreeMode>("full");
+  const pickingNow = picking(selection);
   const all = useMemo(() => flattenCommit(commit), [commit]);
   const rows = useMemo(() => (mode === "focused" ? all.filter(isOwnComponent) : all), [mode, all]);
   const filtered = all.length - rows.length;
@@ -366,10 +434,39 @@ export function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) 
             </tr>
           </thead>
           <tbody>
-            {shown.map((node) => (
-              <tr key={node.id} data-class={node.componentClass}>
+            {shown.map((node) => {
+              // A pick names the commit as well as the fiber, so the row a reader
+              // ticked here is still ticked after they step through four commits
+              // and come back. See `reactNodeKey`.
+              const key = reactNodeKey(commit, node.id);
+              const picked = pickedClass(selection, key);
+              return (
+              <tr
+                key={node.id}
+                data-class={node.componentClass}
+                className={pickingNow ? `${picked ? "is-picked " : ""}explore-pickable-row` : undefined}
+                onClick={() => { if (pickingNow) selection?.onToggleSelection(key); }}
+              >
                 <th scope="row">
-                  <span className="react-component-name">{node.name}</span>
+                  {/* A name is plain text here until there is something to click
+                      it for: this table navigates nowhere, so a button that did
+                      nothing would be a promise it cannot keep. While picking it
+                      becomes one, so the keyboard reaches the row too. It keeps
+                      the name's own class either way, which is what greys out a
+                      host element or a framework wrapper. */}
+                  {pickingNow ? (
+                    <button
+                      type="button"
+                      className="react-component-name explore-tree-focus"
+                      aria-pressed={pickNumber(selection, key) !== undefined}
+                      onClick={(event) => { event.stopPropagation(); selection?.onToggleSelection(key); }}
+                    >
+                      {node.name}
+                    </button>
+                  ) : (
+                    <span className="react-component-name">{node.name}</span>
+                  )}
+                  <PickTick selection={selection} nodeId={key} />
                   {node.sourceHint ? <code title={node.sourceHint}>{shortLocationLabel(node.sourceHint)}</code> : null}
                 </th>
                 <td>{reactMs(node.selfMs)}</td>
@@ -380,7 +477,8 @@ export function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) 
                   {node.compiledWithForget ? <em> · React Compiler</em> : null}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -428,8 +526,9 @@ export function ReactComponentTable({ commit }: { commit: ReactExploreCommit }) 
  * are all context providers. `Everything` is one click away for the times a
  * provider is the finding.
  */
-export function ReactRenderTree({ commit }: { commit: ReactExploreCommit }) {
+export function ReactRenderTree({ commit, selection }: { commit: ReactExploreCommit; selection?: FrameSelection }) {
   const [mode, setMode] = useState<TreeMode>("focused");
+  const pickingNow = picking(selection);
   // Both depths, in both modes: the note compares them, so it needs the one the
   // reader is not looking at as much as the one they are.
   const depth = useMemo(() => ({
@@ -460,6 +559,12 @@ export function ReactRenderTree({ commit }: { commit: ReactExploreCommit }) {
     );
   }, [commit, mode]);
 
+  // Which boxes carry a ring, and which component a click on a box picks. Built
+  // from the drawn tree, so a mode toggle that collapses a component away takes
+  // its ring with it rather than leaving one on the row that absorbed it.
+  const picks = useMemo(() => (flame ? pickedReactFlame(flame, commit, selection) : null), [flame, commit, selection]);
+  const hiddenPicks = picks ? reactPicksInCommit(commit, selection) - picks.drawnPicks : 0;
+
   if (!flame) {
     return (
       <EmptyState
@@ -477,15 +582,43 @@ export function ReactRenderTree({ commit }: { commit: ReactExploreCommit }) {
       <FlameLegend what="a component's own render time" />
       {/* Same patched graph as the task side, so the two flame graphs are the
           same component here and in a plugin panel. */}
-      <FlameGraph data={flame} formatValue={reactMs} rowHeight={24} />
+      {/* A picked component is ringed and numbered the same way it is on the task
+          side. While the reader is picking, a click is the pick and nothing else:
+          zooming into the component they just chose would move the very boxes
+          they are working through. */}
+      <FlameGraph
+        data={flame}
+        formatValue={reactMs}
+        rowHeight={24}
+        {...(picks?.labels ? { selectedLabels: picks.labels } : {})}
+        {...(pickingNow ? {
+          selectOnly: true,
+          // The commit's own root box is not a fiber and has no key, so a click
+          // on it picks nothing rather than picking the reconciler.
+          onSelect: (boxId: string) => {
+            const key = picks?.keyOf(boxId);
+            if (key !== undefined) selection?.onToggleSelection(key);
+          },
+        } : {})}
+      />
       <ChartNotes
         reading={
           <>
             Width is time including everything a component rendered. The colour is its own time alone.
           </>
         }
-        controls={`Click a box to zoom into its subtree \u00B7 Esc to go back \u00B7 ${ZOOM_HINT}`}
+        controls={pickingNow
+          ? "Click a component to add it to your selection, or click it again to take it out"
+          : `Click a box to zoom into its subtree \u00B7 Esc to go back \u00B7 ${ZOOM_HINT}`}
         caveats={[
+          hiddenPicks > 0 ? (
+            <>
+              {hiddenPicks === 1 ? "One component you picked is" : `${hiddenPicks} components you picked are`} not drawn
+              here{mode === "focused" ? " \u2014 collapsed away as a pass-through, or below a component that was" : ""}.
+              {mode === "focused" ? " Switch to Everything to see " : " They are still in your selection, and the Components table lists "}
+              {hiddenPicks === 1 ? "it" : "them"}.
+            </>
+          ) : null,
           <>
             A wide pale box rendered expensive children and cost nothing itself &mdash; memoize it, or move the work
             down. A narrow hot box is the component to go and change.

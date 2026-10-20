@@ -475,19 +475,23 @@
    close it at either side. Same two pixels and colour as the ring the other
    three views draw, so one picked frame looks picked wherever it appeared. */
 .explore-table tr.is-picked > th,
-.explore-table tr.is-picked > td {
+.explore-table tr.is-picked > td,
+.react-component-table tr.is-picked > th,
+.react-component-table tr.is-picked > td {
   background: color-mix(in srgb, var(--primary) 14%, transparent);
   box-shadow:
     inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
     inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent);
 }
-.explore-table tr.is-picked > th:first-child {
+.explore-table tr.is-picked > th:first-child,
+.react-component-table tr.is-picked > th:first-child {
   box-shadow:
     inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
     inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
     inset 2px 0 0 color-mix(in srgb, var(--primary) 62%, transparent);
 }
-.explore-table tr.is-picked > td:last-child {
+.explore-table tr.is-picked > td:last-child,
+.react-component-table tr.is-picked > td:last-child {
   box-shadow:
     inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
     inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent),

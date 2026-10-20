@@ -38,9 +38,13 @@ export interface ExploreViewProps {
   /** `ReactExplorer.commitKey`, for hosts that hold the selected commit. */
   commitKey?: string;
   /**
-   * `TaskExplorer.selection`, for a host that lets its reader pick frames out of
-   * the task views and wants them back. Task views only: a React recording's
-   * components are addressed some other way.
+   * `TaskExplorer.selection` and `ReactExplorer.selection`, for a host that lets
+   * its reader pick frames or components out of the views and wants them back.
+   *
+   * One prop for both because a host holds one set of ids either way; which kind
+   * of id they are follows from what it handed over. A task frame is a
+   * `TaskTreeNode.id`, a React component is a `reactNodeKey`, and no Explore
+   * draws both at once.
    */
   selection?: FrameSelection;
   /** `ReactExplorer.defaultCommitKey`, for hosts that only name where to open. */
@@ -98,7 +102,7 @@ export function ExploreView({
         <EmptyState title="Nothing to explore" description={`${react.reason} Re-run the analysis and choose Explore again.`} />
       ) : null}
       {react?.state === "ready" ? (
-        <ReactExplorer handoff={react.handoff} commitKey={commitKey} defaultCommitKey={defaultCommitKey} onCommitChange={onCommitChange} />
+        <ReactExplorer handoff={react.handoff} commitKey={commitKey} defaultCommitKey={defaultCommitKey} onCommitChange={onCommitChange} selection={selection} />
       ) : null}
       {task?.state === "ready" ? (
         <TaskExplorer handoff={task.handoff} focusNodeId={focusNodeId} onFocusChange={onFocusChange} selection={selection} />

@@ -88,3 +88,38 @@ export function PickTick({ selection, nodeId }: { selection: FrameSelection | un
   const at = pickNumber(selection, nodeId);
   return at === undefined ? null : <span className="explore-picked-tick" aria-hidden="true">{at}</span>;
 }
+
+/**
+ * The id a picked React component carries.
+ *
+ * A task frame is addressed by one id across all four of its views because the
+ * merged call tree gives it one. A React recording has no such tree: a fiber id
+ * is unique inside its root and nowhere else, and the same component rendered in
+ * forty commits is forty fibers that may or may not share a number. So the id a
+ * pick is held by names the commit as well — `<rootId>.<commitIndex>.<fiberId>`,
+ * the commit key the explorer already keeps in its address bar with the fiber
+ * appended.
+ *
+ * Naming the commit is what lets a selection outlive the commit picker. A reader
+ * works a cascade by stepping through commits, and the question they are
+ * assembling is usually "these components, in these commits"; a per-commit set
+ * would empty itself under exactly the navigation the reading is made of.
+ */
+export function reactNodeKey(commit: { rootId: number; commitIndex: number }, fiberId: number): string {
+  return `${commit.rootId}.${commit.commitIndex}.${fiberId}`;
+}
+
+/**
+ * The commit a picked component belongs to, or nothing when the id names no
+ * commit at all.
+ *
+ * The host resolves picks against a recording it holds, and a pick made three
+ * commits ago has to find its way back to the commit that explains it.
+ */
+export function reactNodeKeyParts(key: string): { rootId: number; commitIndex: number; fiberId: number } | undefined {
+  const parts = key.split(".");
+  if (parts.length !== 3) return undefined;
+  const [rootId, commitIndex, fiberId] = parts.map(Number);
+  if (![rootId, commitIndex, fiberId].every(Number.isInteger)) return undefined;
+  return { rootId: rootId!, commitIndex: commitIndex!, fiberId: fiberId! };
+}

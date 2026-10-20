@@ -384,3 +384,83 @@ test('the built package asks nothing of Node or Next', { skip: needsBuild }, () 
     }
   }
 });
+
+test('a host that passes a selection gets picking in the React views too', { skip: needsBuild }, () => {
+  // The same seam as the task side, over a recording instead of a task. What is
+  // different here is the id: a fiber id is unique inside its root and nowhere
+  // else, so the pick names the commit as well, which is what lets a selection
+  // survive the commit picker a reader walks a cascade with.
+  const handoff = reactHandoff();
+  const longest = [...handoff.explore.commits].sort((a, b) => b.durationMs - a.durationMs)[0];
+  assert.ok(longest && longest.tree.length > 0, 'the fixture has a commit with a tree');
+
+  const fibers = [];
+  const walk = (nodes) => { for (const node of nodes) { fibers.push(node); walk(node.children); } };
+  walk(longest.tree);
+  const heaviest = [...fibers].sort((a, b) => b.selfMs - a.selfMs)[0];
+  const key = explore.reactNodeKey(longest, heaviest.id);
+
+  assert.deepEqual(explore.reactNodeKeyParts(key),
+    { rootId: longest.rootId, commitIndex: longest.commitIndex, fiberId: heaviest.id },
+    'a pick says which commit it was made in, so a host can resolve it later');
+  assert.equal(explore.reactNodeKeyParts('not.a.key'), undefined);
+  assert.equal(explore.reactNodeKeyParts('1.2'), undefined, 'a commit key is not a component pick');
+
+  const selection = { enabled: true, selectedNodeIds: [key], onToggleSelection: () => {} };
+
+  // The render tree is the tab the explorer opens on, so this is the whole way
+  // through: a hand-off and a set of ids in, a ringed and numbered box out.
+  const html = renderToString(createElement(explore.ReactExplorer, { handoff, selection }));
+  assert.match(html, /ring-2 ring-ring ring-inset/, 'the picked component is ringed in the icicle');
+  assert.match(html, /text-primary-foreground">1</, 'and numbered as the pick it is');
+  assert.match(html, /Click a component to add it to your selection/, 'and the hint says a click no longer zooms');
+
+  // The table is the other half, and renders on its own because the tab beside
+  // it is not mounted until a reader opens it.
+  const table = renderToString(createElement(explore.ReactComponentTable, { commit: longest, selection }));
+  assert.match(table, /class="[^"]*is-picked/, 'the picked row carries the pick class');
+  assert.match(table, /class="explore-picked-tick/, 'and the pill that says which pick it is');
+  assert.match(table, /aria-pressed="true"/, 'a picked row reports that it is pressed');
+
+  // The regression this prop must not become: a host that asks for nothing sees
+  // the recording it always saw, and its component names stay plain text rather
+  // than becoming buttons that do nothing.
+  const plain = renderToString(createElement(explore.ReactExplorer, { handoff }));
+  assert.doesNotMatch(plain, /is-picked|explore-picked-tick/, 'no selection, no pick drawing');
+  const plainTable = renderToString(createElement(explore.ReactComponentTable, { commit: longest }));
+  assert.doesNotMatch(plainTable, /is-picked|explore-picked-tick|explore-pickable-row/);
+  assert.match(plainTable, /<span class="react-component-name">/, 'a name that navigates nowhere is not a button');
+
+  // A pick made in another commit is still held, and is simply not drawn here —
+  // the view says so rather than losing it.
+  const elsewhere = explore.reactNodeKey({ rootId: longest.rootId, commitIndex: longest.commitIndex + 50 }, heaviest.id);
+  assert.equal(explore.reactPicksInCommit(longest, { enabled: true, selectedNodeIds: [key, elsewhere], onToggleSelection: () => {} }), 1,
+    'only the picks of this commit count as this commit’s');
+});
+
+test('a React pick rings the fiber that was clicked and not its namesakes', { skip: needsBuild }, () => {
+  // The opposite of the task side, deliberately. A task tree merges a function's
+  // call sites, so one pick has to ring every box drawing it. React merges
+  // nothing: two renders of one component are two fibers with their own causes,
+  // their own changed props and their own time, and ringing both would claim a
+  // sameness React did not record.
+  const commit = { rootId: 1, commitIndex: 3 };
+  const tree = {
+    id: 'commit:0', name: 'Commit 3', value: 10, selfValue: 1,
+    children: [
+      { id: 'commit.0:7', name: 'Row', value: 5, selfValue: 5, children: [] },
+      { id: 'commit.1:9', name: 'Row', value: 4, selfValue: 4, children: [] },
+    ],
+  };
+  const picks = explore.pickedReactFlame(tree, commit, {
+    enabled: true, selectedNodeIds: ['1.3.9'], onToggleSelection: () => {},
+  });
+  assert.deepEqual(picks.labels, { 'commit.1:9': '1' }, 'the other Row is a different render and stays unringed');
+  assert.equal(picks.keyOf('commit.0:7'), '1.3.7', 'an unpicked box still knows which component a click would pick');
+  assert.equal(picks.keyOf('commit:0'), undefined, 'the commit root is the reconciler, not a component');
+  assert.equal(picks.drawnPicks, 1);
+
+  const none = explore.pickedReactFlame(tree, commit, undefined);
+  assert.equal(none.labels, undefined, 'no selection, no labels');
+  assert.equal(none.keyOf('commit.0:7'), '1.3.7', 'and the mapping still works for the first pick of all');
+});
