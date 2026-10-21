@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/@changesets/config@4.0.1/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [["@callstack/tracesift", "@callstack/tracesift-explore"]],
   "linked": [],
   "access": "public",
   "baseBranch": "main",
