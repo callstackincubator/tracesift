@@ -1,6 +1,6 @@
 {
   "name": "@callstack/tracesift",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Managed local CPU profile analysis with AI",
   "license": "MIT",
   "type": "module",

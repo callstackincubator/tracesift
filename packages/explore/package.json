@@ -1,6 +1,6 @@
 {
   "name": "@callstack/tracesift-explore",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "TraceSift's profile drill-down views: task timeline, flame graph, call tree, React commits",
   "license": "MIT",
   "type": "module",
