@@ -53,7 +53,12 @@ async function main() {
   assert(['darwin', 'linux'].includes(platform) && ['arm64', 'x64'].includes(arch), `Unsupported artifact target: ${platform}-${arch}`);
   const app = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const cli = JSON.parse(await readFile(join(root, 'packages/cli/package.json'), 'utf8'));
-  assert(app.dependencies?.[cli.name] === cli.version, 'The app and CLI versions must match before packaging.');
+  const dependency = app.dependencies?.[cli.name];
+  assert(dependency, `The app must depend on ${cli.name} before packaging.`);
+  assert(
+    dependency === cli.version || /^workspace:(\*|\^|~)$/.test(dependency),
+    'The app and CLI versions must match before packaging.',
+  );
   assert(app.version === cli.version, 'The application and CLI package versions must match before packaging.');
   assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(app.version), 'Invalid application version.');
   const revision = process.env.TRACESIFT_RELEASE_REVISION || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
