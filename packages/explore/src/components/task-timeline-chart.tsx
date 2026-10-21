@@ -76,7 +76,7 @@ export function TaskTimelineChart({
           called
           {uncoveredMs > 0.5 ? ` · ${formatMs(uncoveredMs)} in React or unnamed engine code` : ""}
           {timeline.omittedBoxCount > 0
-            ? ` · ${timeline.omittedBoxCount} calls too short to draw`
+            ? ` · ${timeline.omittedBoxCount} calls too short or too many to draw`
             : ""}
         </span>
       </div>

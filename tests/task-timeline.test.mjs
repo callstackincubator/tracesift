@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { buildCallTree } from '../src/lib/call-tree.ts';
 import { buildTaskTimeline } from '../src/lib/task-timeline.ts';
+
+const execFileAsync = promisify(execFile);
+const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const node = (id, name, children = [], url = 'app/screen.js') => ({
   id, children, callFrame: { functionName: name, scriptId: '1', url, lineNumber: 0, columnNumber: 0 },
@@ -32,6 +38,36 @@ const tableOf = (byName) => ({
   classOf: (frame) => byName[frame.functionName] ?? 'framework',
   degraded: false, resolvedByModel: 0,
   usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costUsd: 0 },
+});
+
+test('a recording that opens a new box every sample is capped while it is built', async () => {
+  // Four million boxes is what this recording wants: a kept stack that shares
+  // nothing with the one before it never leaves a call open, so each sample
+  // opens a row per frame. The chart must not draw them, and it must not have
+  // to hold them to learn that. A guard that prunes the finished array still
+  // allocates all four million — seven hundred megabytes here, in the middle of
+  // an analysis whose other pass over the same profile costs thirty — and dies
+  // on a machine with less heap, which is the opposite of a guard rail.
+  //
+  // The child is spawned under a heap the old cost cannot fit in, so this fails
+  // by running out of memory rather than by timing out on somebody's CI box.
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    ['--experimental-strip-types', '--max-old-space-size=128', 'tests/timeline-churn-fixture.mjs'],
+    { cwd: projectRoot, maxBuffer: 4 * 1024 * 1024 },
+  );
+  const built = JSON.parse(stdout);
+
+  // Nothing of the sort was built: four million boxes are reported, none drawn.
+  assert.equal(built.keptUnder, 4_000_000);
+  assert.equal(built.boxes, 0, 'no call of a twenty-deep stack survives a cap this far over');
+  assert.equal(built.rows, 0);
+  assert.equal(built.omitted, built.keptUnder, 'every call it declined to build is counted');
+  assert.equal(built.omittedMs, built.durationMs, 'overlapping build and prune omissions are counted once');
+  // And the axis still tells the truth about the time: a chart with no rows is
+  // not a task that ran in framework code, and reading it as one would be a
+  // worse answer than the one that costs too much to draw.
+  assert.equal(built.coveredMs, built.durationMs, 'collapsed time is still covered time');
 });
 
 test('a frame called twice is two boxes at the positions it ran', () => {

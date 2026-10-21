@@ -34,8 +34,28 @@ const DEPENDENCY_URL = /(?:^|[\\/])node_modules[\\/]/;
 /**
  * Chunk names a bundler generates for third-party code. These are decisive:
  * nothing a product developer wrote ends up in a file called `vendors~main`.
+ *
+ * Tested against the file's name rather than the whole URL, and anchored at the
+ * start rather than scanning to the end. The URL arrives with an uploaded
+ * profile, and a pattern of the shape `prefix[-.][^\\/]*$` is quadratic on a
+ * name whose tail never satisfies that end anchor: `vendors~` followed by tens
+ * of thousands of dashes and a separator made one classification take seconds,
+ * and there is one classification per distinct frame in the recording. Cutting
+ * the name first leaves the pattern nothing to backtrack over, because a name
+ * carries no separators by construction.
  */
-const VENDOR_CHUNK = /(?:^|[\\/])(?:vendor|vendors|vendors~[^/\\]*|chunk-vendors|framework|polyfills)[-.][^\\/]*$/i;
+const VENDOR_CHUNK_NAME = /^(?:vendors~[^/\\]*|(?:vendor|vendors|chunk-vendors|framework|polyfills))[-.]/i;
+
+/**
+ * Whether a frame's URL names one of those chunks, which is the same as asking
+ * whether its last path segment does: the old pattern's `[^\\/]*$` tail already
+ * refused a match at anything but the final segment.
+ */
+function isVendorChunkUrl(url: string): boolean {
+  let start = url.length;
+  while (start > 0 && url[start - 1] !== "/" && url[start - 1] !== "\\") start -= 1;
+  return VENDOR_CHUNK_NAME.test(url.slice(start));
+}
 
 /**
  * A single bundled artefact holds application and dependency code together, so
@@ -71,7 +91,7 @@ export function classifyByRule(frame: CdpCallFrame, codeSplit = false): FrameCla
   if (ANONYMOUS_NAMES.has(name) && !url) return "anonymous";
   if (VIRTUAL_SCHEME.test(url)) return "native";
   if (isFrameworkInternalFrame(frame)) return "framework";
-  if (DEPENDENCY_URL.test(url) || VENDOR_CHUNK.test(url)) return "library";
+  if (DEPENDENCY_URL.test(url) || isVendorChunkUrl(url)) return "library";
   if (ANONYMOUS_NAMES.has(name)) return "anonymous";
   // No URL means the engine, with one exception: the call wrappers V8 parks at
   // the boundary between native and JavaScript name a real call the product
@@ -86,7 +106,7 @@ export function classifyByRule(frame: CdpCallFrame, codeSplit = false): FrameCla
   // meaning: the same chunk holds mangled identifiers that would head a card
   // as `l` or `t.A`, and those stay residue.
   if (BUNDLE_URL.test(url)) {
-    return codeSplit && !VENDOR_CHUNK.test(url) && isMeaningfulFrame(frame) ? "app" : undefined;
+    return codeSplit && !isVendorChunkUrl(url) && isMeaningfulFrame(frame) ? "app" : undefined;
   }
   // A path a developer could open, outside `node_modules`, is their own code.
   // `source-location.ts` already owns the question of what counts as one, and
@@ -128,7 +148,7 @@ const UNRESOLVED: FrameClass = "library";
  */
 export function ruleClassTable(frames: Iterable<CdpCallFrame> = []): FrameClassTable {
   const all = [...frames];
-  const codeSplit = all.some((frame) => VENDOR_CHUNK.test(frame.url));
+  const codeSplit = all.some((frame) => isVendorChunkUrl(frame.url));
   const unresolved = new Set<string>();
   for (const frame of all) {
     if (!classifyByRule(frame, codeSplit)) unresolved.add(frameClassKey(frame));

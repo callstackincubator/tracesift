@@ -67,6 +67,20 @@ test("a Metro bundle's build options never reach the label", () => {
   assert.ok(!isSourceLabel(compactLocation(metro, 193701, 39)), 'a bundle is not a file to open');
 });
 
+test('a URL made of separators costs one pass, not one per character', () => {
+  // A frame's URL arrives with an uploaded profile, so its shape is somebody
+  // else's choice. The two patterns these functions used to lean on are both
+  // quadratic when the tail never satisfies the end anchor — a run of slashes,
+  // or a run of `1-` pairs with no dot to close a fingerprint — which let one
+  // artefact name cost seconds, once per distinct frame in the recording.
+  // Correctness is already pinned above; what is pinned here is the cost.
+  const before = process.hrtime.bigint();
+  assert.equal(compactLocation(`http://h/a${'/'.repeat(200_000)}x`, 1, 1), 'x:2:2');
+  assert.equal(compactLocation(`https://x/${'1-'.repeat(200_000)}.js`, 1, 1), `${'1-'.repeat(200_000)}.js:2:2`);
+  const ms = Number(process.hrtime.bigint() - before) / 1e6;
+  assert.ok(ms < 500, `compacting two pathological URLs took ${ms.toFixed(0)} ms`);
+});
+
 test('a path is shown from the part that tells one row from another', () => {
   // The machine the profile was recorded on is not information.
   assert.equal(

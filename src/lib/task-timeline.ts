@@ -68,11 +68,17 @@ export interface TaskTimeline {
   /** Which classes survived the filter, so the view can name what it is hiding. */
   kept: FrameClass[];
   /**
-   * Calls too narrow to draw, dropped with everything nested inside them. Zero
-   * on any ordinary task; the cap exists so a pathological recording cannot
-   * hand the browser a million boxes.
+   * Calls the chart declined to draw, either too narrow to be worth a row or
+   * past the point where building more stopped being worth it. Zero on any
+   * ordinary task; the caps exist so a pathological recording cannot hand the
+   * browser a million boxes, nor the analysis the memory of building them.
    */
   omittedBoxCount: number;
+  /**
+   * Wall time spent under a kept frame that the chart therefore does not draw.
+   * Not the sum of the omitted calls' own durations — those nest, so they would
+   * count the same millisecond once per row.
+   */
   omittedBoxMs: number;
 }
 
@@ -140,9 +146,24 @@ export function isShownFrame(name: string, frameClass: FrameClass, kept: Readonl
 /**
  * More boxes than a browser can lay out without stalling. A three-second task
  * with the framework collapsed away draws six or seven thousand, so this is a
- * guard rail rather than a working limit.
+ * guard rail rather than a working limit. `prune` narrows the chart to it.
  */
 const MAX_BOXES = 24_000;
+
+/**
+ * More boxes than it is worth to build on the way to that narrowing.
+ *
+ * A recording whose kept stack changes between every sample opens one box per
+ * frame per sample, so the count is samples × depth: two hundred thousand
+ * samples of a twenty-deep stack is four million boxes, seven hundred megabytes
+ * allocated and thrown away, against the three megabytes the call tree built
+ * from the same profile costs. Narrowing by call width is still the right cut
+ * for a chart a reader can use, so the build stops at a ceiling wide enough to
+ * make that judgement over — 192,000 boxes is under forty megabytes, and a
+ * real three-second task is two orders of magnitude under even that — and what
+ * it refused to build is reported as omitted rather than silently missing.
+ */
+const MAX_BUILT_BOXES = MAX_BOXES * 8;
 
 interface OpenBox {
   key: string;
@@ -165,6 +186,9 @@ export function buildTaskTimeline(
   let open: OpenBox[] = [];
   let clock = 0;
   let coveredMs = 0;
+  let omittedBoxCount = 0;
+  let unownedOmittedBoxMs = 0;
+  const omittedBoxMsByOwner: number[] = [];
 
   const closeFrom = (depth: number) => {
     for (let index = open.length - 1; index >= depth; index -= 1) {
@@ -207,7 +231,15 @@ export function buildTaskTimeline(
     while (shared < open.length && shared < chain.length && open[shared].key === chain[shared].key) shared += 1;
     closeFrom(shared);
 
-    for (let depth = shared; depth < chain.length; depth += 1) {
+    // Frames past the ceiling are never built. What is left open absorbs their
+    // time as self time, which is how this chart already treats the framework
+    // frames it collapses: time a drawn call spent, with no row of its own.
+    const buildable = Math.min(chain.length, shared + (MAX_BUILT_BOXES - boxes.length));
+    if (chain.length > buildable) {
+      omittedBoxCount += chain.length - buildable;
+    }
+
+    for (let depth = shared; depth < buildable; depth += 1) {
       const source = chain[depth];
       const location = nodeLocation(source);
       const box: TimelineBox = {
@@ -221,8 +253,18 @@ export function buildTaskTimeline(
         nodeId: source.id,
       };
       parentOf.push(depth > 0 ? open[depth - 1].index : -1);
+      omittedBoxMsByOwner.push(0);
       boxes.push(box);
       open.push({ key: source.key, box, index: boxes.length - 1, endMs: clock });
+    }
+
+    if (chain.length > buildable) {
+      // Remember which drawn box absorbed the omitted suffix. If pruning later
+      // drops that owner, its duration already includes this sample and must
+      // not be counted a second time in the omission total.
+      const owner = open[open.length - 1];
+      if (owner) omittedBoxMsByOwner[owner.index] += weight;
+      else unownedOmittedBoxMs += weight;
     }
 
     clock += weight;
@@ -231,20 +273,27 @@ export function buildTaskTimeline(
       coveredMs += weight;
       // Self time is what the innermost kept frame did not hand to another kept
       // frame. Framework work it delegated to counts as its own here, because
-      // after collapsing there is nothing else on the chart to charge it to.
+      // after collapsing there is nothing else on the chart to charge it to —
+      // and so does the work below the ceiling the build stopped at.
       open[open.length - 1].box.selfMs += weight;
+    } else if (chain.length > 0) {
+      // A kept frame ran and nothing was drawn for it, because the ceiling was
+      // already reached. The axis is still not idle here — a gap says the
+      // product was not on the stack, and that would be a lie — so the time is
+      // covered. It is reported through the omission, not through a row.
+      coveredMs += weight;
     }
   }
   closeFrom(0);
 
-  const pruned = prune(boxes, parentOf, durationMs);
+  const pruned = prune(boxes, parentOf, durationMs, omittedBoxMsByOwner, unownedOmittedBoxMs);
   return {
     boxes: pruned.boxes.map(round),
     durationMs: round1(durationMs),
     coveredMs: round1(coveredMs),
     rows: pruned.boxes.reduce((deepest, box) => Math.max(deepest, box.depth + 1), 0),
     kept: [...kept],
-    omittedBoxCount: pruned.omittedBoxCount,
+    omittedBoxCount: omittedBoxCount + pruned.omittedBoxCount,
     omittedBoxMs: round1(pruned.omittedBoxMs),
   };
 }
@@ -258,8 +307,16 @@ function prune(
   boxes: TimelineBox[],
   parentOf: number[],
   durationMs: number,
+  omittedBoxMsByOwner: number[],
+  unownedOmittedBoxMs: number,
 ): { boxes: TimelineBox[]; omittedBoxCount: number; omittedBoxMs: number } {
-  if (boxes.length <= MAX_BOXES) return { boxes, omittedBoxCount: 0, omittedBoxMs: 0 };
+  if (boxes.length <= MAX_BOXES) {
+    return {
+      boxes,
+      omittedBoxCount: 0,
+      omittedBoxMs: unownedOmittedBoxMs + omittedBoxMsByOwner.reduce((sum, value) => sum + value, 0),
+    };
+  }
 
   // Start at a width no screen could draw and double until the count fits. A
   // box opens after its parent, so one forward pass settles every ancestor.
@@ -275,7 +332,7 @@ function prune(
     if (kept <= MAX_BOXES) {
       const survivors: TimelineBox[] = [];
       let omittedBoxCount = 0;
-      let omittedBoxMs = 0;
+      let omittedBoxMs = unownedOmittedBoxMs;
       for (let index = 0; index < boxes.length; index += 1) {
         if (dropped[index]) {
           omittedBoxCount += 1;
@@ -285,12 +342,21 @@ function prune(
           continue;
         }
         survivors.push(boxes[index]);
+        omittedBoxMs += omittedBoxMsByOwner[index];
       }
       return { boxes: survivors, omittedBoxCount, omittedBoxMs };
     }
     floor *= 2;
   }
-  return { boxes: boxes.slice(0, MAX_BOXES), omittedBoxCount: boxes.length - MAX_BOXES, omittedBoxMs: 0 };
+  let omittedBoxMs = unownedOmittedBoxMs;
+  for (let index = 0; index < boxes.length; index += 1) {
+    if (index < MAX_BOXES) {
+      omittedBoxMs += omittedBoxMsByOwner[index];
+    } else if (parentOf[index] < 0 || parentOf[index] < MAX_BOXES) {
+      omittedBoxMs += boxes[index].durationMs;
+    }
+  }
+  return { boxes: boxes.slice(0, MAX_BOXES), omittedBoxCount: boxes.length - MAX_BOXES, omittedBoxMs };
 }
 
 /** Microsecond precision. A chart is read by eye, and the payload is per box. */
