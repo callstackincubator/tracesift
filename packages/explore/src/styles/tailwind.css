@@ -1,0 +1,43 @@
+/* The Tailwind v4 entry the published stylesheet is compiled from.
+ *
+ * Consumers import the built `@callstack/tracesift-explore/styles.css` and never
+ * run Tailwind themselves. Rebuild it with `npm run build` in this package.
+ *
+ * `@rozenite/ui/styles.css` is the library's own Tailwind source — preflight, the
+ * token blocks, the `.dark` variant — so this sheet carries everything the views
+ * need on its own: the app loads one file, and so does a bundled plugin panel
+ * with no PostCSS in its pipeline.
+ *
+ * The `@source` lines are what decide which utilities survive into the output:
+ * the library's own components, this package's, and the three classes a host
+ * passes in as strings that nothing here mentions (`overflow-visible` is on the
+ * flame graph, so it can spill its tooltip outside the scrolling box;
+ * `dark h-screen bg-background` is what the app paints while it waits for the
+ * stored theme to be read).
+ */
+@import "@rozenite/ui/styles.css";
+
+@source "../";
+
+@source inline("overflow-visible");
+@source inline("dark h-screen bg-background");
+
+/* Fonts are the host's call, never this sheet's.
+ *
+ * Tailwind would otherwise write its own `--font-sans` / `--font-mono` stacks
+ * into `:root`, and a consumer that loads this file after its own stylesheet
+ * would watch its mono and sans fonts get replaced — the app sets
+ * `--font-mono: var(--font-geist-mono)` in `globals.css` and roughly a hundred
+ * rules read it. `@theme reference` keeps the utilities generating (`.font-mono`
+ * and friends still exist) while emitting nothing into `:root`, and the
+ * fallbacks are inline in each rule instead: honour `--font-mono` when the host
+ * has one, otherwise a system mono stack. Same for the sans side, which is also
+ * what `body` and `code`/`pre` preflight resolve to.
+ */
+@theme reference {
+  --font-sans: var(--font-sans, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji");
+  --font-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+}
+
+@import "./shared.css";
+@import "./explore.css";

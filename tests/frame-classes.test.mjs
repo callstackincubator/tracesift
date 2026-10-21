@@ -68,6 +68,19 @@ test('a profile the rules answer in full is not degraded', () => {
   assert.equal(table.unresolvedCount, 0);
 });
 
+test('a URL whose shape was chosen to be slow is still classified at a glance', () => {
+  // The vendor-chunk rule reads an uploaded profile's URL, and the pattern it
+  // used carried an unbounded run before a required separator and an end anchor,
+  // which is quadratic the moment the tail cannot satisfy that anchor. One
+  // crafted URL of this shape held the whole classification for seconds.
+  const evil = { functionName: 'render', url: `vendors~${'-'.repeat(200_000)}/`, scriptId: '1', lineNumber: 0, columnNumber: 0 };
+  const before = process.hrtime.bigint();
+  assert.equal(classifyByRule(evil), undefined, 'a name no rule can settle still falls through');
+  assert.equal(ruleClassTable([evil]).classOf(evil), 'library');
+  const ms = Number(process.hrtime.bigint() - before) / 1e6;
+  assert.ok(ms < 500, `classifying one pathological URL took ${ms.toFixed(0)} ms`);
+});
+
 test('no model runs for a classification, whatever is configured', async () => {
   // The guarantee this module exists to keep: uploading a profile is a
   // measurement. `pi-agent` is the only way to a provider, and nothing on

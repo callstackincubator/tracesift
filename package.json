@@ -6,6 +6,7 @@
     "postinstall": "patch-package --error-on-fail",
     "dev": "node --max-old-space-size=8192 --import @callstack/tracesift/bootstrap node_modules/next/dist/bin/next dev",
     "build": "next build",
+    "build:explore": "npm run build --workspace @callstack/tracesift-explore",
     "artifact:package": "node scripts/package-standalone.mjs",
     "changeset": "changeset",
     "release:version": "changeset version && node scripts/sync-release-version.mjs && npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
@@ -17,7 +18,8 @@
     "test:release:local": "node scripts/test-local-release.mjs"
   },
   "dependencies": {
-    "@callstack/tracesift": "0.5.0",
+    "@callstack/tracesift": "workspace:*",
+    "@callstack/tracesift-explore": "workspace:*",
     "@earendil-works/pi-coding-agent": "0.87.1",
     "@rozenite/ui": "^2.4.0",
     "agent-react-devtools": "0.4.0",
@@ -41,6 +43,7 @@
     "typescript": "^5"
   },
   "workspaces": [
-    "packages/cli"
+    "packages/cli",
+    "packages/explore"
   ]
 }

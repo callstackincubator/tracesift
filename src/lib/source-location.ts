@@ -34,7 +34,77 @@ export function frameSourceLocation(frame: { url: string; lineNumber: number; co
 function stripContentHash(fileName: string): string {
   // Only a hash that follows a stem is removed; a bare `base64url.js` is the
   // stem itself and keeps its name.
-  return fileName.replace(/(?<=[^-.])[-.]([0-9a-f]{8,}|(?=[\w-]*\d)(?=[\w-]*[a-zA-Z])[\w-]{8,})(?=\.)/g, "");
+  //
+  // Read left to right rather than matched. The pattern this replaced was
+  // quadratic on a name whose tail never satisfies its end anchor — a run of
+  // `1-1-1-…` with no dot to close a fingerprint cost seconds — and a frame's
+  // URL arrives with an uploaded profile, so its shape is somebody else's
+  // choice, and this ran once per distinct frame. One pass says the same thing:
+  // a separator that follows a stem, opening at least eight characters of one
+  // of the two fingerprint shapes, up to the next dot.
+  const DASH = 45;
+  const DOT = 46;
+  const isWord = (code: number) =>
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    || code === 95 || code === DASH;
+  const isDigit = (code: number) => code >= 48 && code <= 57;
+  // Lower-case only, as the pattern it replaces was: `A` is not a hex digit here.
+  const isHexDigit = (code: number) => isDigit(code) || (code >= 97 && code <= 102);
+  const isLetter = (code: number) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+
+  let out = "";
+  let index = 0;
+  // The run the last separator was measured against, and what it holds from
+  // there on. Every candidate ends where its run ends, so measuring the run once
+  // settles every separator inside it; a `-` is itself a word character, so the
+  // runs of consecutive separators overlap and the counts only ever lose
+  // characters at the front. That is what keeps a separator cheap.
+  let runEnd = 0;
+  let countedTo = 0;
+  let nonHex = 0;
+  let digits = 0;
+  let letters = 0;
+
+  while (index < fileName.length) {
+    const code = fileName.charCodeAt(index);
+    // A stem has to precede the separator, which is why index 0 never qualifies:
+    // there is nothing there to keep.
+    const seam = index > 0 && (code === DASH || code === DOT)
+      && fileName.charCodeAt(index - 1) !== DASH && fileName.charCodeAt(index - 1) !== DOT;
+    if (seam) {
+      const start = index + 1;
+      if (start > runEnd) {
+        runEnd = start;
+        while (runEnd < fileName.length && isWord(fileName.charCodeAt(runEnd))) runEnd += 1;
+        countedTo = start;
+        nonHex = 0;
+        digits = 0;
+        letters = 0;
+        for (let at = start; at < runEnd; at += 1) {
+          const character = fileName.charCodeAt(at);
+          if (!isHexDigit(character)) nonHex += 1;
+          if (isDigit(character)) digits += 1;
+          if (isLetter(character)) letters += 1;
+        }
+      } else {
+        while (countedTo < start) {
+          const character = fileName.charCodeAt(countedTo);
+          if (!isHexDigit(character)) nonHex -= 1;
+          if (isDigit(character)) digits -= 1;
+          if (isLetter(character)) letters -= 1;
+          countedTo += 1;
+        }
+      }
+      if (runEnd - start >= 8 && fileName.charCodeAt(runEnd) === DOT
+        && (nonHex === 0 || (digits > 0 && letters > 0))) {
+        index = runEnd;
+        continue;
+      }
+    }
+    out += fileName[index];
+    index += 1;
+  }
+  return out;
 }
 
 /**
@@ -48,9 +118,23 @@ function stripContentHash(fileName: string): string {
  * `index.bundle`, which is what a reader needs; a path with a literal `&` in a
  * directory name loses the rest of itself, and that trade is worth taking
  * against a bundle label nobody can read.
+ *
+ * Cut by hand rather than with `replace(/\/+$/, "")`: a URL arrives with an
+ * uploaded profile, and that pattern is quadratic on the tail of one that is
+ * mostly separators — Metro's `//&platform=` form is one character away from it.
+ * Scanning is the same rule with nothing to backtrack over.
  */
 function stripRequest(url: string): string {
-  return url.split(/[?#&]/, 1)[0].replace(/\/+$/, "");
+  let end = url.length;
+  for (let index = 0; index < url.length; index += 1) {
+    const character = url[index];
+    if (character === "?" || character === "#" || character === "&") {
+      end = index;
+      break;
+    }
+  }
+  while (end > 0 && url[end - 1] === "/") end -= 1;
+  return url.slice(0, end);
 }
 
 /** The shortest label that still identifies a frame's position. */

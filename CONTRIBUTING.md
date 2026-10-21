@@ -15,7 +15,7 @@ cd tracesift
 npm ci
 ```
 
-If you already have a checkout, run `npm ci` from its root. The root install also links the CLI workspace; no global CLI installation is needed.
+If you already have a checkout, run `npm ci` from its root. The root install also links the CLI and Explore workspaces; no global CLI installation is needed. The Explore workspace (`packages/explore`, published as `@callstack/tracesift-explore`) builds its `dist` during that install; rebuild it on its own with `npm run build:explore`.
 
 Use a separate home for development so testing does not change your normal TraceSift configuration:
 

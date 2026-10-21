@@ -1,0 +1,689 @@
+
+
+/* ---------------------------------------------------------------------------
+   Card drill-down (/explore)
+   One card's subtree, in its own tab: a flame graph for where the time is, a
+   call tree for what called what, and a table of the work that repeated.
+   --------------------------------------------------------------------------- */
+
+.explore-page {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.explore-header { display: flex; flex-direction: column; gap: 8px; }
+.explore-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+.explore-shape {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-location {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.explore-figures strong { font-size: 18px; color: var(--primary); }
+.explore-figures span { opacity: 0.5; }
+/* A note under a chart or a table. Capped at a readable measure rather than
+   taking the container's: these sit under charts that run the width of the
+   page, and at 12px an uncapped line ran past 150 characters. Italic stays,
+   because what is left under this class is the one-line aside it suits; the
+   multi-line notes moved to `.chart-notes` below. */
+.explore-caveat {
+  max-width: 72ch;
+  font-size: 12px;
+  line-height: 1.55;
+  font-style: italic;
+  color: var(--muted-foreground);
+}
+
+/* ── The notes under a chart ──────────────────────────────────────────────────
+   Three jobs that used to share one paragraph, now stacked in the order they
+   are read: the reading key on arrival, the controls when a reader wants to
+   move, and the caveats folded away until a figure looks wrong. The key is
+   upright and at the body colour because it is the one line here that is not
+   an aside. */
+.chart-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 72ch;
+  margin-top: 10px;
+}
+.chart-notes-reading {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+.chart-notes-controls {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
+.chart-notes-caveats { font-size: 12px; color: var(--muted-foreground); }
+.chart-notes-caveats > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.chart-notes-caveats > summary::-webkit-details-marker { display: none; }
+.chart-notes-caveats > summary::before {
+  content: "\25B8";
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+.chart-notes-caveats[open] > summary::before { transform: rotate(90deg); }
+.chart-notes-caveats > summary:hover { opacity: 1; color: var(--foreground); }
+/* Block, not flex: a flex container drops the list markers, and the markers are
+   most of what makes these read as a list rather than as the paragraph they
+   used to be. */
+.chart-notes-caveats ul {
+  margin: 7px 0 0;
+  padding-left: 1.2em;
+  list-style: disc;
+  line-height: 1.55;
+}
+.chart-notes-caveats li { margin: 0 0 5px; }
+.chart-notes-caveats li:last-child { margin-bottom: 0; }
+.chart-notes-caveats li::marker { opacity: 0.6; }
+.chart-notes-caveats strong { color: var(--foreground); font-weight: 600; }
+.chart-notes-caveats code,
+.chart-notes-reading code { font-family: var(--font-mono, monospace); font-size: 11.5px; }
+.explore-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.explore-path-label { text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.explore-path-frame + .explore-path-frame::before { content: "→ "; opacity: 0.5; }
+
+/* A segmented control rather than four boxes in a row. The component ships one
+   already, but the app sets `--radius: 0` and a 16px body size, which squares
+   its corners and overfills its 24px track — so the strip is sized and rounded
+   here instead of inheriting those two. */
+.explore-tabs { width: 100%; }
+.explore-tabs [data-slot="tabs-list"] {
+  gap: 2px;
+  height: auto;
+  padding: 4px;
+  background: color-mix(in srgb, var(--muted) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 11px;
+}
+.explore-tabs [data-slot="tabs-tab"] {
+  height: auto;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.4;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.explore-tabs [data-slot="tabs-tab"]:not(:disabled) { cursor: pointer; }
+.explore-tabs [data-slot="tabs-tab"]:hover:not([data-active]) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+/* The selected view is the one you are reading, so it lifts off the track. */
+.explore-tabs [data-slot="tabs-tab"][data-active] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary) 15%, var(--card));
+  border-color: color-mix(in srgb, var(--primary) 32%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+}
+.explore-panel {
+  padding-top: 18px;
+  min-height: 320px;
+}
+
+.explore-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.explore-tree .explore-tree { padding-left: 16px; border-left: 1px solid var(--border); margin-left: 6px; }
+.explore-tree summary { cursor: pointer; list-style-position: outside; }
+.explore-tree summary::marker { color: var(--muted-foreground); }
+.explore-tree-leaf { list-style: none; padding-left: 15px; }
+.explore-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name figures" "bar bar" "location location";
+  gap: 4px 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.explore-tree-row:hover { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.explore-tree-name {
+  grid-area: name;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.explore-tree-figures { grid-area: figures; display: flex; align-items: baseline; gap: 10px; }
+.explore-tree-row .row-bar-track { grid-area: bar; }
+.explore-tree-location {
+  grid-area: location;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.explore-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.explore-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.explore-table th, .explore-table td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.explore-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted-foreground); }
+.explore-table thead button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.explore-table thead button.is-sorted { color: var(--primary); }
+.explore-table tbody th {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.explore-table tbody th code { font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
+.explore-table td { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
+/* A figure column is as wide as its widest figure and no wider. Left to wrap,
+   a long frame name or path claims the table's width and `2.92 s` breaks after
+   the number, so the digits in one row no longer line up with the next. The
+   `Called from` column is the one that holds prose, so it opts back in. */
+.explore-table thead th,
+.explore-table td { white-space: nowrap; }
+.explore-table .explore-table-callers { white-space: normal; }
+/* The name column takes what is left, and wraps inside itself. */
+.explore-table tbody th { width: 100%; }
+/* Every frame name in Explore is a way to refocus the view on that frame. */
+.explore-tree-focus {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.explore-tree-focus:hover { color: var(--primary); }
+.explore-tree-focus em { color: var(--muted-foreground); font-style: normal; }
+/* The one way back out of a focused frame, to the whole task. */
+.explore-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.explore-caller { display: block; font-size: 12px; }
+.explore-caller em { color: var(--muted-foreground); font-style: normal; }
+
+.explore-footer { display: flex; justify-content: flex-end; }
+.explore-footer button:not(:disabled) { cursor: pointer; }
+
+@media (max-width: 640px) {
+  .explore-tree-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "figures" "bar" "location"; }
+  .explore-table { font-size: 12px; }
+}
+
+/* The task against the clock. Positions are percentages of the task duration,
+   so the chart fits at zoom 1 and zooming is one width on the canvas. */
+.timeline { display: flex; flex-direction: column; gap: 10px; }
+.timeline-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-bottom: 10px;
+}
+.timeline-zoom {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.timeline-zoom:hover { background: var(--muted); }
+.timeline-zoom.is-current { border-color: var(--primary); color: var(--primary); }
+.timeline-legend { margin-left: auto; }
+.timeline-zoom:disabled { opacity: 0.4; cursor: default; }
+.timeline-zoom:disabled:hover { background: transparent; }
+
+/* The flame graph's two controls on one line, and the box the stretched graph
+   scrolls inside. The graph itself is percentage-based, so zooming is nothing
+   but a wider canvas: `.flame-scale` is `zoom * 100%` of the viewport and every
+   frame keeps the same share of it. */
+.flame-controls { display: flex; flex-wrap: wrap; align-items: baseline; gap: 18px; }
+.flame-controls .timeline-controls { margin-bottom: 10px; }
+.flame-viewport { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+/* Where a wheel gesture landed, which falls between the ladder's rungs. */
+.zoom-readout { min-width: 4ch; margin-left: 4px; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.flame-scale { min-width: 100%; }
+
+/* Frames are packed edge to edge and the library draws only a faint right edge,
+   so a run of same-coloured boxes reads as one box and a row reads as a band.
+   A full border in the page's own background cuts every cell out of its
+   neighbours and out of the row below, and hovering lifts that border so the
+   box under the pointer is the one being read. Unlayered, so it beats the
+   utility classes the library sets the faint edge with. */
+[data-slot="flame-graph-frame"] {
+  border: 1px solid var(--background);
+  border-radius: 3px;
+}
+[data-slot="flame-graph-frame"]:hover {
+  border-color: var(--foreground);
+  z-index: 1;
+}
+
+/* The "no own time" bucket is muted-on-muted, which at 11px is a box whose name
+   cannot be read at all — and those are most of the boxes in a React commit,
+   where the pass-through wrappers are exactly the frames a reader is trying to
+   name. Same grey, enough of a lift to carry text. */
+[data-slot="flame-graph-frame"].bg-muted { background: color-mix(in srgb, var(--muted) 55%, var(--border)); }
+[data-slot="flame-graph-frame"].bg-muted span { color: var(--foreground); opacity: 0.85; }
+
+/* What the five colours mean, above every graph that uses them. */
+.flame-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.flame-legend-lead { margin-right: 2px; }
+.flame-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.flame-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--background) 60%, transparent);
+}
+.flame-legend-swatch[data-bucket="heaviest"] { background: var(--danger); }
+.flame-legend-swatch[data-bucket="heavy"] { background: var(--warning); }
+.flame-legend-swatch[data-bucket="moderate"] { background: var(--info); }
+.flame-legend-swatch[data-bucket="light"] { background: var(--success); }
+.flame-legend-swatch[data-bucket="none"] { background: color-mix(in srgb, var(--muted) 55%, var(--border)); }
+
+.timeline-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: 10px; }
+.timeline-canvas { position: relative; min-width: 100%; padding: 0 0 8px; }
+
+.timeline-ruler {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.timeline-tick {
+  position: absolute;
+  top: 4px;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Gaps are stretches where only React, or engine code naming nothing, was on the
+   stack. They are left empty on a hatched ground so they read as "not our code",
+   never as idle. */
+.timeline-rows {
+  position: relative;
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--muted) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.timeline-box {
+  position: absolute;
+  height: 20px;
+  min-width: 1px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--chart-2, #4ade80);
+  color: #04210f;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--background) 65%, transparent);
+}
+/* A built-in the code called by name — `[Native] intlDateTimeFormatFormat` — is
+   kept on the chart because the cost is real and the caller controls it, but it
+   is not the reader's own code: a paler fill inside a hairline ring says
+   `engine` at a glance without taking it off the row it ran on. The name is on the box
+   and the class is in the tooltip, so this never carries the distinction alone. */
+.timeline-box[data-class="native"] {
+  background: color-mix(in srgb, var(--chart-2, #4ade80) 32%, var(--muted));
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+.timeline-box > span { padding: 0 4px; pointer-events: none; }
+.timeline-box:hover { filter: brightness(1.12); }
+.timeline-box.is-selected { outline: 2px solid var(--primary); outline-offset: -2px; z-index: 1; }
+
+/* ── Picking frames out of the four views ────────────────────────────────────
+   A picked frame is a frame the reader has set aside to ask about, so it reads
+   as one thing wherever it appears: the same tint, the same inset ring and the
+   same count on a timeline box, a tree row, a culprit row and a flame box. It is
+   deliberately not the focus ring. Focus is where a view is standing and stays
+   exactly one frame; a pick is a set the reader is building, and the two land on
+   the same frame often enough that they need separate channels. Every view here
+   already spends `outline` on its focus, so a pick rides on `box-shadow`
+   instead, and a frame that is both shows both.
+
+   A pick never recolors a fill. On the timeline the fill is the frame's class
+   and in the flame graph it is its heat, and in both a pick is a comment on the
+   frame rather than a measurement of it. */
+/* The ring and the tint, on the one view that draws both on the element itself.
+   The timeline and the flame graph are handled below and in the component, and a
+   table row cannot carry this at all — a `tr` in a collapsed table paints no
+   shadow — so the culprit table draws its ring per cell. Written against the row
+   rather than as a bare `.is-picked` rule, which would silently do nothing on
+   half the elements that carry the class. */
+.explore-tree-row.is-picked {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 62%, transparent);
+  border-radius: 8px;
+}
+/* Hover has the same specificity as the rule above and used to be the later of
+   the two, so a picked row stopped answering the pointer. Deepen the tint instead
+   of replacing it, so the pick survives the hover it now also reports. */
+.explore-tree-row.is-picked:hover { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+/* A collapsed table cannot paint a shadow across a row, and these cells are flex
+   containers rather than table cells, so the ring is built from the cells' own
+   inset shadows: the top and bottom edges tile across the row, and the ends
+   close it at either side. Same two pixels and colour as the ring the other
+   three views draw, so one picked frame looks picked wherever it appeared. */
+.explore-table tr.is-picked > th,
+.explore-table tr.is-picked > td,
+.react-component-table tr.is-picked > th,
+.react-component-table tr.is-picked > td {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent);
+}
+.explore-table tr.is-picked > th:first-child,
+.react-component-table tr.is-picked > th:first-child {
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 2px 0 0 color-mix(in srgb, var(--primary) 62%, transparent);
+}
+.explore-table tr.is-picked > td:last-child,
+.react-component-table tr.is-picked > td:last-child {
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--primary) 62%, transparent),
+    inset -2px 0 0 color-mix(in srgb, var(--primary) 62%, transparent);
+}
+/* The count says which of the reader's picks this is — the one thing a ring
+   cannot say once four of them are spread across two tabs. The same pill in all
+   four views, so a reader learns it once. A timeline box drawn one pixel wide
+   clips it behind `overflow: hidden`, leaving the ring to carry the pick there. */
+.explore-picked-tick {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground, var(--background));
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+/* A built-in keeps its own paler fill, so its picked box has to keep the hairline
+   that says `engine` too — and the two shadows are written out together, since
+   `box-shadow` replaces rather than adds. */
+.timeline-box.is-picked {
+  box-shadow:
+    inset -1px 0 0 color-mix(in srgb, var(--background) 65%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, var(--primary) 75%, transparent);
+  z-index: 1;
+}
+.timeline-box.is-picked[data-class="native"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, var(--primary) 75%, transparent);
+}
+/* The name and its pick number, on the row that stacks the source line beneath
+   them. The cell is a column flex container, so an ungrouped pill would be a flex
+   item of its own — stretched to the cell's width, on its own line, reading as a
+   bar with a digit in it rather than the number of the frame beside it. One block
+   around the two lets them flow as they do in a call-tree row, which is the row
+   the culprit table is meant to match. */
+.explore-culprit-name { display: block; min-width: 0; }
+/* A culprit row answers to a click only while the reader is picking, so the
+   pointer appears only when the click would do something. */
+.explore-pickable-row { cursor: pointer; }
+/* The frame name is still a button while picking, but the row is the target and
+   link styling would promise the focus it no longer moves. */
+.explore-pickable-row .explore-tree-focus {
+  color: inherit;
+  text-decoration: none;
+  cursor: inherit;
+}
+.explore-pickable-row .explore-tree-focus:hover { color: inherit; text-decoration: underline; }
+
+/* ── The React commit chart ──────────────────────────────────────────────────
+   One bar per commit, evenly spaced. The plot grows downwards from a baseline
+   at its foot, because bar height is duration against the tallest commit and a
+   reader compares tops. */
+.commit-fill {
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--chart-2, #4ade80) 55%, var(--muted));
+}
+/* Over budget is the whole point of the chart, so it is the one thing the fill
+   carries. The budget line says how far over. */
+.commit-fill[data-over="yes"] { background: var(--chart-1, #f87171); }
+/* A commit that produced a card is a finding the reader has already seen
+   named, so it is ringed rather than recoloured: the fill still has to mean
+   `over budget` alone. */
+.commit-fill[data-carded="yes"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 45%, transparent); }
+.commit-fill.is-selected { outline: 2px solid var(--primary); outline-offset: 1px; z-index: 1; }
+.commit-strip-budget {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--foreground) 45%, transparent);
+  pointer-events: none;
+}
+.commit-strip-budget > span {
+  position: sticky;
+  left: 0;
+  /* Above a bar label's own background, which otherwise paints over the
+     leftmost one. */
+  z-index: 2;
+  display: inline-block;
+  padding: 0 4px;
+  background: var(--background);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  /* Above its own line: below it, the label of a budget that sits low in a
+     recording with one enormous commit lands on the numbers underneath. */
+  transform: translateY(-100%);
+}
+
+/* Every commit gets an equal share of the width, so a recording with one
+   dominant commit still offers its small ones as targets the same size as the
+   big one. Only height carries time here. */
+.commit-bars { min-width: 100%; }
+.commit-bars-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  border-bottom: 1px solid var(--border);
+}
+.commit-slot {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+/* Above the bar, not inside it: the bars worth reading a figure off are the
+   short ones, which have no room inside. The background is load-bearing — a
+   recording with one dominant commit puts the budget line and the labels of
+   every short bar at much the same height, and the label breaks the dashed
+   line rather than being printed across it. */
+.commit-slot-label {
+  position: relative;
+  z-index: 1;
+  background: var(--background);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--muted-foreground);
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.commit-slot:hover .commit-fill { filter: brightness(1.15); }
+/* Matches the plot's `gap` and the slots' `min-width`, or the numbers drift
+   away from the bars they label. */
+.commit-bars-axis {
+  display: flex;
+  gap: 3px;
+  padding-top: 4px;
+}
+.commit-bars-axis > span {
+  flex: 1 1 0;
+  overflow: hidden;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+/* ── Every component in one commit ───────────────────────────────────────────
+   The table the card deliberately does not have: all of it, ranked by own time,
+   including the three hundred rows that each cost a hundredth of a frame. */
+.react-component-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.react-component-table th,
+.react-component-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  vertical-align: baseline;
+}
+.react-component-table thead th {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.react-component-table tbody th { font-weight: 500; }
+.react-component-table td:nth-child(2),
+.react-component-table td:nth-child(3),
+.react-component-table td:nth-child(4) {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.react-component-table td:last-child { color: var(--muted-foreground); }
+/* A host element or a framework wrapper is still a row — its own time is real —
+   but it is not a component anybody wrote, and a reader scanning for something
+   to change should be able to skip it. */
+.react-component-table tr[data-class="host"] .react-component-name,
+.react-component-table tr[data-class="framework"] .react-component-name,
+.react-component-table tr[data-class="unnamed"] .react-component-name {
+  color: var(--muted-foreground);
+}
+.react-component-name { margin-right: 6px; }
+.react-component-table code { font-size: 11px; color: var(--muted-foreground); }
+.react-components .explore-caveat { margin-top: 10px; }
+.react-components .chart-notes { margin-top: 12px; }

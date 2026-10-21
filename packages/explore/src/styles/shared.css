@@ -1,0 +1,144 @@
+/* The primitives an Explore row is built out of, plus the header and shell the
+   view sits in.
+   *
+   * Lifted from the app's `src/app/globals.css` rather than rewritten, so the
+   * two render the same pixels; the app keeps its own copy because its results
+   * page uses these too. Both sheets define the same names, and the rules are
+   * identical, so loading one, the other, or both draws the same thing.
+   *
+   * Two things are deliberately absent. `html` and `body` are left to the host:
+   * a plugin mounts inside a document somebody else owns, and a package that
+   * paints the page background would be arguing with it. The font tokens are the
+   * host's as well — the app maps `--font-sans`/`--font-mono` onto the Geist
+   * files it loads, and everywhere else the Tailwind defaults stand. */
+
+[data-slot="plugin-shell"] {
+  --page-ambient-background:
+    radial-gradient(ellipse 78% 52% at 50% -14%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 68%),
+    radial-gradient(circle at 92% 76%, color-mix(in srgb, #6f7cff 5%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--background) 97%, #ddd7f2) 0%, var(--background) 64%);
+  color-scheme: light;
+  background: var(--page-ambient-background);
+  background-attachment: fixed;
+}
+
+[data-slot="plugin-shell"].dark {
+  --page-ambient-background:
+    radial-gradient(ellipse 32% 56% at 10% 16%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 68%),
+    radial-gradient(ellipse 82% 56% at 70% 14%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 68%),
+    radial-gradient(circle at 20% 78%, color-mix(in srgb, #536dfe 4%, transparent), transparent 36%),
+    radial-gradient(circle at 80% 78%, color-mix(in srgb, #536dfe 4%, transparent), transparent 36%),
+    linear-gradient(180deg, color-mix(in srgb, var(--background) 95%, #282134) 0%, var(--background) 66%);
+  color-scheme: dark;
+}
+
+/* The header a host renders above the view. Scoped to the library's own slot,
+   so a host that brings its own header brings its own styles as well. */
+[data-slot="plugin-header"] {
+  position: relative;
+  z-index: 50;
+  min-height: 64px;
+  padding-inline: 22px;
+  background: color-mix(in srgb, var(--background) 38%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 76%, transparent);
+  backdrop-filter: blur(18px);
+}
+[data-slot="plugin-header"] button:not(:disabled) { cursor: pointer; }
+
+.brand { display: flex; align-items: flex-end; gap: 10px; }
+.brand { gap: 11px; }
+.brand > span:last-child { display: flex; align-items: baseline; gap: 6px; }
+.brand-name { font-size: 17px; font-weight: 500; letter-spacing: 0.015em; }
+.brand small {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.brand small b {
+  color: color-mix(in srgb, var(--foreground) 82%, var(--muted-foreground));
+  font-family: var(--font-mono, monospace);
+  font-size: .95em;
+  font-weight: 650;
+}
+
+/* One row of a culprit list or a call tree: the name, its figures, and the bar
+   that sets them against the whole. */
+.row-figure {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* The second of a row's two figures: self time beside total time. */
+.row-secondary {
+  flex: 1 1 auto;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.row-share {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.row-bar-track { height: 4px; background: var(--muted); overflow: hidden; border-radius: 999px; }
+.row-bar-fill { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
+
+/* The one inferred block on an otherwise measured card, so it is set apart
+   rather than blended in: a reader has to be able to see where the arithmetic
+   stops and the model's reading begins. */
+.card-insight {
+  margin: 0 20px 16px;
+  padding: 13px 15px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 10px;
+}
+.card-insight-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.card-insight ul { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; list-style: none; }
+.card-insight li {
+  position: relative;
+  padding-left: 15px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.card-insight li::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 75%, transparent);
+}
+.explore-header .card-insight { margin: 14px 0 0; }
+.card-insight-error { margin: 0 20px 14px; text-align: left; }
+
+/* The sizes the app's results pass settled on, which are what Explore reads:
+   lifted together so the two surfaces cannot drift apart by loading one pass
+   and not the other. */
+.row-figure-line { align-items: flex-end; margin-bottom: 9px; }
+.row-figure { display: flex; align-items: baseline; font-size: 16px; color: var(--primary); opacity: 0.8; }
+.row-secondary { font-size: 13px; }
+.row-share { padding: 3px 7px; background: var(--muted); border-radius: 999px; font-size: 10px; }
+.row-bar-track { height: 6px; background: color-mix(in srgb, var(--muted) 88%, var(--background)); }
+.row-bar-fill { background: color-mix(in srgb, var(--foreground) 45%, var(--background)); }
+.row-share { font-size: 12px; }

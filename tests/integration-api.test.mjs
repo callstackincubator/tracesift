@@ -40,6 +40,7 @@ const { GET: health } = await import('../src/app/api/integration/v1/health/route
 const { POST: analyzeRoute } = await import('../src/app/api/integration/v1/analyze/route.ts');
 const { POST: handoffRoute } = await import('../src/app/api/integration/v1/handoff/route.ts');
 const { GET: taskRoute } = await import('../src/app/api/integration/v1/task/route.ts');
+const { GET: reactExploreRoute } = await import('../src/app/api/integration/v1/react-explore/route.ts');
 
 await saveAnalysisSettings({ autoSave: false });
 test.after(() => rm(home, { recursive: true, force: true }));
@@ -217,4 +218,68 @@ test('integration task route serves one card whole, including the tree and timel
   const unknownTask = await taskRoute(authorized(`http://localhost/api/integration/v1/task?analysisId=${analysis.analysisId}&taskIndex=4242`));
   assert.equal(unknownTask.status, 404);
   assert.deepEqual(await unknownTask.json(), { error: 'That task is not part of this analysis.' });
+});
+
+test('integration react-explore route guards its credentials and its analyses', async () => {
+  const unauthenticated = await reactExploreRoute(new Request('http://localhost/api/integration/v1/react-explore?analysisId=any'));
+  assert.equal(unauthenticated.status, 401);
+  assert.deepEqual(await unauthenticated.json(), { error: 'Unauthorized.' });
+
+  const badRequests = [
+    'http://localhost/api/integration/v1/react-explore',
+    'http://localhost/api/integration/v1/react-explore?analysisId=%20%20',
+  ];
+  for (const url of badRequests) {
+    const response = await reactExploreRoute(authorized(url));
+    assert.equal(response.status, 400, url);
+    assert.match((await response.json()).error, /analysisId/);
+  }
+
+  const missing = await reactExploreRoute(authorized('http://localhost/api/integration/v1/react-explore?analysisId=no-such-analysis'));
+  assert.equal(missing.status, 404);
+  assert.match((await missing.json()).error, /no longer available/);
+});
+
+test('integration react-explore route serves the commit timeline the analysis stored', async t => {
+  const profile = await readFile(path.resolve('sample-profiles/react/react-profile-2.json'));
+  const form = new FormData();
+  form.set('profile', new File([profile], 'react-profile-2.json', { type: 'application/json' }));
+  form.set('profileType', 'react');
+  const analyzed = await analyzeRoute(authorized('http://localhost/api/integration/v1/analyze', {
+    method: 'POST', body: form,
+  }));
+  assert.equal(analyzed.status, 200);
+  const analysis = await analyzed.json();
+  t.after(() => destroyRecord(analysis.analysisId));
+
+  const response = await reactExploreRoute(authorized(`http://localhost/api/integration/v1/react-explore?analysisId=${analysis.analysisId}`));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.apiVersion, 1);
+  assert.equal(body.analysisId, analysis.analysisId);
+  assert.equal(body.title, 'react-profile-2.json');
+
+  // The stored record is the only source of truth: the strip, the cards, and
+  // this response are the same values, so no reader can disagree with another.
+  const record = await findAnalysis(analysis.analysisId);
+  const stored = JSON.parse(JSON.stringify({ explore: record.reactExplore, cards: record.reactCards.cards }));
+  assert.ok(stored.explore.commits.length > 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(body.explore)), stored.explore);
+  assert.deepEqual(JSON.parse(JSON.stringify(body.cards)), stored.cards);
+});
+
+test('integration react-explore route refuses analyses that hold no commit timeline', async t => {
+  const profile = await readFile(path.resolve('sample-profiles/cpu/hermes-release-1.json'));
+  const form = new FormData();
+  form.set('profile', new File([profile], 'hermes-release-1.json', { type: 'application/json' }));
+  const analyzed = await analyzeRoute(authorized('http://localhost/api/integration/v1/analyze', {
+    method: 'POST', body: form,
+  }));
+  assert.equal(analyzed.status, 200);
+  const analysis = await analyzed.json();
+  t.after(() => destroyRecord(analysis.analysisId));
+
+  const response = await reactExploreRoute(authorized(`http://localhost/api/integration/v1/react-explore?analysisId=${analysis.analysisId}`));
+  assert.equal(response.status, 404);
+  assert.match((await response.json()).error, /no commit timeline/);
 });

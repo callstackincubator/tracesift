@@ -196,21 +196,47 @@ function buildTree(fibers: ReactRenderedFiber[], fiberIndex: ReadonlyMap<number,
   return roots;
 }
 
+/** Recorded order, across roots: the strip is a clock, and a recording with an
+ * app root and a dev-overlay root interleaves on it. */
+function inRecordedOrder(
+  a: { commit: { timestampMs: number; rootId: number; commitIndex: number } },
+  b: { commit: { timestampMs: number; rootId: number; commitIndex: number } },
+): number {
+  return a.commit.timestampMs - b.commit.timestampMs
+    || a.commit.rootId - b.commit.rootId || a.commit.commitIndex - b.commit.commitIndex;
+}
+
+/** The card id a commit would carry, which is how the two sets find each other. */
+function cardIdOf(commit: { rootId: number; commitIndex: number }): string {
+  return `react-commit-${commit.rootId}-${commit.commitIndex}`;
+}
+
 export function buildReactExplore(recordings: ReactRecording[], cards: ReactCardSet): ReactExplore {
   const cardIds = new Set(cards.cards.map((card) => card.id));
   const budgetMs = cards.budgetMs;
   const all = recordings.flatMap((recording) =>
     recording.commits.map((commit) => ({ commit, fiberIndex: recording.fiberIndex })),
   );
-  // Recorded order, across roots: the strip is a clock, and a recording with an
-  // app root and a dev-overlay root interleaves on it.
-  all.sort((a, b) => a.commit.timestampMs - b.commit.timestampMs
-    || a.commit.rootId - b.commit.rootId || a.commit.commitIndex - b.commit.commitIndex);
+  all.sort(inRecordedOrder);
   const kept = all.slice(0, MAX_STRIP_COMMITS);
+
+  // A commit that produced a card is never dropped for the cap. The cap counts
+  // bars a reader can scrub, and past it the strip is a shape rather than a
+  // picker; a card is not a bar, it is the thing a reader clicked to get here,
+  // and the card's link names that commit. Cut it and the view cannot find the
+  // key, falls back to the longest commit it still holds, and opens a different
+  // commit under the heading of the one that was asked for. There are at most as
+  // many of them as the card set shows, so honouring this costs the cap a
+  // handful of bars.
+  const cardedTail = all.slice(MAX_STRIP_COMMITS).filter(({ commit }) => cardIds.has(cardIdOf(commit)));
+  if (cardedTail.length > 0) {
+    kept.push(...cardedTail);
+    kept.sort(inRecordedOrder);
+  }
 
   let budget = MAX_EXPLORE_NODES;
   const commits: ReactExploreCommit[] = kept.map(({ commit, fiberIndex }) => {
-    const id = `react-commit-${commit.rootId}-${commit.commitIndex}`;
+    const id = cardIdOf(commit);
     const affordable = commit.fibers.length <= budget;
     if (affordable) budget -= commit.fibers.length;
     const top = commit.fibers[0] ?? null;
