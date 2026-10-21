@@ -6,6 +6,7 @@ import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertReleaseMetadata, REPOSITORY, TARGETS } from './release-metadata.js';
+import { versionsAligned } from '../../../scripts/workspace-versions.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -59,7 +60,7 @@ async function main() {
   if (!directory || process.argv.length > 4) throw new Error('Usage: node packages/cli/scripts/generate-release.js <artifact-dir> [output-file]');
   const app = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const cli = JSON.parse(await readFile(join(root, 'packages/cli/package.json'), 'utf8'));
-  if (app.version !== cli.version || app.dependencies?.[cli.name] !== cli.version) throw new Error('Application and CLI versions must match.');
+  if (!versionsAligned(app, cli)) throw new Error('Application and CLI versions must match.');
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const release = await generateRelease({ artifactDir: resolve(directory), version: cli.version, revision });
   await writeFile(resolve(output), `${JSON.stringify(release, null, 2)}\n`);
