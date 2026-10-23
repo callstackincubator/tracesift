@@ -127,6 +127,11 @@ async function startCapture(message) {
     baseUrl,
     sequence: 0,
     scripts: new Map(),
+    sourceMapEntries: new Map(),
+    sourceMapQueue: Promise.resolve(),
+    sourceMapBytes: 0,
+    sourceMapWarnings: [],
+    sourceMapLimitReached: false,
     stopping: false,
     stopReason: "manual",
     pollTimer: null,
@@ -245,9 +250,15 @@ async function readProtocolStream(source, handle) {
   }
 }
 
-async function loadSourceMap(capture, script) {
+function sourceMapLoadFailure(resource, sourceMapUrl) {
+  const details = [];
+  if (Number.isInteger(resource?.httpStatusCode)) details.push(`HTTP ${resource.httpStatusCode}`);
+  if (resource?.netErrorName) details.push(resource.netErrorName);
+  return new Error(details.length > 0 ? `${sourceMapUrl} returned ${details.join("; ")}` : `Could not load ${sourceMapUrl}`);
+}
+
+async function loadSourceMap(capture, script, sourceMapUrl = resolveSourceMapUrl(script)) {
   if (!script.url || !script.sourceMapURL || script.url.startsWith("chrome-extension:")) return null;
-  const sourceMapUrl = resolveSourceMapUrl(script);
   let raw;
   if (sourceMapUrl.startsWith("data:")) {
     raw = decodeDataUrl(sourceMapUrl);
@@ -258,7 +269,7 @@ async function loadSourceMap(capture, script) {
       url: sourceMapUrl,
       options: { disableCache: false, includeCredentials: true },
     });
-    if (!result.resource?.success || !result.resource.stream) throw new Error(result.resource?.netErrorName || `Could not load ${sourceMapUrl}`);
+    if (!result.resource?.success || !result.resource.stream) throw sourceMapLoadFailure(result.resource, sourceMapUrl);
     raw = await readProtocolStream(source, result.resource.stream);
   }
   if (raw.length > MAX_SOURCE_MAP_BYTES) throw new Error("Source map exceeds the 8 MB retention limit.");
@@ -267,36 +278,62 @@ async function loadSourceMap(capture, script) {
   return { url: script.url, sourceMapUrl, sourceMap, bytes: raw.length };
 }
 
+async function tryRetainSourceMap(capture, entry) {
+  if (entry.retained || capture.sourceMapLimitReached) return;
+  entry.attempts += 1;
+  try {
+    const loaded = await loadSourceMap(capture, entry.script, entry.sourceMapUrl);
+    if (!loaded) return;
+    if (capture.sourceMapBytes + loaded.bytes > MAX_ALL_SOURCE_MAP_BYTES) {
+      capture.sourceMapLimitReached = true;
+      capture.sourceMapWarnings.push("Stopped retaining source maps after the 16 MB safety limit.");
+      return;
+    }
+    capture.sourceMapBytes += loaded.bytes;
+    entry.retained = { url: loaded.url, sourceMapUrl: loaded.sourceMapUrl, sourceMap: loaded.sourceMap };
+    entry.error = null;
+  } catch (error) {
+    entry.error = errorText(error);
+  }
+}
+
+function queueSourceMap(capture, script) {
+  if (!script.url || !script.sourceMapURL || script.url.startsWith("chrome-extension:")) return;
+  let sourceMapUrl;
+  try { sourceMapUrl = resolveSourceMapUrl(script); }
+  catch {
+    capture.sourceMapWarnings.push(`Ignored an invalid source-map URL for ${script.url || "an anonymous script"}.`);
+    return;
+  }
+  // DevTools does not duplicate data-URL maps in metadata: source-rundown
+  // events already carry their contents in the trace.
+  if (sourceMapUrl.startsWith("data:")) return;
+  const key = `${script.url}\n${sourceMapUrl}`;
+  if (capture.sourceMapEntries.has(key)) return;
+  const entry = { script, sourceMapUrl, attempts: 0, retained: null, error: null };
+  capture.sourceMapEntries.set(key, entry);
+  // Serialize reads so eager retention cannot temporarily hold an unbounded
+  // number of large maps while still enforcing the aggregate byte limit.
+  capture.sourceMapQueue = capture.sourceMapQueue.then(() => tryRetainSourceMap(capture, entry));
+}
+
 async function collectSourceMaps(capture) {
-  const retained = [];
-  const warnings = [];
-  const seen = new Set();
-  let bytes = 0;
-  for (const script of capture.scripts.values()) {
-    if (!script.sourceMapURL) continue;
-    let resolved;
-    try { resolved = resolveSourceMapUrl(script); }
-    catch { warnings.push(`Ignored an invalid source-map URL for ${script.url || "an anonymous script"}.`); continue; }
-    // DevTools does not duplicate data-URL maps in metadata: source-rundown
-    // events already carry their contents in the trace.
-    if (resolved.startsWith("data:")) continue;
-    const key = `${script.url}\n${resolved}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    try {
-      const loaded = await loadSourceMap(capture, script);
-      if (!loaded) continue;
-      if (bytes + loaded.bytes > MAX_ALL_SOURCE_MAP_BYTES) {
-        warnings.push("Stopped retaining source maps after the 16 MB safety limit.");
-        break;
-      }
-      bytes += loaded.bytes;
-      retained.push({ url: loaded.url, sourceMapUrl: loaded.sourceMapUrl, sourceMap: loaded.sourceMap });
-    } catch (error) {
-      warnings.push(`Could not retain the source map for ${script.url || "an anonymous script"}: ${errorText(error)}`);
+  await capture.sourceMapQueue;
+  // A development server can still be compiling when scriptParsed arrives.
+  // Retry eager failures once at finalization, matching DevTools' fallback.
+  for (const entry of capture.sourceMapEntries.values()) {
+    if (!entry.retained && entry.error && !capture.sourceMapLimitReached) await tryRetainSourceMap(capture, entry);
+  }
+  const warnings = [...capture.sourceMapWarnings];
+  for (const entry of capture.sourceMapEntries.values()) {
+    if (!entry.retained && entry.error) {
+      warnings.push(`Could not retain source map ${entry.sourceMapUrl} for ${entry.script.url || "an anonymous script"}: ${entry.error}`);
     }
   }
-  return { retained, warnings };
+  return {
+    retained: [...capture.sourceMapEntries.values()].flatMap((entry) => entry.retained ? [entry.retained] : []),
+    warnings: [...new Set(warnings)],
+  };
 }
 
 async function finalize(params) {
@@ -350,13 +387,15 @@ chrome.debugger.onEvent.addListener((source, method, params = {}) => {
   }
   if (method === "Debugger.scriptParsed" && typeof params.scriptId === "string") {
     if (capture.scripts.size >= 50_000) return;
-    capture.scripts.set(scriptKey(source, params), {
+    const script = {
       scriptId: params.scriptId,
       url: params.url || "",
       ...(params.sourceMapURL ? { sourceMapURL: params.sourceMapURL } : {}),
       ...(typeof params.executionContextAuxData?.frameId === "string" ? { frameId: params.executionContextAuxData.frameId } : {}),
       ...(source.sessionId ? { sessionId: source.sessionId } : {}),
-    });
+    };
+    capture.scripts.set(scriptKey(source, params), script);
+    queueSourceMap(capture, script);
     return;
   }
   if (method === "Tracing.bufferUsage") {
