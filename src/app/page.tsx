@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { ChangeEvent, DragEvent, ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   Alert,
@@ -1803,6 +1804,9 @@ function InspectorApp() {
           <span><span className="brand-name">TraceSift</span><small>by Callstack</small></span>
         </PluginHeader.Title>
         <PluginHeader.Actions>
+          <Button className="header-action" render={<Link href="/capture" />} size="sm" variant="ghost">
+            Capture
+          </Button>
           <Button className="header-action" type="button" size="sm" variant="ghost" onClick={() => { setSettingsOpen(false); setHistoryOpen(true); }}>
             <HeaderIcon type="history" /> Analyses
           </Button>
