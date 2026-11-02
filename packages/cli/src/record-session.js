@@ -101,13 +101,59 @@ async function mainFrameOf(cdp, sessionId) {
   } catch { return undefined; }
 }
 
+/**
+ * Which of several open pages is the recording about?
+ *
+ * One tab needs no choosing. But `record launch` hands the browser to a person,
+ * and signing in opens consent popups and second tabs, so the first target
+ * Chrome happens to list is often not the one on screen — and recording the
+ * wrong tab produces a trace of nothing with no sign that anything went wrong.
+ *
+ * `visibilityState` is the signal that survives this flow: a background tab is
+ * `hidden` whichever application holds the OS focus, so it still tells the tabs
+ * apart when the recording was started from a terminal or from Codex rather
+ * than from Chrome itself. `document.hasFocus()` only breaks ties between two
+ * windows that are both showing a page.
+ *
+ * @param {{ send: (method: string, params?: object, sessionId?: string) => Promise<any> }} cdp
+ * @param {{ targetId: string, url?: string }[]} pages
+ */
+export async function selectPageTarget(cdp, pages) {
+  if (pages.length < 2) return pages[0];
+  let best;
+  for (const page of pages) {
+    let sessionId;
+    try {
+      ({ sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.targetId, flatten: true }));
+      const { result } = await cdp.send('Runtime.evaluate', {
+        expression: '({ visible: document.visibilityState === "visible", focused: document.hasFocus() })',
+        returnByValue: true,
+      }, sessionId);
+      const value = result?.value ?? {};
+      const rank = (value.visible ? 2 : 0) + (value.focused ? 1 : 0);
+      // Ties keep the earlier page, so Chrome's own order still decides when
+      // nothing distinguishes them.
+      if (!best || rank > best.rank) best = { rank, page };
+    } catch {
+      // A page that cannot be probed is still a page; it just cannot argue for
+      // itself against one that answered.
+      if (!best) best = { rank: -1, page };
+    } finally {
+      // Probing must leave no session behind: the caller attaches to the page
+      // it chose, and a stray session would keep receiving its events.
+      if (sessionId) await cdp.send('Target.detachFromTarget', { sessionId }).catch(() => undefined);
+    }
+  }
+  return best?.page ?? pages[0];
+}
+
 /** Wait for Chrome to report a page target it is willing to let us attach to. */
 async function pageTarget(cdp) {
   const deadline = Date.now() + 15_000;
   for (;;) {
     const { targetInfos = [] } = await cdp.send('Target.getTargets');
-    const page = targetInfos.find((target) => target.type === 'page' && !/^(chrome|chrome-extension|devtools):/.test(target.url || ''));
-    if (page) return page;
+    const pages = targetInfos.filter((target) => target.type === 'page' && !/^(chrome|chrome-extension|devtools):/.test(target.url || ''));
+    if (pages.length) return await selectPageTarget(cdp, pages);
     if (Date.now() > deadline) throw new Error('Chrome did not open a page to record.');
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
