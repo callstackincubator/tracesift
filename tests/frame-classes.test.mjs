@@ -88,3 +88,23 @@ test('no model runs for a classification, whatever is configured', async () => {
   const source = await import('node:fs/promises').then((fs) => fs.readFile('src/lib/frame-classes.ts', 'utf8'));
   assert.ok(!source.includes('pi-agent'), 'frame classification must not import the agent runner');
 });
+
+test('a webpack scheme is unwrapped, not filed with the engine', () => {
+  // A webpack dev server hands every frame a `webpack-internal:` URL. Reading
+  // the scheme as "no file on disk" collapsed a whole recording to `native`:
+  // no frame was ever the developer's own, so no card found a boundary and the
+  // collapse that hides React had nothing left to recognise.
+  assert.equal(classifyByRule(frame('blockMainThread', 'webpack-internal:///./src/app/index.web.ts')), 'app');
+  assert.equal(
+    classifyByRule(frame('logComponentRender', 'webpack-internal:///./node_modules/react-dom/cjs/react-dom-client.development.js')),
+    'framework',
+  );
+  assert.equal(classifyByRule(frame('map', 'webpack-internal:///./node_modules/lodash/map.js')), 'library');
+  // A build layer sits between the scheme and the path, and a source map writes
+  // the same path under a namespace instead.
+  assert.equal(classifyByRule(frame('Page', 'webpack-internal:///(app-pages-browser)/./src/app/page.tsx')), 'app');
+  assert.equal(classifyByRule(frame('getUsers', 'webpack://_N_E/./src/api/users.ts')), 'app');
+  // The other virtual schemes still name no file.
+  assert.equal(classifyByRule(frame('handler', 'chrome-extension://abc/background.js')), 'native');
+  assert.equal(classifyByRule(frame('run', 'blob:http://localhost:3000/abc')), 'native');
+});

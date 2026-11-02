@@ -65,7 +65,37 @@ function isVendorChunkUrl(url: string): boolean {
 const BUNDLE_URL = /\.(?:bundle|min\.js)(?:[?#]|$)/i;
 
 /** Schemes that name no file on disk: engine internals, extensions, eval'd code. */
-const VIRTUAL_SCHEME = /^(?:node|extensions|chrome-extension|chrome|webpack-internal|v8|evalmachine|blob|data):/i;
+const VIRTUAL_SCHEME = /^(?:node|extensions|chrome|chrome-extension|v8|evalmachine|blob|data):/i;
+
+/**
+ * webpack's own schemes are wrapping, not a statement that the module has no
+ * file: `webpack-internal:///./node_modules/react-dom/cjs/react-dom-client.development.js`
+ * carries the path webpack compiled, and a dev server hands every single frame
+ * one. Filing those with the engine collapsed a whole recording to `native` —
+ * no frame reached the `node_modules` or readable-path rules, so nothing was
+ * ever the developer's own code, no card found a boundary, and the collapse
+ * that hides React's internals had nothing left to recognise.
+ *
+ * Both spellings appear: `webpack-internal:///(layer)/./src/app.ts` from a
+ * build with layers, `webpack://namespace/./src/app.ts` from a source map.
+ */
+const WEBPACK_SCHEME = /^webpack(?:-internal)?:\/\/\/?/i;
+
+/** The path behind a webpack scheme, or the URL untouched when there is none. */
+function unwrapBundlerUrl(url: string): string {
+  if (!WEBPACK_SCHEME.test(url)) return url;
+  // After the scheme comes an optional build layer in parentheses, then either
+  // a module path or the namespace the source map was written under.
+  let rest = url.replace(WEBPACK_SCHEME, "").replace(/^\([^)]*\)\//, "");
+  if (!rest.startsWith("./") && !rest.startsWith("../") && !rest.startsWith("/")) {
+    const slash = rest.indexOf("/");
+    // A namespace is a bare word; a first segment holding a dot is already a
+    // file or a directory webpack recorded, so it stays.
+    if (slash > 0 && !rest.slice(0, slash).includes(".")) rest = rest.slice(slash + 1);
+  }
+  // `./` is webpack's marker for the project root, not part of the path.
+  return rest.replace(/^\.\//, "");
+}
 
 /**
  * V8 and Hermes label built-ins `native array.js`. The leading word is the
@@ -85,12 +115,14 @@ export function frameClassKey(frame: CdpCallFrame): string {
  * case no rule can settle.
  */
 export function classifyByRule(frame: CdpCallFrame, codeSplit = false): FrameClass | undefined {
-  const { functionName: name, url } = frame;
+  const { functionName: name } = frame;
+  const url = unwrapBundlerUrl(frame.url);
+  const resolved = url === frame.url ? frame : { ...frame, url };
   if (TRANSPARENT_NAMES.has(name)) return "native";
   if (NATIVE_URL.test(url)) return "native";
   if (ANONYMOUS_NAMES.has(name) && !url) return "anonymous";
   if (VIRTUAL_SCHEME.test(url)) return "native";
-  if (isFrameworkInternalFrame(frame)) return "framework";
+  if (isFrameworkInternalFrame(resolved)) return "framework";
   if (DEPENDENCY_URL.test(url) || isVendorChunkUrl(url)) return "library";
   if (ANONYMOUS_NAMES.has(name)) return "anonymous";
   // No URL means the engine, with one exception: the call wrappers V8 parks at
