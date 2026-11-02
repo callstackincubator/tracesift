@@ -44,8 +44,10 @@ test('packed artifact contains executable and shared exports, runnable outside r
   assert.equal(await readFile(join(modules, '@callstack/tracesift/README.md'), 'utf8'), await readFile(repositoryReadme, 'utf8'));
   assert.equal(await readFile(join(modules, '@callstack/tracesift/LICENSE'), 'utf8'), await readFile(repositoryLicense, 'utf8'));
   assert.equal(pkg.license, 'MIT');
-  assert.deepEqual(Object.keys(pkg.exports).sort(), ['./bootstrap', './config', './models', './oauth', './runtime']);
+  assert.deepEqual(Object.keys(pkg.exports).sort(), ['./bootstrap', './config', './models', './oauth', './runtime', './trace-export']);
+  // The web app imports the exporter from the published package, so its types must ship with it.
+  assert(packed.files.some(file => file.path === 'src/trace-export.d.ts'));
   const output = execFileSync(process.execPath, [join(modules, '@callstack/tracesift/src/cli.js'), '--help'], { cwd: temp, encoding: 'utf8' });
   assert.match(output, /tracesift init/);
-  execFileSync(process.execPath, ['--input-type=module', '-e', "import '@callstack/tracesift/config'; import '@callstack/tracesift/models'; import '@callstack/tracesift/runtime';"], { cwd: temp });
+  execFileSync(process.execPath, ['--input-type=module', '-e', "import '@callstack/tracesift/config'; import '@callstack/tracesift/models'; import '@callstack/tracesift/runtime'; import '@callstack/tracesift/trace-export';"], { cwd: temp });
 });

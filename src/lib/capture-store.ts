@@ -1,5 +1,4 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
 import {
   appendFile,
   chmod,
@@ -13,8 +12,8 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { finished } from "node:stream/promises";
-import { createGzip } from "node:zlib";
+
+import { writeTraceExport } from "@callstack/tracesift/trace-export";
 
 import {
   ACTIVE_CAPTURE_STATES,
@@ -45,8 +44,6 @@ const CAPTURE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 // IO.read is deliberately smaller than this limit. Keeping the server limit
 // close to the read size prevents either side from retaining a large request.
 export const MAX_RAW_CHUNK_BYTES = 1024 * 1024;
-const MAX_TRACE_PREFIX_BYTES = 1024 * 1024;
-const MAX_INSPECTED_EVENT_BYTES = 512 * 1024;
 const MAX_WARNING_LENGTH = 500;
 const TERMINAL_STATES = new Set<CaptureState>(["captured", "captured_with_warnings", "failed", "interrupted"]);
 
@@ -255,176 +252,6 @@ export async function appendCaptureRawChunk(id: string, token: string, sequence:
   });
 }
 
-async function writeWithBackpressure(stream: NodeJS.WritableStream, chunk: Uint8Array | string): Promise<void> {
-  if (!stream.write(chunk)) await new Promise<void>((resolveDrain) => stream.once("drain", resolveDrain));
-}
-
-/**
- * Copy only the traceEvents array body from Chrome's JSON trace stream.
- *
- * ReturnAsStream still produces one valid JSON document. We never parse or
- * retain its events: this small byte-level state machine locates the array and
- * streams its contents into the enhanced-trace wrapper. JSON punctuation is
- * ASCII, so scanning bytes remains correct across UTF-8 and input boundaries.
- */
-async function copyTraceEvents(spool: string, output: NodeJS.WritableStream): Promise<number> {
-  let prefix = Buffer.alloc(0);
-  let started = false;
-  let ended = false;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let objectDepth = 0;
-  let eventCount = 0;
-
-  const copyArrayBytes = async (bytes: Buffer): Promise<void> => {
-    const sliceStart = 0;
-    for (let index = 0; index < bytes.length; index += 1) {
-      const byte = bytes[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (byte === 0x5c) escaped = true;
-        else if (byte === 0x22) inString = false;
-        continue;
-      }
-      if (byte === 0x22) inString = true;
-      else if (byte === 0x5b) depth += 1;
-      else if (byte === 0x7b) {
-        if (depth === 1 && objectDepth === 0) eventCount += 1;
-        objectDepth += 1;
-      }
-      else if (byte === 0x7d) objectDepth -= 1;
-      else if (byte === 0x5d) {
-        depth -= 1;
-        if (depth === 0) {
-          if (index > sliceStart) await writeWithBackpressure(output, bytes.subarray(sliceStart, index));
-          ended = true;
-          return;
-        }
-      }
-    }
-    if (bytes.length > sliceStart) await writeWithBackpressure(output, bytes.subarray(sliceStart));
-  };
-
-  for await (const value of createReadStream(spool)) {
-    if (ended) break;
-    let chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-    if (!started) {
-      prefix = Buffer.concat([prefix, chunk]);
-      if (prefix.byteLength > MAX_TRACE_PREFIX_BYTES) throw new Error("Chrome trace is missing a traceEvents array near its start.");
-      const text = prefix.toString("utf8");
-      const first = text.search(/\S/);
-      let opening = first >= 0 && text[first] === "[" ? first : -1;
-      if (opening < 0) {
-        const marker = text.indexOf('"traceEvents"');
-        if (marker >= 0) opening = text.indexOf("[", marker + 13);
-      }
-      if (opening < 0) continue;
-      // The stream can be either a bare trace-event array or Chrome's usual
-      // {"traceEvents":[...]} object. Start immediately after its outer array.
-      chunk = prefix.subarray(Buffer.byteLength(text.slice(0, opening + 1), "utf8"));
-      prefix = Buffer.alloc(0);
-      started = true;
-      depth = 1;
-    }
-    await copyArrayBytes(chunk);
-  }
-  if (!started || !ended || inString || depth !== 0 || objectDepth !== 0) throw new Error("Chrome returned an incomplete trace stream.");
-  return eventCount;
-}
-
-async function inspectTraceMetadata(spool: string, traceMarker: string): Promise<{
-  hasInspectorMetadata: boolean;
-  marker?: { pid: number; tid: number; ts: number };
-}> {
-  let prefix = Buffer.alloc(0);
-  let started = false;
-  let depth = 0;
-  let objectDepth = 0;
-  let inString = false;
-  let escaped = false;
-  let eventParts: Buffer[] = [];
-  let eventBytes = 0;
-  let eventOverflow = false;
-  let capturingEvent = false;
-  let hasInspectorMetadata = false;
-
-  const inspectEvent = (): { pid: number; tid: number; ts: number } | undefined => {
-    if (eventOverflow) return undefined;
-    try {
-      const event = JSON.parse(Buffer.concat(eventParts, eventBytes).toString("utf8")) as Record<string, unknown>;
-      if (["TracingStartedInBrowser", "TracingStartedInPage", "CpuProfile"].includes(String(event.name))) {
-        hasInspectorMetadata = true;
-      }
-      if (event.name === traceMarker && typeof event.pid === "number" && typeof event.tid === "number" && typeof event.ts === "number" && Number.isFinite(event.pid) && Number.isFinite(event.tid) && Number.isFinite(event.ts)) {
-        return { pid: Number(event.pid), tid: Number(event.tid), ts: Number(event.ts) };
-      }
-    } catch { /* A malformed event is rejected later by the full stream copier. */ }
-    return undefined;
-  };
-
-  for await (const value of createReadStream(spool)) {
-    let chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-    if (!started) {
-      prefix = Buffer.concat([prefix, chunk]);
-      if (prefix.byteLength > MAX_TRACE_PREFIX_BYTES) break;
-      const text = prefix.toString("utf8");
-      const first = text.search(/\S/);
-      let opening = first >= 0 && text[first] === "[" ? first : -1;
-      if (opening < 0) {
-        const marker = text.indexOf('"traceEvents"');
-        if (marker >= 0) opening = text.indexOf("[", marker + 13);
-      }
-      if (opening < 0) continue;
-      chunk = prefix.subarray(Buffer.byteLength(text.slice(0, opening + 1), "utf8"));
-      prefix = Buffer.alloc(0);
-      started = true;
-      depth = 1;
-    }
-
-    let eventStart = capturingEvent ? 0 : -1;
-    for (let index = 0; index < chunk.length; index += 1) {
-      const byte = chunk[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (byte === 0x5c) escaped = true;
-        else if (byte === 0x22) inString = false;
-      } else if (byte === 0x22) inString = true;
-      else if (byte === 0x5b) depth += 1;
-      else if (byte === 0x5d) depth -= 1;
-      else if (byte === 0x7b) {
-        if (depth === 1 && objectDepth === 0) {
-          eventStart = index;
-          eventParts = [];
-          eventBytes = 0;
-          eventOverflow = false;
-          capturingEvent = true;
-        }
-        objectDepth += 1;
-      } else if (byte === 0x7d) {
-        objectDepth -= 1;
-        if (depth === 1 && objectDepth === 0 && eventStart >= 0) {
-          const part = chunk.subarray(eventStart, index + 1);
-          eventBytes += part.byteLength;
-          if (eventBytes <= MAX_INSPECTED_EVENT_BYTES) eventParts.push(part);
-          else eventOverflow = true;
-          const marker = inspectEvent();
-          if (marker) return { hasInspectorMetadata, marker };
-          eventStart = -1;
-          capturingEvent = false;
-        }
-      }
-    }
-    if (eventStart >= 0) {
-      const part = chunk.subarray(eventStart);
-      eventBytes += part.byteLength;
-      if (eventBytes <= MAX_INSPECTED_EVENT_BYTES) eventParts.push(part);
-      else eventOverflow = true;
-    }
-  }
-  return { hasInspectorMetadata };
-}
-
 function sourceMapBasename(value: string): string {
   const clean = value.split(/[?#]/)[0];
   return clean.slice(clean.lastIndexOf("/") + 1);
@@ -464,11 +291,6 @@ function validSourceMaps(value: CaptureSourceMap[]): CaptureSourceMap[] {
 async function writeGzipExport(record: StoredCapture, scripts: CaptureScriptMetadata[], sourceMaps: CaptureSourceMap[], mainFrame?: CaptureMainFrame, traceMarker?: string): Promise<{ export: { fileName: string; sizeBytes: number }; eventCount: number }> {
   const stamp = new Date(record.createdAt).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const fileName = `Trace-${stamp}.json.gz`;
-  const destination = join(captureDir(record.id), fileName);
-  const temporary = `${destination}.${randomUUID()}.tmp`;
-  const output = createWriteStream(temporary, { flags: "wx", mode: 0o600 });
-  const gzip = createGzip({ level: 6 });
-  gzip.pipe(output);
   const metadata = {
     // DevTools' enhanced-trace schema is currently version 1. The source
     // rundown events in traceEvents carry script content; these retained maps
@@ -482,36 +304,15 @@ async function writeGzipExport(record: StoredCapture, scripts: CaptureScriptMeta
       scripts,
     },
   };
-  const traceMetadata = traceMarker ? await inspectTraceMetadata(spoolPath(record.id), traceMarker) : { hasInspectorMetadata: false };
-  const syntheticMetadata = !traceMetadata.hasInspectorMetadata && traceMetadata.marker && mainFrame ? {
-    name: "TracingStartedInBrowser",
-    cat: "disabled-by-default-devtools.timeline",
-    ph: "I",
-    s: "t",
-    pid: traceMetadata.marker.pid,
-    tid: traceMetadata.marker.tid,
-    ts: traceMetadata.marker.ts,
-    args: { data: { persistentIds: true, frames: [{
-      frame: mainFrame.id,
-      url: mainFrame.url || record.target.url,
-      name: mainFrame.name,
-      processId: traceMetadata.marker.pid,
-      isOutermostMainFrame: true,
-      isInPrimaryMainFrame: true,
-    }] } },
-  } : undefined;
-  try {
-    gzip.write(`{"metadata":${JSON.stringify(metadata)},"traceEvents":[`);
-    if (syntheticMetadata) gzip.write(`${JSON.stringify(syntheticMetadata)},`);
-    const eventCount = await copyTraceEvents(spoolPath(record.id), gzip);
-    gzip.end("]}");
-    await finished(output);
-    await rename(temporary, destination);
-    const info = await stat(destination);
-    return { export: { fileName, sizeBytes: info.size }, eventCount: eventCount + (syntheticMetadata ? 1 : 0) };
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  const written = await writeTraceExport({
+    spool: spoolPath(record.id),
+    destination: join(captureDir(record.id), fileName),
+    metadata,
+    mainFrame,
+    fallbackUrl: record.target.url,
+    traceMarker,
+  });
+  return { export: { fileName, sizeBytes: written.sizeBytes }, eventCount: written.eventCount };
 }
 
 export async function finalizeCapture(id: string, token: string, input: {
