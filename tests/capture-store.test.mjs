@@ -87,6 +87,35 @@ test("raw Chrome stream chunks are authorized, ordered, durable, and exported as
   assert.equal(await store.getCapture(capture.id), undefined);
 });
 
+test("a stale source-map comment from a bundled module does not warn about minified names", async () => {
+  const { capture, uploadToken } = await store.createCapture({ target });
+  await store.appendCaptureRawChunk(capture.id, uploadToken, 0, Buffer.from(JSON.stringify({ traceEvents: [] }), "utf8"));
+  const completed = await store.finalizeCapture(capture.id, uploadToken, {
+    stopReason: "manual",
+    // Metro concatenates a dependency that still carries its own comment, and
+    // Chrome reports that name for the whole bundle.
+    scripts: [{ scriptId: "9", url: "https://dev.test:8082/vendors.bundle.js", sourceMapURL: "Size.js.map" }],
+    sourceMaps: [],
+  });
+  assert.equal(completed.sourceMapsSeen, 0);
+  assert.deepEqual(completed.warnings, []);
+  assert.equal(completed.state, "captured");
+  await store.deleteCapture(capture.id);
+});
+
+test("a missing map that does belong to the script still warns", async () => {
+  const { capture, uploadToken } = await store.createCapture({ target });
+  await store.appendCaptureRawChunk(capture.id, uploadToken, 0, Buffer.from(JSON.stringify({ traceEvents: [] }), "utf8"));
+  const completed = await store.finalizeCapture(capture.id, uploadToken, {
+    stopReason: "manual",
+    scripts: [{ scriptId: "9", url: "https://dev.test:8082/vendors.bundle.js", sourceMapURL: "vendors.bundle.js.map" }],
+    sourceMaps: [],
+  });
+  assert.match(completed.warnings.join("\n"), /none could be retained/);
+  assert.equal(completed.state, "captured_with_warnings");
+  await store.deleteCapture(capture.id);
+});
+
 test("only one active capture can exist", async () => {
   const first = await store.createCapture({ target });
   await assert.rejects(store.createCapture({ target: { ...target, tabId: 43 } }), /already active/);

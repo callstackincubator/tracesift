@@ -61,4 +61,6 @@ test("source-map failures identify the map URL, HTTP status, and network error",
   assert.match(background, /resource\?\.httpStatusCode/);
   assert.match(background, /resource\?\.netErrorName/);
   assert.match(background, /Could not retain source map \$\{entry\.sourceMapUrl\} for/);
+  assert.match(background, /a stale source-map comment a bundled module left inside/);
+  assert.match(background, /sourceMapBelongsToScript\(entry\.script\.url, entry\.sourceMapUrl\)/);
 });

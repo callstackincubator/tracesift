@@ -425,6 +425,24 @@ async function inspectTraceMetadata(spool: string, traceMarker: string): Promise
   return { hasInspectorMetadata };
 }
 
+function sourceMapBasename(value: string): string {
+  const clean = value.split(/[?#]/)[0];
+  return clean.slice(clean.lastIndexOf("/") + 1);
+}
+
+/**
+ * A bundled module's own `//# sourceMappingURL` comment can survive
+ * concatenation, and Chrome reports the last comment it finds in a script. A
+ * name that cannot belong to the script points at a file the bundler never
+ * emitted, so it is no evidence that this script has a retrievable map.
+ */
+function sourceMapBelongsToScript(scriptUrl: string, sourceMapURL: string): boolean {
+  const script = sourceMapBasename(scriptUrl);
+  const map = sourceMapBasename(sourceMapURL).replace(/\.map$/, "");
+  if (!script || !map) return true;
+  return script.startsWith(map) || map.startsWith(script);
+}
+
 function validScripts(value: CaptureScriptMetadata[]): CaptureScriptMetadata[] {
   return value.slice(0, 50_000).filter((script) => script && typeof script.scriptId === "string" && typeof script.url === "string").map((script) => ({
     scriptId: cleanText(script.scriptId, 200),
@@ -521,7 +539,7 @@ export async function finalizeCapture(id: string, token: string, input: {
     if (input.stopReason) record.stopReason = input.stopReason;
     if (record.dataLoss) record.warnings.push("Chrome reported that trace data was lost before export completed.");
     for (const warning of input.warnings ?? []) record.warnings.push(cleanText(String(warning), MAX_WARNING_LENGTH));
-    const externalSourceMapsReported = scripts.some((script) => script.sourceMapURL && !script.sourceMapURL.startsWith("data:"));
+    const externalSourceMapsReported = scripts.some((script) => script.sourceMapURL && !script.sourceMapURL.startsWith("data:") && sourceMapBelongsToScript(script.url, script.sourceMapURL));
     if (externalSourceMapsReported && record.sourceMapsSeen === 0) record.warnings.push("Chrome reported external source maps, but none could be retained; generated function names may remain minified.");
     if (!scripts.some((script) => script.sourceMapURL)) record.warnings.push("No source-map URLs were reported by Chrome; generated function names may remain minified.");
     record.warnings = [...new Set(record.warnings)].slice(0, 100);

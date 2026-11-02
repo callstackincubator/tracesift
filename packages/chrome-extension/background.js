@@ -231,6 +231,22 @@ function decodeDataUrl(url) {
   return header.includes(";base64") ? atob(payload) : decodeURIComponent(payload);
 }
 
+function sourceMapBasename(value) {
+  const clean = (value || "").split(/[?#]/)[0];
+  return clean.slice(clean.lastIndexOf("/") + 1);
+}
+
+// A bundled module's own `//# sourceMappingURL` comment can survive
+// concatenation, and Chrome reports the last comment it finds in a script. Such
+// a name points at a file the bundler never emitted, so failing to load it says
+// nothing about whether the bundle itself has a retrievable map.
+function sourceMapBelongsToScript(scriptUrl, sourceMapUrl) {
+  const script = sourceMapBasename(scriptUrl);
+  const map = sourceMapBasename(sourceMapUrl).replace(/\.map$/, "");
+  if (!script || !map) return true;
+  return script.startsWith(map) || map.startsWith(script);
+}
+
 function resolveSourceMapUrl(script) {
   return new URL(script.sourceMapURL, script.url || undefined).href;
 }
@@ -327,7 +343,10 @@ async function collectSourceMaps(capture) {
   const warnings = [...capture.sourceMapWarnings];
   for (const entry of capture.sourceMapEntries.values()) {
     if (!entry.retained && entry.error) {
-      warnings.push(`Could not retain source map ${entry.sourceMapUrl} for ${entry.script.url || "an anonymous script"}: ${entry.error}`);
+      const script = entry.script.url || "an anonymous script";
+      warnings.push(sourceMapBelongsToScript(entry.script.url, entry.sourceMapUrl)
+        ? `Could not retain source map ${entry.sourceMapUrl} for ${script}: ${entry.error}`
+        : `Ignored ${entry.sourceMapUrl}, a stale source-map comment a bundled module left inside ${script}: ${entry.error}`);
     }
   }
   return {
