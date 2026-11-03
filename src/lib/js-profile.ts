@@ -13,6 +13,7 @@ import {
   type TaskSet,
 } from "./tasks.ts";
 import { normalizeProfile } from "../app/js-profiler/normalize.ts";
+import { collectCaptureWarnings, collectRetainedSourceMaps, symbolicateProfile } from "./symbolicate.ts";
 import { queryHotspots, querySummary } from "../app/js-profiler/query.ts";
 import type {
   CdpCallFrame,
@@ -20,6 +21,7 @@ import type {
   CdpProfileNode,
   JsHotspotsResult,
   JsProfileSummary,
+  SourceMapsInfo,
 } from "../app/js-profiler/types.ts";
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -328,11 +330,18 @@ export function summarizeCpuProfile(
    * asks for a comparison.
    */
   legacyBottlenecks: () => Bottleneck[];
+  /** What the retained maps resolved, for the log and the symbolication notes. */
+  sourceMaps: SourceMapsInfo;
 } {
   const now = Date.now();
   // Parsed once: this runs over the whole upload, and the profiles this tool
   // exists for are hundreds of megabytes.
   const profile = coerceCdpProfile(raw);
+  // Before anything reads a frame's URL. Classification, the call tree, the
+  // task splitter and every location printed downstream all take that URL at
+  // its word, so the move from bundle positions to authored files has to
+  // happen once, here, rather than in whichever of them noticed first.
+  const sourceMaps = symbolicateProfile(profile, collectRetainedSourceMaps(raw), collectCaptureWarnings(raw));
   const session = normalizeProfile(profile, {
     sessionId,
     name,
@@ -340,6 +349,7 @@ export function summarizeCpuProfile(
     startedAt: now,
     stoppedAt: now,
     samplingIntervalUs: undefined,
+    sourceMaps,
   });
   const durationMs = session.durationMs;
 
@@ -349,6 +359,7 @@ export function summarizeCpuProfile(
     summary: querySummary(session),
     tree,
     profile,
+    sourceMaps,
     tasks: extractTasks(profile),
     legacyBottlenecks: () => groupBottlenecks(profile, durationMs),
     cards: selectCards(tree),

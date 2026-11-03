@@ -83,9 +83,10 @@ export async function POST(request: Request): Promise<Response> {
   let tree;
   let tasks;
   let legacyBottlenecks;
+  let sourceMaps;
   try {
     const rawProfile = JSON.parse(await readFile(`${dir}/${PROFILE_FILE_NAME}`, "utf8")) as unknown;
-    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tree, tasks, legacyBottlenecks } =
+    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tree, tasks, legacyBottlenecks, sourceMaps } =
       summarizeCpuProfile(rawProfile, id, profile.name));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -103,6 +104,15 @@ export async function POST(request: Request): Promise<Response> {
   // card says about which code is whose is a lookup in this table, and the
   // table is rules alone — so the same file always produces the same cards,
   // and uploading a profile costs nothing but the measurement.
+  log(
+    `source maps: ${sourceMaps.state}` +
+    `${sourceMaps.bundleUrls.length ? `, ${sourceMaps.resolvedSourceMapUrls.length}/${sourceMaps.bundleUrls.length} bundles` : ""}` +
+    `${sourceMaps.totalMappableFrameCount ? `, ${sourceMaps.symbolicatedFrameCount}/${sourceMaps.totalMappableFrameCount} frames moved to authored sources` : ""}` +
+    `${sourceMaps.failures.length ? `, ${sourceMaps.failures.length} unreadable` : ""}`
+  );
+  // Without this, a React Native upload whose maps the capture failed to fetch
+  // looks exactly like a bare `.cpuprofile`: `state: "none"` and no reason.
+  for (const warning of sourceMaps.captureWarnings) log(`capture warning: ${warning}`);
   const settings = await getAnalysisSettings();
   const classes = ruleClassTable(parsedProfile.nodes.map((node) => node.callFrame));
   const taskCards = nodeCardEngineRequested()

@@ -139,3 +139,24 @@ test("a React Native target without a tab id is accepted and its fields round-tr
 });
 
 test.after(async () => { await rm(home, { recursive: true, force: true }); });
+
+test("why a recording carries no source maps is written into the recording", async () => {
+  const { capture, uploadToken } = await store.createCapture({ target });
+  await store.appendCaptureRawChunk(capture.id, uploadToken, 0, Buffer.from(JSON.stringify({ traceEvents: [] }), "utf8"));
+  const completed = await store.finalizeCapture(capture.id, uploadToken, {
+    stopReason: "manual",
+    // React Native: no scriptParsed, so no scripts, and the map is fetched
+    // from Metro over HTTP after the recording stops.
+    scripts: [],
+    sourceMaps: [],
+    warnings: ["Could not retain the Metro source map http://127.0.0.1:8081/index.ts.map//&platform=ios after 30s: timeout"],
+  });
+  assert.equal(completed.sourceMapsSeen, 0);
+
+  const exported = await store.captureExport(capture.id);
+  const decoded = JSON.parse((await unzip(await readFile(exported.path))).toString("utf8"));
+  // Not just in `record.json`, which the next recording overwrites: an export
+  // with no maps and no reason is indistinguishable from a bare `.cpuprofile`.
+  assert.match(decoded.metadata.traceSift.warnings.join("\n"), /after 30s: timeout/);
+  await store.deleteCapture(capture.id);
+});

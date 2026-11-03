@@ -295,7 +295,7 @@ function validSourceMaps(value: CaptureSourceMap[]): CaptureSourceMap[] {
   }));
 }
 
-async function writeGzipExport(record: StoredCapture, scripts: CaptureScriptMetadata[], sourceMaps: CaptureSourceMap[], mainFrame?: CaptureMainFrame, traceMarker?: string): Promise<{ export: { fileName: string; sizeBytes: number }; eventCount: number }> {
+async function writeGzipExport(record: StoredCapture, scripts: CaptureScriptMetadata[], sourceMaps: CaptureSourceMap[], warnings: string[], mainFrame?: CaptureMainFrame, traceMarker?: string): Promise<{ export: { fileName: string; sizeBytes: number }; eventCount: number }> {
   const stamp = new Date(record.createdAt).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const fileName = `Trace-${stamp}.json.gz`;
   const metadata = {
@@ -309,6 +309,12 @@ async function writeGzipExport(record: StoredCapture, scripts: CaptureScriptMeta
       target: record.target,
       createdAt: new Date(record.createdAt).toISOString(),
       scripts,
+      // Why a recording carries no source maps is decided at capture time and
+      // was, until now, written only to `record.json` — which the next
+      // recording overwrites. By the time someone opens the export and finds
+      // every frame still at a bundle position, the reason is gone. It
+      // belongs in the file it explains.
+      warnings,
     },
   };
   const written = await writeTraceExport({
@@ -357,7 +363,7 @@ export async function finalizeCapture(id: string, token: string, input: {
       name: cleanText(input.mainFrame.name || "", 300),
     } : undefined;
     const traceMarker = input.traceMarker ? cleanText(input.traceMarker, 300) : undefined;
-    const completedExport = await writeGzipExport(record, scripts, sourceMaps, mainFrame, traceMarker);
+    const completedExport = await writeGzipExport(record, scripts, sourceMaps, record.warnings, mainFrame, traceMarker);
     record.export = completedExport.export;
     record.eventCount = completedExport.eventCount;
     record.state = record.warnings.length > 0 ? "captured_with_warnings" : "captured";

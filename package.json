@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@callstack/tracesift": "workspace:*",
+    "@jridgewell/trace-mapping": "^0.3.31",
     "@callstack/tracesift-explore": "workspace:*",
     "@earendil-works/pi-coding-agent": "0.87.1",
     "@rozenite/ui": "^2.4.0",

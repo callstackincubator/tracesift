@@ -4,15 +4,16 @@
 # the plugin's panel exercises the code in this working tree rather than the
 # published CLI and the installed app.
 #
-# Two things have to come from here rather than from a release: `tracesift
-# record`, which no published CLI has yet, and gzip support in the analyze
-# route, without which a recorded trace reaches no cards. Both live in this
-# tree, so this script points the plugin at the tree.
+# Three things have to come from here rather than from a release: `tracesift
+# record`, which no published CLI has yet; `record --platform rn`, which only
+# 0.6.0 has; and gzip support in the analyze route, without which a recorded
+# trace reaches no cards. All live in this tree, so this script points the
+# plugin at the tree.
 #
-# It leaves two pointer files the plugin's own scripts/test-codex-local.sh
+# It leaves two pointer files the plugin's own tooling/test-codex-local.sh
 # reads, then stays in the foreground serving the app. Stop it with Ctrl-C.
 #
-#   scripts/test-codex-local.sh [--port 3100] [--home <path>]
+#   scripts/test-codex-local.sh [--port 3100] [--home <path>] [--metro <url>]
 #
 set -euo pipefail
 
@@ -23,12 +24,15 @@ CLI_POINTER_FILE="${TMPDIR%/}/tracesift-codex-test-cli"
 HOME_DIR="${TMPDIR%/}/tracesift-codex-test-home.d"
 PORT=""
 
-usage() { echo "Usage: $0 [--port <port>] [--home <path>]" >&2; }
+METRO_URL=""
+
+usage() { echo "Usage: $0 [--port <port>] [--home <path>] [--metro <url>]" >&2; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port) PORT="${2:-}"; shift ;;
     --home) HOME_DIR="${2:-}"; shift ;;
+    --metro) METRO_URL="${2:-}"; shift ;;
     *) usage; exit 2 ;;
   esac
   shift
@@ -79,6 +83,10 @@ cleanup() {
   local status=$?
   echo
   echo "Stopping..."
+  # A recording outlives this script: it runs in a detached recorder holding
+  # Hermes' one sampler or Chrome's tracing lock, and leaving it running means
+  # the next run cannot start one.
+  TRACE_SIFT_HOME="$HOME_DIR" "$CLI_WRAPPER" record stop >/dev/null 2>&1 || true
   # A Chrome left open by `record launch` belongs to this home; quitting it
   # here means the next run does not meet a browser nobody can reach.
   TRACE_SIFT_HOME="$HOME_DIR" "$CLI_WRAPPER" record close >/dev/null 2>&1 || true
@@ -92,6 +100,7 @@ echo "Starting TraceSift from this checkout on $BASE_URL..."
 TRACE_SIFT_HOME="$HOME_DIR" \
 TRACE_SIFT_INTEGRATION_TOKEN="$TOKEN" \
 TRACE_SIFT_INSTANCE="$INSTANCE" \
+TRACESIFT_DEBUG=1 \
 TRACE_SIFT_VERSION="0.0.0-codex-local" \
   npm run dev -- --port "$PORT" &
 SERVER_PID=$!
@@ -121,19 +130,48 @@ chmod 600 "$HOME_DIR/service.json"
 printf '%s' "$HOME_DIR" > "$POINTER_FILE"
 printf '%s' "$CLI_WRAPPER" > "$CLI_POINTER_FILE"
 
+# Say up front whether a React Native app is reachable, because that is the
+# route under test and the answer is one command away. Metro and the app are
+# the developer's to start, so this only reports what it found.
+METRO_URL="${METRO_URL:-http://127.0.0.1:8081}"
+RN_STATUS="$(
+  TRACE_SIFT_HOME="$HOME_DIR" "$CLI_WRAPPER" record targets --platform rn --metro "$METRO_URL" --json 2>/dev/null |
+    node -e '
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", chunk => { input += chunk; });
+      process.stdin.on("end", () => {
+        let payload;
+        try { payload = JSON.parse(input); } catch { payload = null; }
+        if (!payload) { process.stdout.write("Metro did not answer. Start it with `npx expo start` or `npm start`."); return; }
+        if (payload.error) { process.stdout.write(payload.error); return; }
+        const targets = payload.targets ?? [];
+        if (!targets.length) { process.stdout.write(`no app connected to ${payload.metro}. Open the app in a simulator or emulator.`); return; }
+        process.stdout.write(targets.map(target => `${target.title}${target.recommended ? " (default)" : ""}`).join(", "));
+      });
+    ' || true
+)"
+
 cat <<EOF
 
 TraceSift is serving this checkout.
-  app:  $BASE_URL
-  home: $HOME_DIR
-  cli:  $CLI_WRAPPER
+  app:   $BASE_URL
+  home:  $HOME_DIR
+  cli:   $CLI_WRAPPER
+  metro: $METRO_URL
+         ${RN_STATUS:-could not be checked}
 
 Leave this running. In another terminal, install the plugin and relaunch Codex:
-  cd <codex-mobile-dev-plugin> && scripts/test-codex-local.sh
+  cd <codex-mobile-dev-plugin> && tooling/test-codex-local.sh
 
-Then in Codex: Mobile Dev -> TraceSift -> JavaScript CPU -> Record a web app.
+Then in Codex: Mobile Dev -> TraceSift -> JavaScript CPU -> Record a running app.
+  React Native  one press: the app is already running, so Start profile records
+                it. Ask the agent instead and it drives the same thing itself.
+  Web app       two presses: Launch web app, reach the state worth profiling,
+                then Start profile.
 
-Ctrl-C here when you are done; it quits any browser \`record launch\` left open.
+Ctrl-C here when you are done; it stops any recording still running and quits
+any browser \`record launch\` left open.
 EOF
 
 wait "$SERVER_PID"

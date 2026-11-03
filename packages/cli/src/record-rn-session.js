@@ -11,6 +11,12 @@ const MAX_UPLOAD_BYTES = 192 * 1024;
 // there is normally one bundle to retain.
 const MAX_SOURCE_MAP_BYTES = 48 * 1024 * 1024;
 const MAX_ALL_SOURCE_MAP_BYTES = 64 * 1024 * 1024;
+// Metro builds a bundle's map on demand, and for a large app that is a cold
+// multi-minute job: a Bluesky-sized bundle is ~900k lines. Thirty seconds was
+// enough for an Expo starter and silently gave up on everything bigger, which
+// is exactly the recording that needs the map most. This matches the trace
+// flush budget below — the export is already waiting on the device by then.
+const SOURCE_MAP_FETCH_TIMEOUT_MS = 120_000;
 const STOP_POLL_MS = 1000;
 const FLUSH_TIMEOUT_MS = 120_000;
 const METHOD_NOT_FOUND = -32601;
@@ -144,8 +150,9 @@ function metroSourceMaps(origin) {
           warnings.push(`Stopped retaining source maps after the ${MAX_ALL_SOURCE_MAP_BYTES / 1048576} MB safety limit.`);
           break;
         }
+        const startedAt = Date.now();
         try {
-          const response = await fetch(mapUrl, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+          const response = await fetch(mapUrl, { redirect: 'error', signal: AbortSignal.timeout(SOURCE_MAP_FETCH_TIMEOUT_MS) });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const raw = await response.text();
           if (raw.length > MAX_SOURCE_MAP_BYTES) throw new Error(`is ${Math.round(raw.length / 1048576)} MB, past the retention limit`);
@@ -154,7 +161,9 @@ function metroSourceMaps(origin) {
           bytes += raw.length;
           retained.push({ url: bundleUrl, sourceMapUrl: mapUrl, sourceMap });
         } catch (error) {
-          warnings.push(`Could not retain the Metro source map ${mapUrl}: ${errorText(error)}`);
+          // How long it ran separates a timeout from a 404: both arrive here,
+          // and only one of them means the derived URL was wrong.
+          warnings.push(`Could not retain the Metro source map ${mapUrl} after ${Math.round((Date.now() - startedAt) / 1000)}s: ${errorText(error)}`);
         }
       }
       if (retained.length === 0) {

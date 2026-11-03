@@ -6,6 +6,7 @@ import type {
   JsProfileSession,
   JsStackSignature,
   JsTimeBucket,
+  SourceMapsInfo,
 } from "./types";
 import { stripRequest } from "../../lib/source-location.ts";
 
@@ -29,6 +30,12 @@ interface NormalizeMeta {
   startedAt: number;
   stoppedAt: number;
   samplingIntervalUs: number | undefined;
+  /**
+   * What `symbolicate.ts` managed to resolve before the frames reached here.
+   * Absent for a caller that never ran it, which is reported as `none` — the
+   * same answer this gave unconditionally before anything read the maps back.
+   */
+  sourceMaps?: SourceMapsInfo;
 }
 
 export function normalizeProfile(
@@ -94,6 +101,9 @@ export function normalizeProfile(
       const url = cf.url;
       const funcName = cf.functionName || "(anonymous)";
       const isNative = cf.url.startsWith("native ");
+      // A symbolicated frame carries where it was sampled; `url` by then is the
+      // authored file, so the bundle test below has to ask the bundle URL.
+      const sampledUrl = cf.bundleUrl ?? cf.url;
       const isRuntime =
         RUNTIME_NAMES.has(cf.functionName) || (!cf.url && cf.functionName.startsWith("("));
       const isAnonymous = !funcName || funcName === "(anonymous)";
@@ -108,7 +118,16 @@ export function normalizeProfile(
         isNative,
         isRuntime,
         isAnonymous,
-        symbolicationStatus: isHttpUrl(cf.url) ? "bundle-level" : "not-applicable",
+        symbolicationStatus: cf.bundleUrl
+          ? "symbolicated"
+          : isHttpUrl(sampledUrl)
+            ? "bundle-level"
+            : "not-applicable",
+        ...(cf.bundleUrl === undefined ? {} : {
+          bundleUrl: cf.bundleUrl,
+          bundleLineNumber: cf.bundleLineNumber,
+          bundleColumnNumber: cf.bundleColumnNumber,
+        }),
       };
 
       frameByKey.set(key, frame);
@@ -340,13 +359,14 @@ export function normalizeProfile(
     sampleHotspotIds,
     rawNodeToFrameId,
     rawProfile,
-    sourceMaps: {
+    sourceMaps: meta.sourceMaps ?? {
       state: "none",
       bundleUrls: [],
       resolvedSourceMapUrls: [],
       symbolicatedFrameCount: 0,
       totalMappableFrameCount: 0,
       failures: [],
+      captureWarnings: [],
     },
   };
 }

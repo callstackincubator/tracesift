@@ -108,3 +108,17 @@ test('a webpack scheme is unwrapped, not filed with the engine', () => {
   assert.equal(classifyByRule(frame('handler', 'chrome-extension://abc/background.js')), 'native');
   assert.equal(classifyByRule(frame('run', 'blob:http://localhost:3000/abc')), 'native');
 });
+
+test("Metro writes a bundle's parameters into the path, so the extension is followed by a slash", () => {
+  // The real shape off a React Native capture: no `?` anywhere, the build
+  // options live in the path. A rule anchored at `?`, `#` or end of string
+  // matched none of them, which left the one bundler this rule exists for
+  // reaching the residue branch by accident rather than by rule.
+  const metro = 'http://192.168.68.55:8081/index.ts.bundle//&platform=ios&dev=true&lazy=true';
+  assert.equal(classifyByRule(frame('loadModuleImplementation', metro)), undefined);
+  // With a vendor chunk seen elsewhere in the recording, a meaningful name in
+  // a sibling bundle is the product's own code.
+  assert.equal(classifyByRule(frame('PostThread', metro), true), 'app');
+  // A mangled one in the same bundle is still residue.
+  assert.equal(classifyByRule(frame('t.A', metro), true), undefined);
+});
