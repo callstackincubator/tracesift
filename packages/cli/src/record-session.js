@@ -15,7 +15,7 @@ const MAX_SOURCE_MAP_BYTES = 8 * 1024 * 1024;
 const MAX_ALL_SOURCE_MAP_BYTES = 16 * 1024 * 1024;
 const STOP_POLL_MS = 1000;
 
-const TRACE_CATEGORIES = [
+export const TRACE_CATEGORIES = [
   '-*',
   'blink.console',
   'blink.user_timing',
@@ -33,7 +33,7 @@ const TRACE_CATEGORIES = [
   'v8.execute',
 ].join(',');
 
-function errorText(error) {
+export function errorText(error) {
   return error instanceof Error ? error.message : String(error || 'Unknown recording error.');
 }
 
@@ -253,7 +253,7 @@ function sourceMapCollector(cdp) {
 }
 
 /** Choose where the trace goes: a running TraceSift if there is one, else disk. */
-async function resolveSink(home, target, title, options) {
+export async function resolveSink(home, target, title, options) {
   if (options.sink !== 'local') {
     try {
       const service = await readActiveService(home);
@@ -322,7 +322,7 @@ export async function runRecording(options) {
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.targetId, flatten: true });
     await configureSession(cdp, sessionId);
 
-    const target = { tabId: 0, title: page.title || options.url || 'Chrome performance capture', url: options.url || page.url || '' };
+    const target = { platform: 'chrome', title: page.title || options.url || 'Chrome performance capture', url: options.url || page.url || '' };
     sink = await resolveSink(home, target, target.title, options);
     const traceMarker = `__tracesift_main_${sink.captureId}`;
     let mainFrame = await mainFrameOf(cdp, sessionId);
@@ -488,10 +488,19 @@ export async function runRecording(options) {
   }
 }
 
-/** Entry point for the detached recorder `tracesift record start` spawns. */
+/**
+ * Entry point for the detached recorder `tracesift record start` spawns.
+ *
+ * The React Native recorder is loaded only when it is the one being asked for,
+ * so a Chrome recording never pays for a module it cannot use.
+ */
 export async function recorderMain(argv) {
   try {
-    await runRecording(JSON.parse(argv[0]));
+    const options = JSON.parse(argv[0]);
+    const run = options.platform === 'rn'
+      ? (await import('./record-rn-session.js')).runRnRecording
+      : runRecording;
+    await run(options);
   } catch (error) {
     // The failure is already recorded in record.json for `record stop` and
     // `record status` to report; the log keeps the full text.

@@ -22,9 +22,15 @@ export type CaptureStopReason =
   | "error";
 
 export interface CaptureTarget {
-  tabId: number;
+  /** Chrome's tab id. Absent for a React Native capture, which has no tab. */
+  tabId?: number;
   title: string;
   url: string;
+  platform?: "chrome" | "react-native";
+  /** React Native: the Metro inspector target, its app bundle id and the device it runs on. */
+  targetId?: string;
+  appId?: string;
+  deviceName?: string;
 }
 
 export interface CaptureRecord {

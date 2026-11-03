@@ -7,6 +7,7 @@ import type {
   JsStackSignature,
   JsTimeBucket,
 } from "./types";
+import { stripRequest } from "../../lib/source-location.ts";
 
 const NOISE_NAMES = new Set([
   "(idle)",
@@ -356,12 +357,16 @@ function isHttpUrl(url: string): boolean {
 
 function deriveModuleName(url: string): string {
   if (!url) return "(anonymous)";
+  // Metro appends its build options to the bundle path itself, so the last
+  // path segment of a React Native frame's URL is the options and not a file
+  // name. `stripRequest` already owns that distinction.
+  const path = stripRequest(url);
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(path);
     const parts = parsed.pathname.split("/");
-    return parts.at(-1) || parsed.hostname || url;
+    return parts.at(-1) || parsed.hostname || path;
   } catch {
-    const parts = url.split(/[/\\]/);
-    return parts.at(-1) || url;
+    const parts = path.split(/[/\\]/);
+    return parts.at(-1) || path;
   }
 }

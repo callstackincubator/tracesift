@@ -76,11 +76,18 @@ function cleanText(value: string, maximum: number): string {
 }
 
 function safeTarget(target: CaptureTarget): CaptureTarget {
-  if (!Number.isSafeInteger(target.tabId) || target.tabId < 0) throw new Error("Choose a valid Chrome tab.");
+  if (target.tabId !== undefined && (!Number.isSafeInteger(target.tabId) || target.tabId < 0)) throw new Error("Choose a valid Chrome tab.");
+  const targetId = typeof target.targetId === "string" ? cleanText(target.targetId, 300) : "";
+  const appId = typeof target.appId === "string" ? cleanText(target.appId, 300) : "";
+  const deviceName = typeof target.deviceName === "string" ? cleanText(target.deviceName, 300) : "";
   return {
-    tabId: target.tabId,
+    ...(target.tabId !== undefined ? { tabId: target.tabId } : {}),
     title: cleanText(target.title || "Untitled tab", 300),
     url: cleanText(target.url || "", 4000),
+    ...(target.platform === "chrome" || target.platform === "react-native" ? { platform: target.platform } : {}),
+    ...(targetId ? { targetId } : {}),
+    ...(appId ? { appId } : {}),
+    ...(deviceName ? { deviceName } : {}),
   };
 }
 

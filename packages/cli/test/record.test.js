@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { assertRecordOptions, parseDuration, recordClose } from '../src/record.js';
+import { assertRecordOptions, parseDuration, parsePlatform, recordClose, recordTargets } from '../src/record.js';
 import { createIngestSink, createLocalSink } from '../src/record-sink.js';
 import {
   activeRecordState, clearBrowserState, clearRecordState, liveBrowserState, readBrowserState, readRecordState, writeBrowserState, writeRecordState,
@@ -247,4 +247,59 @@ test('record options are rejected for the subcommands that would ignore them', (
   }
   assert.throws(() => assertRecordOptions('explore', undefined, { url: 'x' }), /only supported by tracesift record/);
   assert.throws(() => assertRecordOptions('start', undefined, { sink: 'local' }), /only supported by tracesift record/);
+});
+
+test('a platform is one of the two this records, and defaults to Chrome', () => {
+  assert.equal(parsePlatform(undefined), 'chrome');
+  assert.equal(parsePlatform('chrome'), 'chrome');
+  assert.equal(parsePlatform('rn'), 'rn');
+  assert.equal(parsePlatform('react-native'), 'rn');
+  assert.throws(() => parsePlatform('android'), /Platform must be chrome or rn\./);
+});
+
+test('a flag meant for the other platform is refused rather than ignored', () => {
+  assert.doesNotThrow(() => assertRecordOptions('record', 'start', {
+    platform: 'rn', metro: 'http://127.0.0.1:8081', app: 'com.example', device: 'iPhone', 'target-id': 'a-1', duration: '5s', sink: 'local',
+  }));
+  assert.doesNotThrow(() => assertRecordOptions('record', 'targets', { platform: 'rn', metro: 'http://127.0.0.1:8081', json: true }));
+
+  for (const option of ['url', 'chrome', 'user-data-dir', 'headless']) {
+    assert.throws(() => assertRecordOptions('record', 'start', { platform: 'rn', [option]: 'x' }),
+      new RegExp(`--${option} applies to Chrome`));
+  }
+  for (const option of ['metro', 'app', 'device', 'target-id', 'no-source-maps']) {
+    assert.throws(() => assertRecordOptions('record', 'start', { [option]: 'x' }),
+      new RegExp(`--${option} applies to tracesift record start --platform rn`));
+  }
+});
+
+test('there is no React Native browser to launch or close', () => {
+  for (const subcommand of ['launch', 'close']) {
+    assert.throws(() => assertRecordOptions('record', subcommand, { platform: 'rn' }),
+      /There is nothing to launch for React Native/);
+    assert.doesNotThrow(() => assertRecordOptions('record', subcommand, { platform: 'chrome' }));
+  }
+});
+
+test('targets refuses to list anything but React Native apps', async () => {
+  await assert.rejects(() => recordTargets({ platform: 'chrome' }), /lists React Native apps/);
+});
+
+test('a React Native capture target carries the app and device instead of a tab', async (t) => {
+  const home = await temporaryHome(t);
+  const target = {
+    platform: 'react-native', title: 'AwesomeApp (Hermes) — iPhone 17 Pro', url: 'http://127.0.0.1:8081',
+    targetId: 'device-1-page-1', appId: 'com.awesome.app', deviceName: 'iPhone 17 Pro',
+  };
+  const sink = await createLocalSink(home, target);
+  await sink.chunk(Buffer.from('{"traceEvents":[{"name":"TracingStartedInPage","ph":"I","pid":1,"tid":1,"ts":1}]}'));
+  const result = await sink.finalize({ scripts: [], sourceMaps: [] });
+
+  const document = JSON.parse(gunzipSync(await readFile(result.path)).toString('utf8'));
+  assert.equal(document.metadata.traceSift.target.platform, 'react-native');
+  assert.equal(document.metadata.traceSift.target.appId, 'com.awesome.app');
+  assert.equal(document.metadata.traceSift.target.deviceName, 'iPhone 17 Pro');
+  assert.ok(!('tabId' in document.metadata.traceSift.target));
+  // Nothing was rebuilt: React Native names its own frames.
+  assert.ok(!document.traceEvents.some((event) => event.name === 'TracingStartedInBrowser'));
 });

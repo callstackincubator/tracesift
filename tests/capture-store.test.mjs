@@ -124,4 +124,18 @@ test("only one active capture can exist", async () => {
   await store.failCapture(second.capture.id, second.uploadToken, { error: "test cleanup", interrupted: true });
 });
 
+test("a React Native target without a tab id is accepted and its fields round-trip", async () => {
+  const native = {
+    title: "Sample app", url: "metro://sample", platform: "react-native",
+    targetId: "page-1", appId: "com.example.sample", deviceName: "iPhone 17",
+  };
+  const { capture, uploadToken } = await store.createCapture({ target: native });
+  assert.equal("tabId" in capture.target, false);
+  assert.equal(capture.target.platform, "react-native");
+  assert.equal(capture.target.appId, native.appId);
+  assert.equal(capture.target.deviceName, native.deviceName);
+  assert.equal(capture.target.targetId, native.targetId);
+  await store.failCapture(capture.id, uploadToken, { error: "test cleanup", interrupted: true });
+});
+
 test.after(async () => { await rm(home, { recursive: true, force: true }); });

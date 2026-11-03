@@ -13,8 +13,15 @@ function closeReason(event) {
  * Flattened sessions are the only mode used here: every command carries the
  * session it belongs to, so one socket drives the browser target and each
  * attached page, worker and frame without nesting.
+ *
+ * `label` names whatever is on the other end in the connection errors. The
+ * React Native inspector is not a browser, and telling its user that "Chrome
+ * closed the debugging connection" sends them looking for a Chrome.
+ *
+ * @param {string} url
+ * @param {{ createSocket?: (url: string) => WebSocket, label?: string }} [options]
  */
-export async function connectCdp(url, { createSocket = (target) => new WebSocket(target) } = {}) {
+export async function connectCdp(url, { createSocket = (target) => new WebSocket(target), label = 'Chrome' } = {}) {
   const socket = createSocket(url);
   const pending = new Map();
   const listeners = new Set();
@@ -34,7 +41,14 @@ export async function connectCdp(url, { createSocket = (target) => new WebSocket
       const waiter = pending.get(message.id);
       if (!waiter) return;
       pending.delete(message.id);
-      if (message.error) waiter.reject(new Error(`${waiter.method} failed: ${message.error.message || 'Chrome rejected the command.'}`));
+      if (message.error) {
+        // Keep the protocol code alongside the text: -32601 is how a runtime
+        // says it has never heard of a domain, which is the difference between
+        // "record with something else" and "this version wants the older call".
+        const failure = new Error(`${waiter.method} failed: ${message.error.message || `${label} rejected the command.`}`);
+        failure.cdpCode = message.error.code;
+        waiter.reject(failure);
+      }
       else waiter.resolve(message.result ?? {});
       return;
     }
@@ -48,17 +62,17 @@ export async function connectCdp(url, { createSocket = (target) => new WebSocket
   });
 
   socket.addEventListener('close', (event) => {
-    shutdown ??= new Error(`Chrome closed the debugging connection: ${closeReason(event)}`);
+    shutdown ??= new Error(`${label} closed the debugging connection: ${closeReason(event)}`);
     rejectAll(shutdown);
   });
   socket.addEventListener('error', () => {
-    shutdown ??= new Error('The Chrome debugging connection failed.');
+    shutdown ??= new Error(`The ${label} debugging connection failed.`);
   });
 
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Chrome did not accept a debugging connection in time.')), CONNECT_TIMEOUT_MS);
+    const timer = setTimeout(() => reject(new Error(`${label} did not accept a debugging connection in time.`)), CONNECT_TIMEOUT_MS);
     socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-    socket.addEventListener('close', (event) => { clearTimeout(timer); reject(new Error(`Chrome refused the debugging connection: ${closeReason(event)}`)); }, { once: true });
+    socket.addEventListener('close', (event) => { clearTimeout(timer); reject(new Error(`${label} refused the debugging connection: ${closeReason(event)}`)); }, { once: true });
   });
 
   return {
@@ -92,7 +106,7 @@ export async function connectCdp(url, { createSocket = (target) => new WebSocket
     },
     get closed() { return Boolean(shutdown) || socket.readyState > 1; },
     close() {
-      shutdown ??= new Error('The Chrome debugging connection was closed.');
+      shutdown ??= new Error(`The ${label} debugging connection was closed.`);
       rejectAll(shutdown);
       try { socket.close(); } catch { /* already gone */ }
     },

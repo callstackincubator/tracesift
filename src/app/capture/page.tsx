@@ -8,7 +8,8 @@ import { Button, PluginHeader, PluginShell } from "@rozenite/ui";
 import { ThemeGate } from "@/app/theme-gate";
 import type { CaptureRecord, CaptureTarget } from "@/lib/capture-types";
 
-type ExtensionReply = { ok: boolean; error?: string; targets?: CaptureTarget[] };
+type ChromeTarget = CaptureTarget & { tabId: number };
+type ExtensionReply = { ok: boolean; error?: string; targets?: ChromeTarget[] };
 
 const REQUEST_SOURCE = "tracesift-web-v1";
 const RESPONSE_SOURCE = "tracesift-extension-v1";
@@ -29,7 +30,7 @@ function stateLabel(state: CaptureRecord["state"]): string {
 
 function CapturePage() {
   const [extensionState, setExtensionState] = useState<"disconnected" | "connecting" | "connected">("disconnected");
-  const [targets, setTargets] = useState<CaptureTarget[]>([]);
+  const [targets, setTargets] = useState<ChromeTarget[]>([]);
   const [selectedTab, setSelectedTab] = useState<number | null>(null);
   const [captures, setCaptures] = useState<CaptureRecord[]>([]);
   const [busy, setBusy] = useState(false);
