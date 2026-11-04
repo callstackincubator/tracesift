@@ -62,7 +62,15 @@ function isVendorChunkUrl(url: string): boolean {
  * its URL says nothing about either. Frames carrying one are exactly the
  * residue the model call exists to resolve.
  */
-const BUNDLE_URL = /\.(?:bundle|min\.js)(?:[?#]|$)/i;
+/*
+ * Metro writes a bundle's parameters into the path rather than the query, so
+ * the extension is followed by a slash and not by `?`: a React Native frame
+ * arrives at `/index.ts.bundle//&platform=ios&dev=true`. The `[?#]|$` tail
+ * refused every one of them, which left the single case this rule was written
+ * for falling through to `isReadableSourcePath` — false for anything carrying
+ * a scheme — and reaching the residue branch by accident rather than by rule.
+ */
+const BUNDLE_URL = /\.(?:bundle|min\.js)(?:[?#/]|$)/i;
 
 /** Schemes that name no file on disk: engine internals, extensions, eval'd code. */
 const VIRTUAL_SCHEME = /^(?:node|extensions|chrome|chrome-extension|v8|evalmachine|blob|data):/i;

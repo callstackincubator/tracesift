@@ -9,8 +9,14 @@ const MAX_UPLOAD_BYTES = 192 * 1024;
 // past Chrome's 8 MB per-script limit routinely — an Expo starter is already
 // over 10 MB. The aggregate limit is what actually bounds the export, and
 // there is normally one bundle to retain.
+// Two different questions. The fetch limit is how much of a response we are
+// willing to hold as a string at all; the retention limit is how much of it
+// goes into the export, and it is applied after `sourcesContent` is dropped.
+// Metro's map for Bluesky is 56 MB whole and 26 MB without it, so the old
+// single 48 MB test rejected a map that is comfortably retainable.
+const MAX_SOURCE_MAP_FETCH_BYTES = 256 * 1024 * 1024;
 const MAX_SOURCE_MAP_BYTES = 48 * 1024 * 1024;
-const MAX_ALL_SOURCE_MAP_BYTES = 64 * 1024 * 1024;
+const MAX_ALL_SOURCE_MAP_BYTES = 96 * 1024 * 1024;
 // Metro builds a bundle's map on demand, and for a large app that is a cold
 // multi-minute job: a Bluesky-sized bundle is ~900k lines. Thirty seconds was
 // enough for an Expo starter and silently gave up on everything bigger, which
@@ -155,10 +161,17 @@ function metroSourceMaps(origin) {
           const response = await fetch(mapUrl, { redirect: 'error', signal: AbortSignal.timeout(SOURCE_MAP_FETCH_TIMEOUT_MS) });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const raw = await response.text();
-          if (raw.length > MAX_SOURCE_MAP_BYTES) throw new Error(`is ${Math.round(raw.length / 1048576)} MB, past the retention limit`);
+          if (raw.length > MAX_SOURCE_MAP_FETCH_BYTES) throw new Error(`is ${Math.round(raw.length / 1048576)} MB, past the fetch limit`);
           const sourceMap = JSON.parse(raw);
           if (!sourceMap || typeof sourceMap !== 'object' || Array.isArray(sourceMap)) throw new Error('not a JSON object');
-          bytes += raw.length;
+          // More than half a Metro map is the authored files inlined, and
+          // nothing downstream reads them: a frame is moved by `mappings`,
+          // `sources` and `names` alone. Carrying the sources would put a
+          // copy of the whole app inside every recording of it.
+          delete sourceMap.sourcesContent;
+          const size = JSON.stringify(sourceMap).length;
+          if (size > MAX_SOURCE_MAP_BYTES) throw new Error(`is ${Math.round(size / 1048576)} MB without its sources, past the retention limit`);
+          bytes += size;
           retained.push({ url: bundleUrl, sourceMapUrl: mapUrl, sourceMap });
         } catch (error) {
           // How long it ran separates a timeout from a 404: both arrive here,

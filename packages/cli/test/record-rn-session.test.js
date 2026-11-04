@@ -22,9 +22,14 @@ const TARGET = { id: 'page-1', title: 'Hermes React Native', appId: 'com.example
  * A Metro that serves /json/list, plus a stand-in for the global WebSocket that
  * speaks the CDP message protocol. `script(message, socket)` plays the app.
  */
-async function fakeApp(t, script) {
+async function fakeApp(t, script, map) {
   const server = createServer((request, response) => {
     const port = server.address().port;
+    if (map && request.url.includes('.map')) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(map));
+      return;
+    }
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify([{ ...TARGET, webSocketDebuggerUrl: `ws://127.0.0.1:${port}/inspector/debug?device=a` }]));
   });
@@ -260,4 +265,48 @@ test('a long CPU profile is split into chunks that carry the node table once', (
   assert.deepEqual(chunks.map((chunk) => chunk.args.data.timeDeltas.length), [10_000, 10_000, 5_000]);
   assert.deepEqual(chunks[1].args.data.cpuProfile.samples, samples.slice(10_000, 20_000));
   assert.deepEqual(chunks[2].args.data.timeDeltas, timeDeltas.slice(20_000));
+});
+
+/**
+ * Metro inlines every authored file it mapped. For an app the size of Bluesky
+ * that is 30 of the map's 56 MB, and it is the half nothing reads: a frame
+ * moves onto its source by `mappings`, `sources` and `names`.
+ */
+test('the authored sources Metro inlines are dropped, because a recording is not a copy of the app', async (t) => {
+  const home = await temporaryDirectory(t);
+  const sourceMap = {
+    version: 3,
+    sources: ['src/view/OpenCameraBtn.tsx'],
+    sourcesContent: ['x'.repeat(64 * 1024 * 1024)],
+    names: ['OpenCameraBtn'],
+    mappings: 'AAAA',
+  };
+  const app = await fakeApp(t, (message, socket) => {
+    if (message.method === 'Tracing.start') return socket.reply(message);
+    if (message.method === 'Tracing.end') {
+      socket.reply(message);
+      socket.notify('Tracing.dataCollected', { value: [{
+        name: 'ProfileChunk', cat: 'disabled-by-default-v8.cpu_profiler', ph: 'P', pid: 7, tid: 11, ts: 1000,
+        args: { data: { cpuProfile: { nodes: [{ id: 1, callFrame: {
+          functionName: 'OpenCameraBtn', scriptId: '6', lineNumber: 0, columnNumber: 0,
+          // Metro writes the build options into the path, not the query.
+          url: `${app.metro}/index.ts.bundle//&platform=ios&dev=true&lazy=true`,
+        } }], samples: [1] }, timeDeltas: [0] } },
+      }] });
+      socket.notify('Tracing.tracingComplete', {});
+      return undefined;
+    }
+    return socket.reply(message);
+  }, sourceMap);
+  const result = await record(t, app, home, { sourceMaps: true });
+
+  const document = await readExport(result.path);
+  const [retained] = document.metadata.sourceMaps;
+  // Whole, this map is past the retention limit. Without the sources it is
+  // nothing, and it still resolves every frame it was fetched for.
+  assert.ok(retained, (await readRecordState(home)).warnings?.join('\n'));
+  assert.equal('sourcesContent' in retained.sourceMap, false);
+  assert.deepEqual(retained.sourceMap.sources, ['src/view/OpenCameraBtn.tsx']);
+  assert.equal(retained.sourceMap.mappings, 'AAAA');
+  assert.deepEqual((await readRecordState(home)).warnings, []);
 });
