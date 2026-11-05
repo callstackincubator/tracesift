@@ -498,7 +498,7 @@ export async function recorderMain(argv) {
   try {
     const options = JSON.parse(argv[0]);
     const run = options.platform === 'rn'
-      ? (await import('./record-rn-session.js')).runRnRecording
+      ? (await import('./record-rn.js')).runRnAnyRecording
       : runRecording;
     await run(options);
   } catch (error) {

@@ -21,11 +21,12 @@ const CLOSE_TIMEOUT_MS = 10_000;
 // browser; everything about the trace itself belongs to `start`.
 const RECORD_OPTIONS = {
   start: ['url', 'chrome', 'user-data-dir', 'out', 'duration', 'headless', 'sink',
-    'platform', 'metro', 'app', 'device', 'target-id', 'no-source-maps'],
+    'platform', 'metro', 'app', 'device', 'target-id', 'no-source-maps',
+    'profiler-port', 'source-map'],
   // `launch` and `close` take --platform only so that naming rn there gets the
   // reason it makes no sense rather than a flag-not-supported error.
   launch: ['url', 'chrome', 'user-data-dir', 'headless', 'platform'],
-  targets: ['platform', 'metro', 'json'],
+  targets: ['platform', 'metro', 'json', 'profiler-port'],
   stop: [],
   status: ['json'],
   close: ['platform'],
@@ -36,7 +37,7 @@ export const RECORD_SUBCOMMANDS = Object.keys(RECORD_OPTIONS);
 // wrong one is a mistake worth failing on: it would otherwise look like the
 // recording honoured a setting it silently dropped.
 const CHROME_ONLY = ['url', 'chrome', 'user-data-dir', 'headless'];
-const RN_ONLY = ['metro', 'app', 'device', 'target-id', 'no-source-maps'];
+const RN_ONLY = ['metro', 'app', 'device', 'target-id', 'no-source-maps', 'profiler-port', 'source-map'];
 
 /** Normalise `--platform`, which defaults to Chrome. */
 export function parsePlatform(value) {
@@ -74,6 +75,15 @@ export function assertRecordOptions(command, subcommand, values) {
   if (platform !== 'rn' && rnOnly) {
     throw new Error(`--${rnOnly} applies to tracesift record start --platform rn.`);
   }
+}
+
+/** The loopback port a release build's profiler dials. */
+export function parseProfilerPort(value) {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+    throw new Error('--profiler-port must be an integer between 1 and 65535.');
+  }
+  return Number(value);
 }
 
 /** Accept `30`, `30s`, `500ms` or `2m`; a bare number is seconds. */
@@ -119,6 +129,10 @@ async function waitFor(home, predicate, timeout, onTimeout, pid) {
     const state = await readRecordState(home);
     const mine = state && (pid === undefined || state.pid === pid) ? state : null;
     if (mine && predicate(mine)) return mine;
+    // A recorder that has already recorded its own reason has nothing left to
+    // say, and waiting out the deadline would replace that reason with a
+    // generic timeout.
+    if (mine?.state === 'failed') throw new Error(mine.error || 'The recorder stopped before it finished.');
     if (mine && !processAlive(mine.pid) && mine.state !== 'captured') {
       throw new Error(mine.error || 'The recorder stopped before it finished.');
     }
@@ -127,21 +141,46 @@ async function waitFor(home, predicate, timeout, onTimeout, pid) {
   }
 }
 
+/** The id a release build is listed under; it needs one, but there is only ever one. */
+export const RELEASE_TARGET_ID = 'release';
+
 /**
- * List the apps connected to Metro, so a recording can name one — and so a
- * harness can find out what is there without starting anything.
+ * List the React Native apps a recording could attach to, over either route.
+ *
+ * Both are reported because the two are not a preference but a property of
+ * the build, and a caller that lists before it records — the panel does, and
+ * so does the agent — would otherwise conclude there is nothing to record
+ * whenever the app is a release build.
+ *
+ * Metro is awaited first. Only when it has nothing to show is the profiler
+ * port given its window, so the ordinary debug listing stays immediate.
  */
 export async function recordTargets(options = {}) {
   const platform = options.platform ?? 'chrome';
   if (platform !== 'rn') {
     throw new Error('tracesift record targets lists React Native apps. Run it with --platform rn.');
   }
+  const { describeProfilerApp, noAppConnectedMessage, probeProfilerApp, DEFAULT_PROFILER_PORT } =
+    await import('./rn-profiler-link.js');
+
   const origin = parseMetroOrigin(options.metro || defaultMetroOrigin());
   const label = origin.href.replace(/\/$/, '');
-  let targets;
+  const port = options.profilerPort ?? DEFAULT_PROFILER_PORT;
+
+  let targets = [];
+  let metroFailure = null;
   try {
     targets = await metroTargets(origin);
   } catch (error) {
+    metroFailure = error.message;
+  }
+
+  const hello = targets.length === 0 ? await probeProfilerApp({ port }) : null;
+
+  if (targets.length === 0 && !hello) {
+    const error = new Error(metroFailure
+      ? noAppConnectedMessage(metroFailure, port)
+      : noAppConnectedMessage(`Metro on ${label} has no app connected to it. Launch the app and wait for the bundle to finish loading.`, port));
     if (!options.json) throw error;
     console.log(JSON.stringify({ apiVersion: 1, error: error.message }));
     process.exitCode = 1;
@@ -154,30 +193,49 @@ export async function recordTargets(options = {}) {
   try { recommended = selectMetroTarget(targets, { origin }); }
   catch { recommended = undefined; }
 
+  const release = hello ? {
+    id: RELEASE_TARGET_ID,
+    title: describeProfilerApp(hello),
+    ...(typeof hello.app === 'string' ? { appId: hello.app } : {}),
+    ...(typeof hello.device === 'string' ? { deviceName: hello.device } : {}),
+    transport: 'release',
+    port,
+  } : null;
+
   if (options.json) {
     console.log(JSON.stringify({
       apiVersion: 1,
       platform: 'rn',
       metro: label,
-      targets: targets.map((target) => ({
-        id: target.id,
-        title: target.title,
-        ...(target.appId ? { appId: target.appId } : {}),
-        ...(target.deviceName ? { deviceName: target.deviceName } : {}),
-        ...(target.deviceId ? { deviceId: target.deviceId } : {}),
-        ...(target.vm ? { vm: target.vm } : {}),
-        supportsMultipleDebuggers: target.supportsMultipleDebuggers,
-        recommended: target.id === recommended?.id,
-      })),
+      profilerPort: port,
+      targets: [
+        ...targets.map((target) => ({
+          id: target.id,
+          title: target.title,
+          ...(target.appId ? { appId: target.appId } : {}),
+          ...(target.deviceName ? { deviceName: target.deviceName } : {}),
+          ...(target.deviceId ? { deviceId: target.deviceId } : {}),
+          ...(target.vm ? { vm: target.vm } : {}),
+          transport: 'metro',
+          supportsMultipleDebuggers: target.supportsMultipleDebuggers,
+          recommended: target.id === recommended?.id,
+        })),
+        // A release build is the only thing to record when it is the only
+        // thing listed, which is the case whenever it is listed at all.
+        ...(release ? [{ ...release, supportsMultipleDebuggers: false, recommended: true }] : []),
+      ],
     }));
     return targets;
   }
 
-  if (targets.length === 0) {
-    console.log(`Metro on ${label} has no app connected to it.`);
-    console.log('Launch the app in a simulator, emulator or device and wait for the bundle to finish loading.');
+  if (release) {
+    console.log(`Release build on port ${port}\n`);
+    console.log(`  ${release.title}`);
+    if (release.appId) console.log(`    app      ${release.appId}`);
+    console.log('\nRecord it with: tracesift record start --platform rn');
     return targets;
   }
+
   console.log(`Metro on ${label}\n`);
   for (const target of targets) {
     console.log(`  ${describeMetroTarget(target)}${target.id === recommended?.id ? '  (default)' : ''}`);
@@ -214,6 +272,8 @@ export async function recordStart(options = {}) {
     app: options.app,
     device: options.device,
     targetId: options.targetId,
+    profilerPort: options.profilerPort,
+    sourceMapPath: options.sourceMapPath,
     sourceMaps: options.sourceMaps !== false,
     out: options.out,
     duration: options.duration,

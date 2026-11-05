@@ -132,7 +132,9 @@ printf '%s' "$CLI_WRAPPER" > "$CLI_POINTER_FILE"
 
 # Say up front whether a React Native app is reachable, because that is the
 # route under test and the answer is one command away. Metro and the app are
-# the developer's to start, so this only reports what it found.
+# the developer's to start, so this only reports what it found. Both routes
+# are asked about, since `record targets` now reports a release build dialling
+# in as well as a debug build on Metro.
 METRO_URL="${METRO_URL:-http://127.0.0.1:8081}"
 RN_STATUS="$(
   TRACE_SIFT_HOME="$HOME_DIR" "$CLI_WRAPPER" record targets --platform rn --metro "$METRO_URL" --json 2>/dev/null |
@@ -143,11 +145,11 @@ RN_STATUS="$(
       process.stdin.on("end", () => {
         let payload;
         try { payload = JSON.parse(input); } catch { payload = null; }
-        if (!payload) { process.stdout.write("Metro did not answer. Start it with `npx expo start` or `npm start`."); return; }
-        if (payload.error) { process.stdout.write(payload.error); return; }
+        if (!payload) { process.stdout.write("nothing answered. Start Metro with `npx expo start`, or install a build made by `tracesift profile build`."); return; }
+        if (payload.error) { process.stdout.write(payload.error.replace(/\n\s*/g, " ")); return; }
         const targets = payload.targets ?? [];
-        if (!targets.length) { process.stdout.write(`no app connected to ${payload.metro}. Open the app in a simulator or emulator.`); return; }
-        process.stdout.write(targets.map(target => `${target.title}${target.recommended ? " (default)" : ""}`).join(", "));
+        if (!targets.length) { process.stdout.write(`no app connected to ${payload.metro} and no release build dialling in.`); return; }
+        process.stdout.write(targets.map(target => `${target.title}${target.transport === "release" ? " [release]" : ""}${target.recommended ? " (default)" : ""}`).join(", "));
       });
     ' || true
 )"
@@ -159,7 +161,7 @@ TraceSift is serving this checkout.
   home:  $HOME_DIR
   cli:   $CLI_WRAPPER
   metro: $METRO_URL
-         ${RN_STATUS:-could not be checked}
+  apps:  ${RN_STATUS:-could not be checked}
 
 Leave this running. In another terminal, install the plugin and relaunch Codex:
   cd <codex-mobile-dev-plugin> && tooling/test-codex-local.sh
@@ -167,6 +169,9 @@ Leave this running. In another terminal, install the plugin and relaunch Codex:
 Then in Codex: Mobile Dev -> TraceSift -> JavaScript CPU -> Record a running app.
   React Native  one press: the app is already running, so Start profile records
                 it. Ask the agent instead and it drives the same thing itself.
+                A debug build is found over Metro and a release build through
+                the profiler package, so test both: \`tracesift profile build\`
+                from an app root makes the second kind.
   Web app       two presses: Launch web app, reach the state worth profiling,
                 then Start profile.
 
