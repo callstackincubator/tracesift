@@ -53,6 +53,34 @@ See the [CLI documentation](packages/cli/CLI.md) for storage, troubleshooting, a
 
 ## Using the web interface
 
+### Capture a Chrome performance trace
+
+TraceSift can record an already-open Chrome tab without opening the DevTools
+Performance panel. Open **Capture** in the header, then click the TraceSift
+Capture extension in Chrome's toolbar while that exact page is active. This
+explicit gesture approves the page; a loopback website cannot pair itself.
+Choose the website tab and start recording. The page remains the control
+surface while the extension uses Chrome DevTools Protocol as a narrow, local
+bridge. Reloading or navigating the approved capture page requires another
+toolbar click.
+
+Chrome buffers events internally while recording. When recording stops, the
+extension pulls the resulting CDP stream in fixed-size chunks and waits for
+each append to `~/.tracesift/captures` before reading the next. The finished
+trace is exported as a Chrome-compatible `.json.gz`; captures remain until
+they are deleted in TraceSift. TraceSift monitors Chrome's trace buffer and
+automatically stops at 90% to avoid losing a full recording. A Chrome crash
+before it exposes the completed stream can still make that recording
+unrecoverable.
+
+The extension currently ships as a developer package. In Chrome 125 or newer,
+open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**,
+and select [`packages/chrome-extension`](packages/chrome-extension). Chrome
+shows its standard debugging banner during a capture. Opening DevTools for the
+same tab, closing the tab, or dismissing that banner can detach the recorder;
+TraceSift reports the capture as interrupted rather than presenting it as a
+complete export.
+
 ### 1. Configure Analysis settings
 
 Without a provider configured, TraceSift still reads a profile end to end and produces its cards. Configure one for the optional extras:

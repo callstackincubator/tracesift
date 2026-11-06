@@ -5,6 +5,15 @@ export interface CdpCallFrame {
     url: string;
     lineNumber: number;
     columnNumber: number;
+    /**
+     * Where this frame was actually sampled, kept when `symbolicate.ts` moved
+     * `url`/`lineNumber`/`columnNumber` onto the authored source. Absent on a
+     * frame no retained map could place, which is also every frame of a
+     * recording that carried no maps at all.
+     */
+    bundleUrl?: string;
+    bundleLineNumber?: number;
+    bundleColumnNumber?: number;
   }
   
   export interface CdpProfileNode {
@@ -40,6 +49,14 @@ export interface CdpCallFrame {
     symbolicatedFrameCount: number;
     totalMappableFrameCount: number;
     failures: SymbolicationFailure[];
+    /**
+     * What the capture said about the maps it could not retain. A recording
+     * with `state: "none"` is otherwise indistinguishable from a bare
+     * `.cpuprofile`, and the difference — Metro timed out, the map was past
+     * the size cap, the derived URL 404'd — is the whole answer to why every
+     * frame is still at a bundle position.
+     */
+    captureWarnings: string[];
   }
   
   // Normalized session model

@@ -1,0 +1,24 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!--
+      The gate, and the reason there is nothing for the app to edit. It
+      resolves to false unless the build passes -PtracesiftProfiler=true, so
+      an ordinary assembleRelease ships this package inert.
+    -->
+    <meta-data
+      android:name="com.tracesift.profiler.enabled"
+      android:value="${tracesiftProfilerEnabled}" />
+
+    <!--
+      The auto-start hook. It runs before Application.onCreate, so the app
+      needs no code of its own, and it does nothing at all unless the app
+      declares com.tracesift.profiler.enabled=true. Not exported: nothing
+      outside the process can reach it.
+    -->
+    <provider
+      android:name="com.tracesift.profiler.ProfilerInitProvider"
+      android:authorities="${applicationId}.tracesiftprofiler"
+      android:exported="false"
+      android:initOrder="100" />
+  </application>
+</manifest>

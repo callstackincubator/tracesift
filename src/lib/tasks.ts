@@ -163,20 +163,52 @@ export function measuredTasks(profile: CdpProfile): RawTaskInterval[] | undefine
  */
 const PROFILER_OVERHEAD_EVENTS = new Set(["CpuProfiler::StartProfiling", "CpuProfiler::StopProfiling"]);
 
+/**
+ * The mark the extension writes into the page the moment `Tracing.start`
+ * returns. Chrome emits no `CpuProfiler::StartProfiling` for a trace a
+ * `chrome.debugger` client started, so on a browser capture the span above is
+ * invisible and the attach lands in the recording as a first block holding
+ * nothing but `(program)` — 518 ms of it on the local capture, carded as "no
+ * code of your own ran in this block" because that is literally true.
+ *
+ * Everything between the profiler's own start and that mark is the cost of
+ * attaching the debugger and starting the recording. Reading it off the mark
+ * keeps this the same kind of claim as the event above — something the tracer
+ * stated — rather than a `(program)`-heavy call tree we decided to distrust.
+ */
+const CAPTURE_MARKER_PREFIX = "__tracesift_main_";
+
 /** Profiler-overhead intervals, grouped by the thread that paid for them. */
 export function profilerOverheadIntervals(
   events: readonly Record<string, unknown>[],
 ): Map<string, RawTaskInterval[]> {
   const byThread = new Map<string, RawTaskInterval[]>();
-  for (const event of events) {
-    if (typeof event.name !== "string" || !PROFILER_OVERHEAD_EVENTS.has(event.name)) continue;
-    if (typeof event.ts !== "number") continue;
-    const dur = typeof event.dur === "number" ? event.dur : 0;
-    if (dur <= 0) continue;
-    const key = threadKey(event);
+  const add = (key: string, interval: RawTaskInterval) => {
     const list = byThread.get(key);
-    if (list) list.push({ ts: event.ts, dur });
-    else byThread.set(key, [{ ts: event.ts, dur }]);
+    if (list) list.push(interval);
+    else byThread.set(key, [interval]);
+  };
+  // `Profile` is emitted on the thread being profiled, and so is the mark, so
+  // the two meet under one key. First of each wins: a capture starts once.
+  const profileStart = new Map<string, number>();
+  const captureMark = new Map<string, number>();
+  for (const event of events) {
+    if (typeof event.name !== "string" || typeof event.ts !== "number") continue;
+    if (PROFILER_OVERHEAD_EVENTS.has(event.name)) {
+      const dur = typeof event.dur === "number" ? event.dur : 0;
+      if (dur > 0) add(threadKey(event), { ts: event.ts, dur });
+    } else if (event.name === "Profile") {
+      const key = threadKey(event);
+      if (!profileStart.has(key)) profileStart.set(key, event.ts);
+    } else if (event.name.startsWith(CAPTURE_MARKER_PREFIX)) {
+      const key = threadKey(event);
+      if (!captureMark.has(key)) captureMark.set(key, event.ts);
+    }
+  }
+  for (const [key, mark] of captureMark) {
+    const start = profileStart.get(key);
+    if (start === undefined || mark <= start) continue;
+    add(key, { ts: start, dur: mark - start });
   }
   return byThread;
 }

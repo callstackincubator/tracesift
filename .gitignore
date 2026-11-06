@@ -43,5 +43,6 @@ next-env.d.ts
 
 /packages/cli/release.json
 /packages/cli/*.tgz
+/packages/rn-profiler/android/build
 
 test-fixtures/local/
