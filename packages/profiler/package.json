@@ -1,6 +1,6 @@
 {
   "name": "@callstack/tracesift-profiler",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Record a Hermes CPU profile from a React Native release build, with tracesift",
   "license": "MIT",
   "main": "src/index.ts",
