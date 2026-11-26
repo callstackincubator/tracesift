@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { maxUploadBytes, uploadTooLargeMessage, putRecord, getAnalysisSettings, saveAnalysis } from "./analysis.ts";
 import { parseReactProfileOptions, ReactProfileError } from "./react-profile.ts";
+import { decompressedProfile, ProfileUploadError } from "./profile-upload.ts";
 import type { extractReactProfile } from "./react-profile.ts";
 import { requireReactEvidence, withinReactBudget, noReactIssues, ZERO_REACT_USAGE, discardSubBudgetReactIssues, type analyzeReactProfile } from "./react-analyzer.ts";
 import { parseFrameBudget } from "./react-evidence.ts";
@@ -64,9 +65,16 @@ export function createReactAnalysisHandler(dependencies: Dependencies) {
       let form: FormData;
       try { form = await request.formData(); }
       catch { throw new ReactProfileError(400, "Expected a multipart form containing the profile file."); }
-      const profile = form.get("profile");
-      if (!(profile instanceof File) || !profile.size) throw new ReactProfileError(400, "A React profile file is required.");
-      if (profile.size > maxUploadBytes()) throw new ReactProfileError(413, uploadTooLargeMessage());
+      const uploaded = form.get("profile");
+      if (!(uploaded instanceof File) || !uploaded.size) throw new ReactProfileError(400, "A React profile file is required.");
+      if (uploaded.size > maxUploadBytes()) throw new ReactProfileError(413, uploadTooLargeMessage());
+      // An export may arrive gzipped; the readers below all want plain JSON.
+      let profile: File;
+      try { profile = await decompressedProfile(uploaded); }
+      catch (error) {
+        if (error instanceof ProfileUploadError) throw new ReactProfileError(error.status, error.message);
+        throw error;
+      }
       const options = parseReactProfileOptions(form);
       const frameBudgetMs = parseFrameBudget(form);
       if (request.signal.aborted) throw new ReactProfileError(499, "React profile analysis cancelled.");

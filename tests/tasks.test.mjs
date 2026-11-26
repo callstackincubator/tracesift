@@ -276,3 +276,26 @@ test('a trace that never names the profiler leaves every task alone', () => {
   const raw = attachMeasuredTasks(profile(nodes, [1, 2, 3], 1000), [{ ts: 2000, dur: 3000 }]);
   assert.deepEqual(extractTasks(raw).tasks.map((task) => task.overhead), [undefined]);
 });
+
+test("a browser capture's attach window is read off TraceSift's own mark", () => {
+  // Chrome emits no `CpuProfiler::StartProfiling` for a trace started through
+  // `chrome.debugger`, so the attach arrives as a first block of `(program)`
+  // with no JS frame in it. The mark the extension writes once `Tracing.start`
+  // returns is the only statement of when the recording really began.
+  const byThread = profilerOverheadIntervals([
+    { name: 'Profile', ph: 'P', ts: 1000, pid: 1, tid: 1 },
+    { name: '__tracesift_main_734ab274-fb87-481f-ba3b-d5f813fee252', ph: 'I', ts: 6000, pid: 1, tid: 1 },
+    // A second thread profiled without a mark keeps its whole recording.
+    { name: 'Profile', ph: 'P', ts: 1000, pid: 1, tid: 2 },
+  ]);
+  assert.deepEqual(byThread.get('1:1'), [{ ts: 1000, dur: 5000 }]);
+  assert.equal(byThread.get('1:2'), undefined);
+});
+
+test('a mark that precedes the profiler bills nothing', () => {
+  const byThread = profilerOverheadIntervals([
+    { name: '__tracesift_main_abc', ph: 'I', ts: 500, pid: 1, tid: 1 },
+    { name: 'Profile', ph: 'P', ts: 1000, pid: 1, tid: 1 },
+  ]);
+  assert.equal(byThread.get('1:1'), undefined);
+});

@@ -1,0 +1,58 @@
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath "com.android.tools.build:gradle:8.7.2"
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${project.properties["TracesiftProfiler_kotlinVersion"] ?: "2.0.21"}"
+  }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+
+/** Fall back to the app's value when it sets one, so the library tracks its host. */
+def host(String name, Object fallback) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
+}
+
+android {
+  namespace "com.tracesift.profiler"
+  compileSdk host("compileSdkVersion", 35)
+
+  defaultConfig {
+    minSdk host("minSdkVersion", 24)
+
+    // The gate lives here rather than in the app's manifest so that enabling
+    // profiling costs the app no edit at all — `-PtracesiftProfiler=true`
+    // reaches every project in the build, this one included. Off by default:
+    // a release binary that opens a control socket for the asking is a
+    // remote-profiling backdoor.
+    manifestPlaceholders = [
+      tracesiftProfilerEnabled: (project.findProperty("tracesiftProfiler") ?: "false").toString(),
+    ]
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+kotlin {
+  jvmToolchain(17)
+}
+
+repositories {
+  google()
+  mavenCentral()
+}
+
+dependencies {
+  // Version-less on purpose: the React Native Gradle plugin in the host app
+  // pins this to whatever React Native the app is on. HermesSamplingProfiler
+  // comes from here — it is in the published react-android artifact, so
+  // nothing has to be built from source.
+  implementation "com.facebook.react:react-android"
+}

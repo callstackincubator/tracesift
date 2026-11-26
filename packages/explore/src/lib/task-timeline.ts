@@ -110,6 +110,30 @@ export interface TaskTimeline {
 export const SHOWN_CLASSES: readonly FrameClass[] = ["app", "library", "anonymous"];
 
 /**
+ * The stricter cut the culprit table draws by, because a list is not a chart.
+ *
+ * `SHOWN_CLASSES` keeps `library` to protect a drawing: a frame misread as a
+ * dependency still has to occupy its place, or the boxes above it move and the
+ * nesting stops describing the recording. A table has no such obligation. Its
+ * rows are independent, every figure on one is measured over the whole task,
+ * and a row that leaves says nothing about the rows that stay — so here the
+ * judgement is not cosmetic, it is the entire question the reader asked.
+ *
+ * `node_modules` is the one thing a symbolicated React Native profile can say
+ * with certainty, and saying it is the point of the toggle: `metroRequire`,
+ * `onResponderRelease` and `computeFullKey` are real costs on real frames that
+ * nobody reading their own code can act on. `anonymous` stays, because a
+ * nameless frame with no URL is as likely to be the reader's arrow function as
+ * anyone's, and the table would rather show one too many than hide theirs.
+ *
+ * The emptiness this risks is the honest answer, and the table already has an
+ * empty state that gives it. The one case it is not is a recording with no
+ * source map, where every bundle frame is filed `library` because no rule
+ * could say otherwise — there the toggle hides frames it cannot vouch for.
+ */
+export const OWN_CODE_CLASSES: readonly FrameClass[] = ["app", "anonymous"];
+
+/**
  * A built-in the product asked for by name: `[Native] intlDateTimeFormatFormat`
  * under Hermes, `toLocaleString (native date.js)` under V8.
  *
