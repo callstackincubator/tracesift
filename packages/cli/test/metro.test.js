@@ -85,7 +85,7 @@ test('an oversized body is rejected', async (t) => {
 test('a non-Metro answer is reported as such', async (t) => {
   const missing = await fakeMetro(t, json({}, 404));
   await assert.rejects(metroTargets(missing), (error) => {
-    assert.match(error.message, new RegExp(`^${missing.replace(/\./g, '\\.')} answered, but it is not a Metro server`));
+    assert.ok(error.message.startsWith(`${missing} answered, but it is not a Metro server`));
     return true;
   });
   const object = await fakeMetro(t, json({ nope: true }));
