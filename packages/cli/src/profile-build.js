@@ -12,7 +12,7 @@ import { DEFAULT_PROFILER_PORT } from './rn-profiler-link.js';
 
 export { listPhysicalIosDevices, matchPhysicalDevice };
 
-export const PROFILER_PACKAGE = '@callstack/tracesift-rn-profiler';
+export const PROFILER_PACKAGE = '@callstack/tracesift-profiler';
 /** The Gradle property the library's manifest placeholder reads. */
 export const PROFILER_GRADLE_PROPERTY = 'tracesiftProfiler';
 

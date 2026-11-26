@@ -1,4 +1,4 @@
-// The link to a release build carrying @callstack/tracesift-rn-profiler.
+// The link to a release build carrying @callstack/tracesift-profiler.
 import { createServer } from 'node:net';
 
 import { connectTunnel, holdTunnel, listBootedSimulators, listTunnelDevices } from './ios-devices.js';
@@ -263,7 +263,7 @@ export function discoverProfilerApps({ port = DEFAULT_PROFILER_PORT, windowMs = 
 export function noAppConnectedMessage(metroFailure, port = DEFAULT_PROFILER_PORT) {
   return 'No React Native app connected.\n'
     + `  Debug build over Metro: ${metroFailure}\n`
-    + `  Release build on port ${port}: nothing dialled in. Install @callstack/tracesift-rn-profiler and build with \`tracesift profile build\`, which also runs \`adb reverse tcp:${port} tcp:${port}\` on Android.`;
+    + `  Release build on port ${port}: nothing dialled in. Install @callstack/tracesift-profiler and build with \`tracesift profile build\`, which also runs \`adb reverse tcp:${port} tcp:${port}\` on Android.`;
 }
 
 /** How the app describes itself, for the recording's label. */

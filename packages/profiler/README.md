@@ -1,4 +1,4 @@
-# @callstack/tracesift-rn-profiler
+# @callstack/tracesift-profiler
 
 Record a Hermes CPU profile from a React Native **release or profiling build**, with no Metro and no debugger.
 
@@ -66,7 +66,7 @@ Release frames are reported at bundle positions, so a source map is needed to na
 Only needed to profile something the CLI cannot bracket from outside:
 
 ```ts
-import { startProfiling, stopProfiling } from '@callstack/tracesift-rn-profiler';
+import { startProfiling, stopProfiling } from '@callstack/tracesift-profiler';
 
 startProfiling();
 // ...

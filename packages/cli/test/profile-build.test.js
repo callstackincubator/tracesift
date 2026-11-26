@@ -136,7 +136,7 @@ test('the dev dependency is added only when it is not already there', async (t) 
   await profileBuild({ projectRoot: root, exec: first.exec, execCapture: first.execCapture });
   assert.deepEqual(first.calls[0], { command: 'npm', args: ['install', '--save-dev', PROFILER_PACKAGE], cwd: root });
 
-  await mkdir(join(root, 'node_modules', '@callstack', 'tracesift-rn-profiler'), { recursive: true });
+  await mkdir(join(root, 'node_modules', '@callstack', 'tracesift-profiler'), { recursive: true });
   const second = recorder();
   await profileBuild({ projectRoot: root, exec: second.exec, execCapture: second.execCapture });
   assert.ok(!second.calls.some((call) => call.command === 'npm'), 'an installed package is not reinstalled');
@@ -185,7 +185,7 @@ async function fakeIosProject(t, { linked = true, sourceMap = true } = {}) {
   await writeFile(join(ios, 'Podfile'), '');
   await writeFile(join(ios, 'Podfile.lock'), linked ? 'PODS:\n  - TracesiftProfiler (0.1.0)\n' : 'PODS:\n');
   await mkdir(join(ios, 'build', 'tracesift', 'Build', 'Products', 'Release-iphonesimulator', 'Spike.app'), { recursive: true });
-  await mkdir(join(root, 'node_modules', '@callstack', 'tracesift-rn-profiler'), { recursive: true });
+  await mkdir(join(root, 'node_modules', '@callstack', 'tracesift-profiler'), { recursive: true });
   if (sourceMap) await writeFile(iosSourceMapPath(ios), '{}');
   return root;
 }

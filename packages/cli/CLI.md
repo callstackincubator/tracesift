@@ -23,7 +23,7 @@ tracesift record stop
 
 Run `tracesift record targets --platform rn` to list apps connected through Metro or the release profiler. Start a recording with `tracesift record start --platform rn`, perform the interaction, then run `tracesift record stop`. Use `--app`, `--device`, or `--target-id` to select a target. `--duration 30s` stops automatically. `record status` reports the current or last recording.
 
-A running TraceSift receives the profile in its capture library. Otherwise the CLI writes a `.json.gz` export under `recordings/` in the TraceSift home; `--out` chooses a different path. `--sink ingest|local` forces one mode. For release builds, `tracesift profile build` prepares and installs a profiler-enabled app; see [the profiler package](../rn-profiler/README.md).
+A running TraceSift receives the profile in its capture library. Otherwise the CLI writes a `.json.gz` export under `recordings/` in the TraceSift home; `--out` chooses a different path. `--sink ingest|local` forces one mode. For release builds, `tracesift profile build` prepares and installs a profiler-enabled app; see [the profiler package](../profiler/README.md).
 
 ## Local integrations
 

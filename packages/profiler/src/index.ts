@@ -8,7 +8,7 @@ const native = NativeModules.TracesiftProfiler as
 function required() {
   if (!native) {
     throw new Error(
-      '@callstack/tracesift-rn-profiler is not linked. Rebuild the app after installing it.',
+      '@callstack/tracesift-profiler is not linked. Rebuild the app after installing it.',
     );
   }
   return native;
