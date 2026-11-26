@@ -10,15 +10,11 @@ import { pickedClass, pickNumber, picking, PickTick, type FrameSelection } from 
 import { formatMs } from "../lib/format.ts";
 import type { FrameLocations } from "../lib/frame-location.ts";
 import { focusedTree, type TaskCulprit, type TaskTreeNode } from "../lib/task-cards.ts";
-import { isShownFrame, SHOWN_CLASSES } from "../lib/task-timeline.ts";
+import { isShownFrame, OWN_CODE_CLASSES } from "../lib/task-timeline.ts";
 import type { FrameClass } from "../lib/frame-classes.ts";
 
-/**
- * The classes the focused views keep, as the set `isShownFrame` tests against.
- * `SHOWN_CLASSES` is the list and this is the lookup; the cut itself lives in
- * `task-timeline.ts` so the chart, the tree and the culprit table share it.
- */
-const DRAWN_CLASSES = new Set<FrameClass>(SHOWN_CLASSES);
+/** The classes the culprit table keeps, as the set `isShownFrame` tests against. */
+const OWN_CODE = new Set<FrameClass>(OWN_CODE_CLASSES);
 
 /**
  * The focused subtree, either as it was recorded or with the framework and the
@@ -93,7 +89,7 @@ export function TaskCallTree({ focus, taskMs, onFocus, locations, selection }: {
 export function TaskCulpritTable({ culprits, onFocus, locations, selection }: { culprits: readonly TaskCulprit[]; onFocus: (id: string) => void; locations: FrameLocations; selection?: FrameSelection }) {
   const [mode, setMode] = useState<TreeMode>("full");
   const rows = useMemo(
-    () => (mode === "focused" ? culprits.filter((culprit) => isShownFrame(culprit.name, culprit.frameClass, DRAWN_CLASSES)) : culprits),
+    () => (mode === "focused" ? culprits.filter((culprit) => isShownFrame(culprit.name, culprit.frameClass, OWN_CODE)) : culprits),
     [mode, culprits],
   );
   const hidden = culprits.length - rows.length;
@@ -159,14 +155,15 @@ export function TaskCulpritTable({ culprits, onFocus, locations, selection }: { 
       ) : (
         <EmptyState
           title="None of these frames are yours"
-          description="Every frame that burned time in this task is React's or the engine's. Switch to Everything to see them."
+          description="Every frame that burned time in this task is React's, a dependency's or the engine's. Switch to Everything to see them."
         />
       )}
       {mode === "focused" && hidden > 0 ? (
         <Text className="explore-caveat">
-          {hidden === 1 ? "One React or engine frame is" : `${hidden} React and engine frames are`} hidden, the same cut
-          the Timeline draws by. Every figure above is unchanged: a culprit&rsquo;s self time is measured over the whole
-          task, so hiding a row neither moves time onto another row nor takes it off this one.
+          {hidden === 1 ? "One frame from React, a dependency or the engine is" : `${hidden} frames from React, dependencies and the engine are`} hidden,
+          a narrower cut than the Timeline&rsquo;s — a chart has to keep a dependency&rsquo;s box to keep its nesting, and a
+          table does not. Every figure above is unchanged: a culprit&rsquo;s self time is measured over the whole task, so
+          hiding a row neither moves time onto another row nor takes it off this one.
         </Text>
       ) : null}
     </>

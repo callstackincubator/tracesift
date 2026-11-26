@@ -62,10 +62,30 @@ function isVendorChunkUrl(url: string): boolean {
  * its URL says nothing about either. Frames carrying one are exactly the
  * residue the model call exists to resolve.
  */
-const BUNDLE_URL = /\.(?:bundle|min\.js)(?:[?#]|$)/i;
+/** Metro bundle URLs may include parameters after a slash instead of a query. */
+const BUNDLE_URL = /\.(?:(?:js)?bundle|min\.js)(?:[?#/]|$)/i;
 
 /** Schemes that name no file on disk: engine internals, extensions, eval'd code. */
-const VIRTUAL_SCHEME = /^(?:node|extensions|chrome-extension|chrome|webpack-internal|v8|evalmachine|blob|data):/i;
+const VIRTUAL_SCHEME = /^(?:node|extensions|chrome|chrome-extension|v8|evalmachine|blob|data):/i;
+
+/** A webpack scheme wraps a file path that can still identify a module. */
+const WEBPACK_SCHEME = /^webpack(?:-internal)?:\/\/\/?/i;
+
+/** The path behind a webpack scheme, or the URL untouched when there is none. */
+function unwrapBundlerUrl(url: string): string {
+  if (!WEBPACK_SCHEME.test(url)) return url;
+  // After the scheme comes an optional build layer in parentheses, then either
+  // a module path or the namespace the source map was written under.
+  let rest = url.replace(WEBPACK_SCHEME, "").replace(/^\([^)]*\)\//, "");
+  if (!rest.startsWith("./") && !rest.startsWith("../") && !rest.startsWith("/")) {
+    const slash = rest.indexOf("/");
+    // A namespace is a bare word; a first segment holding a dot is already a
+    // file or a directory webpack recorded, so it stays.
+    if (slash > 0 && !rest.slice(0, slash).includes(".")) rest = rest.slice(slash + 1);
+  }
+  // `./` is webpack's marker for the project root, not part of the path.
+  return rest.replace(/^\.\//, "");
+}
 
 /**
  * V8 and Hermes label built-ins `native array.js`. The leading word is the
@@ -85,12 +105,14 @@ export function frameClassKey(frame: CdpCallFrame): string {
  * case no rule can settle.
  */
 export function classifyByRule(frame: CdpCallFrame, codeSplit = false): FrameClass | undefined {
-  const { functionName: name, url } = frame;
+  const { functionName: name } = frame;
+  const url = unwrapBundlerUrl(frame.url);
+  const resolved = url === frame.url ? frame : { ...frame, url };
   if (TRANSPARENT_NAMES.has(name)) return "native";
   if (NATIVE_URL.test(url)) return "native";
   if (ANONYMOUS_NAMES.has(name) && !url) return "anonymous";
   if (VIRTUAL_SCHEME.test(url)) return "native";
-  if (isFrameworkInternalFrame(frame)) return "framework";
+  if (isFrameworkInternalFrame(resolved)) return "framework";
   if (DEPENDENCY_URL.test(url) || isVendorChunkUrl(url)) return "library";
   if (ANONYMOUS_NAMES.has(name)) return "anonymous";
   // No URL means the engine, with one exception: the call wrappers V8 parks at

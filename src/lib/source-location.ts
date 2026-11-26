@@ -124,7 +124,7 @@ function stripContentHash(fileName: string): string {
  * mostly separators — Metro's `//&platform=` form is one character away from it.
  * Scanning is the same rule with nothing to backtrack over.
  */
-function stripRequest(url: string): string {
+export function stripRequest(url: string): string {
   let end = url.length;
   for (let index = 0; index < url.length; index += 1) {
     const character = url[index];

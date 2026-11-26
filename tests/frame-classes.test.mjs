@@ -88,3 +88,38 @@ test('no model runs for a classification, whatever is configured', async () => {
   const source = await import('node:fs/promises').then((fs) => fs.readFile('src/lib/frame-classes.ts', 'utf8'));
   assert.ok(!source.includes('pi-agent'), 'frame classification must not import the agent runner');
 });
+
+test('a webpack scheme is unwrapped, not filed with the engine', () => {
+  // A webpack dev server hands every frame a `webpack-internal:` URL.
+  assert.equal(classifyByRule(frame('blockMainThread', 'webpack-internal:///./src/app/index.web.ts')), 'app');
+  assert.equal(
+    classifyByRule(frame('logComponentRender', 'webpack-internal:///./node_modules/react-dom/cjs/react-dom-client.development.js')),
+    'framework',
+  );
+  assert.equal(classifyByRule(frame('map', 'webpack-internal:///./node_modules/lodash/map.js')), 'library');
+  // A build layer sits between the scheme and the path, and a source map writes
+  // the same path under a namespace instead.
+  assert.equal(classifyByRule(frame('Page', 'webpack-internal:///(app-pages-browser)/./src/app/page.tsx')), 'app');
+  assert.equal(classifyByRule(frame('getUsers', 'webpack://_N_E/./src/api/users.ts')), 'app');
+  // The other virtual schemes still name no file.
+  assert.equal(classifyByRule(frame('handler', 'chrome-extension://abc/background.js')), 'native');
+  assert.equal(classifyByRule(frame('run', 'blob:http://localhost:3000/abc')), 'native');
+});
+
+test("Metro writes a bundle's parameters into the path, so the extension is followed by a slash", () => {
+  // The real shape off a React Native capture: no `?` anywhere, the build options live in the path.
+  const metro = 'http://192.168.68.55:8081/index.ts.bundle//&platform=ios&dev=true&lazy=true';
+  assert.equal(classifyByRule(frame('loadModuleImplementation', metro)), undefined);
+  // With a vendor chunk seen elsewhere in the recording, a meaningful name in
+  // a sibling bundle is the product's own code.
+  assert.equal(classifyByRule(frame('PostThread', metro), true), 'app');
+  // A mangled one in the same bundle is still residue.
+  assert.equal(classifyByRule(frame('t.A', metro), true), undefined);
+});
+
+test('a release iOS bundle, main.jsbundle, is a bundle like index.android.bundle', () => {
+  for (const url of ['main.jsbundle', 'index.android.bundle', 'file:///app/main.jsbundle?x=1']) {
+    assert.equal(classifyByRule(frame('loadModuleImplementation', url)), undefined, url);
+    assert.equal(classifyByRule(frame('PostThread', url), true), 'app', url);
+  }
+});

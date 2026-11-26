@@ -19,6 +19,7 @@ import { selectTaskCards } from "@/lib/task-cards";
 import { selectProfileFunctions } from "@/lib/profile-functions";
 import { AgentError } from "@/lib/pi-agent";
 import { debugLog } from "@/lib/debug-log";
+import { decompressedProfile, ProfileUploadError } from "@/lib/profile-upload";
 import type { AnalysisModel, Hotspot, TokenUsage } from "@/lib/analysis";
 
 const LOG = "api/analyze";
@@ -42,14 +43,25 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Expected a multipart form containing the profile file." }, 400);
   }
 
-  const profile = form.get("profile");
-  if (!(profile instanceof File) || profile.size === 0) {
+  const uploaded = form.get("profile");
+  if (!(uploaded instanceof File) || uploaded.size === 0) {
     log("rejected: no profile file in request");
     return json({ error: "A CPU profile file is required." }, 400);
   }
-  if (profile.size > maxUploadBytes()) {
-    log(`rejected: profile too large (${profile.size} bytes)`);
+  if (uploaded.size > maxUploadBytes()) {
+    log(`rejected: profile too large (${uploaded.size} bytes)`);
     return json({ error: uploadTooLargeMessage() }, 413);
+  }
+
+  // An exported trace is gzipped. Inflate before anything stores or parses it.
+  let profile: File;
+  try { profile = await decompressedProfile(uploaded); }
+  catch (error) {
+    if (error instanceof ProfileUploadError) {
+      log(`rejected: ${error.message}`);
+      return json({ error: error.message }, error.status);
+    }
+    throw error;
   }
 
   log(`request received: profile="${profile.name}" (${profile.size} bytes)`);
@@ -71,9 +83,10 @@ export async function POST(request: Request): Promise<Response> {
   let tree;
   let tasks;
   let legacyBottlenecks;
+  let sourceMaps;
   try {
     const rawProfile = JSON.parse(await readFile(`${dir}/${PROFILE_FILE_NAME}`, "utf8")) as unknown;
-    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tree, tasks, legacyBottlenecks } =
+    ({ summary, hotspots: queriedHotspots, cards, profile: parsedProfile, tree, tasks, legacyBottlenecks, sourceMaps } =
       summarizeCpuProfile(rawProfile, id, profile.name));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -91,6 +104,15 @@ export async function POST(request: Request): Promise<Response> {
   // card says about which code is whose is a lookup in this table, and the
   // table is rules alone — so the same file always produces the same cards,
   // and uploading a profile costs nothing but the measurement.
+  log(
+    `source maps: ${sourceMaps.state}` +
+    `${sourceMaps.bundleUrls.length ? `, ${sourceMaps.resolvedSourceMapUrls.length}/${sourceMaps.bundleUrls.length} bundles` : ""}` +
+    `${sourceMaps.totalMappableFrameCount ? `, ${sourceMaps.symbolicatedFrameCount}/${sourceMaps.totalMappableFrameCount} frames moved to authored sources` : ""}` +
+    `${sourceMaps.failures.length ? `, ${sourceMaps.failures.length} unreadable` : ""}`
+  );
+  // Without this, a React Native upload whose maps the capture failed to fetch
+  // looks exactly like a bare `.cpuprofile`: `state: "none"` and no reason.
+  for (const warning of sourceMaps.captureWarnings) log(`capture warning: ${warning}`);
   const settings = await getAnalysisSettings();
   const classes = ruleClassTable(parsedProfile.nodes.map((node) => node.callFrame));
   const taskCards = nodeCardEngineRequested()

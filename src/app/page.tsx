@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { ChangeEvent, DragEvent, ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   Alert,
@@ -90,9 +91,11 @@ interface AnalysisModel {
   modelId?: string;
 }
 
+// `.gz` so a trace exported from a recording — here or by `tracesift record` —
+// can be opened again without unpacking it first.
 const acceptedFiles: Record<UploadKind, string> = {
-  cpu: ".json,application/json",
-  reactProfile: ".json,application/json",
+  cpu: ".json,.gz,application/json,application/gzip",
+  reactProfile: ".json,.gz,application/json,application/gzip",
 };
 
 function formatTokens(tokens: number): string {
@@ -1162,7 +1165,11 @@ function UploadPane({
   const inputId = useId();
   const [isDragging, setIsDragging] = useState(false);
 
-  const acceptFile = (candidate?: File) => (candidate && !candidate.name.toLowerCase().endsWith(".json") ? undefined : candidate);
+  const acceptFile = (candidate?: File) => {
+    const name = candidate?.name.toLowerCase();
+    if (name && !name.endsWith(".json") && !name.endsWith(".json.gz")) return undefined;
+    return candidate;
+  };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
@@ -1803,6 +1810,9 @@ function InspectorApp() {
           <span><span className="brand-name">TraceSift</span><small>by Callstack</small></span>
         </PluginHeader.Title>
         <PluginHeader.Actions>
+          <Button className="header-action" render={<Link href="/capture" />} size="sm" variant="ghost">
+            Capture
+          </Button>
           <Button className="header-action" type="button" size="sm" variant="ghost" onClick={() => { setSettingsOpen(false); setHistoryOpen(true); }}>
             <HeaderIcon type="history" /> Analyses
           </Button>
@@ -1990,9 +2000,9 @@ function InspectorApp() {
 
               <div className="upload-grid single">
                 {profileType === "javascript" ? (
-                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a Chrome Performance .json here" file={files.cpu} disabled={analyzing} onFile={(file) => updateFile("cpu", file)} />
+                  <UploadPane kind="cpu" title="JavaScript CPU profile" detail="Drop a Chrome Performance .json or .json.gz here" file={files.cpu} disabled={analyzing} onFile={(file) => updateFile("cpu", file)} />
                 ) : (
-                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json file here" file={files.reactProfile} disabled={analyzing} onFile={(file) => updateFile("reactProfile", file)} />
+                  <UploadPane kind="reactProfile" title="React component profile" detail="Drop a React DevTools profiling .json or .json.gz file here" file={files.reactProfile} disabled={analyzing} onFile={(file) => updateFile("reactProfile", file)} />
                 )}
               </div>
 

@@ -5,6 +5,11 @@ export interface CdpCallFrame {
     url: string;
     lineNumber: number;
     columnNumber: number;
+    /** Where this frame was actually sampled, kept when `symbolicate.ts` moved
+     * `url`/`lineNumber`/`columnNumber` onto the authored source. */
+    bundleUrl?: string;
+    bundleLineNumber?: number;
+    bundleColumnNumber?: number;
   }
   
   export interface CdpProfileNode {
@@ -40,6 +45,8 @@ export interface CdpCallFrame {
     symbolicatedFrameCount: number;
     totalMappableFrameCount: number;
     failures: SymbolicationFailure[];
+    /** What the capture said about the maps it could not retain. */
+    captureWarnings: string[];
   }
   
   // Normalized session model

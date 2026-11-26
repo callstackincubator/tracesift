@@ -109,6 +109,9 @@ export interface TaskTimeline {
  */
 export const SHOWN_CLASSES: readonly FrameClass[] = ["app", "library", "anonymous"];
 
+/** The stricter cut the culprit table draws by, because a list is not a chart. */
+export const OWN_CODE_CLASSES: readonly FrameClass[] = ["app", "anonymous"];
+
 /**
  * A built-in the product asked for by name: `[Native] intlDateTimeFormatFormat`
  * under Hermes, `toLocaleString (native date.js)` under V8.

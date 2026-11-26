@@ -1,0 +1,39 @@
+{
+  "name": "@callstack/tracesift-profiler",
+  "version": "0.6.0",
+  "description": "Record a Hermes CPU profile from a React Native release build, with tracesift",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "android",
+    "ios",
+    "TracesiftProfiler.podspec",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "react-native",
+    "android",
+    "ios",
+    "hermes",
+    "profiling",
+    "performance"
+  ],
+  "peerDependencies": {
+    "react-native": ">=0.76"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": "https://github.com/callstackincubator/tracesift.git",
+  "scripts": {
+    "test": "echo \"no JS tests; the conversion is tested in packages/cli\""
+  }
+}
