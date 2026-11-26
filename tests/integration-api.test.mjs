@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
+import { gzipSync } from 'node:zlib';
 
 import { buildReactCardPrompt } from '../src/lib/react-card-prompt.ts';
 import { createReactAnalysisHandler } from '../src/lib/react-analysis-handler.ts';
@@ -160,6 +161,35 @@ test('authenticated CPU route analysis returns a card whose route handoff is det
   const secondResponse = await getHandoff();
   assert.equal(secondResponse.status, 200);
   assert.equal((await secondResponse.json()).handoff, first.handoff);
+});
+
+test('a gzipped trace analyzes exactly as the uncompressed one does', async t => {
+  // What `tracesift record` writes with no TraceSift running, and what the web
+  // app's own Export trace button produces, is a `.json.gz`. If the route could
+  // not read it, a capture would never reach a card.
+  const profile = await readFile(path.resolve('sample-profiles/cpu/hermes-release-1.json'));
+  const analyze = async (file) => {
+    const form = new FormData();
+    form.set('profile', file);
+    form.set('profileType', 'auto');
+    const response = await analyzeRoute(authorized('http://localhost/api/integration/v1/analyze', { method: 'POST', body: form }));
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  const plain = await analyze(new File([profile], 'hermes-release-1.json', { type: 'application/json' }));
+  t.after(() => destroyRecord(plain.analysisId));
+  const gzipped = await analyze(new File([gzipSync(profile)], 'hermes-release-1.json.gz', { type: 'application/gzip' }));
+  t.after(() => destroyRecord(gzipped.analysisId));
+
+  assert.equal(gzipped.profileType, 'cpu');
+  // The title comes from the upload, so the suffix is gone but the analysis is
+  // the same measurement.
+  assert.equal(gzipped.title, 'hermes-release-1.json');
+  assert.deepEqual(
+    gzipped.cards.map(card => card.headline ?? card.title),
+    plain.cards.map(card => card.headline ?? card.title),
+  );
 });
 
 test('integration task route guards its credentials, its parameters, and missing analyses', async () => {

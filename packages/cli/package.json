@@ -12,7 +12,11 @@
     "./models": "./src/models.js",
     "./runtime": "./src/runtime.js",
     "./oauth": "./src/oauth.js",
-    "./bootstrap": "./src/bootstrap.js"
+    "./bootstrap": "./src/bootstrap.js",
+    "./trace-export": {
+      "types": "./src/trace-export.d.ts",
+      "default": "./src/trace-export.js"
+    }
   },
   "files": [
     "src",

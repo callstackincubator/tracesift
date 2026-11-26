@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "TraceSift Capture",
+  "version": "0.1.0",
+  "description": "Captures Chrome Performance traces directly into the local TraceSift app.",
+  "minimum_chrome_version": "125",
+  "permissions": ["debugger", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Open TraceSift Capture"
+  }
+}

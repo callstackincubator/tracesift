@@ -19,6 +19,7 @@ import { selectTaskCards } from "@/lib/task-cards";
 import { selectProfileFunctions } from "@/lib/profile-functions";
 import { AgentError } from "@/lib/pi-agent";
 import { debugLog } from "@/lib/debug-log";
+import { decompressedProfile, ProfileUploadError } from "@/lib/profile-upload";
 import type { AnalysisModel, Hotspot, TokenUsage } from "@/lib/analysis";
 
 const LOG = "api/analyze";
@@ -42,14 +43,25 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Expected a multipart form containing the profile file." }, 400);
   }
 
-  const profile = form.get("profile");
-  if (!(profile instanceof File) || profile.size === 0) {
+  const uploaded = form.get("profile");
+  if (!(uploaded instanceof File) || uploaded.size === 0) {
     log("rejected: no profile file in request");
     return json({ error: "A CPU profile file is required." }, 400);
   }
-  if (profile.size > maxUploadBytes()) {
-    log(`rejected: profile too large (${profile.size} bytes)`);
+  if (uploaded.size > maxUploadBytes()) {
+    log(`rejected: profile too large (${uploaded.size} bytes)`);
     return json({ error: uploadTooLargeMessage() }, 413);
+  }
+
+  // An exported trace is gzipped. Inflate before anything stores or parses it.
+  let profile: File;
+  try { profile = await decompressedProfile(uploaded); }
+  catch (error) {
+    if (error instanceof ProfileUploadError) {
+      log(`rejected: ${error.message}`);
+      return json({ error: error.message }, error.status);
+    }
+    throw error;
   }
 
   log(`request received: profile="${profile.name}" (${profile.size} bytes)`);

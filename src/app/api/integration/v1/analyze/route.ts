@@ -9,6 +9,7 @@ import {
   type IntegrationProfileType,
 } from "@/lib/integration-api";
 import { maxUploadBytes, uploadTooLargeMessage } from "@/lib/analysis";
+import { decompressedProfile, ProfileUploadError } from "@/lib/profile-upload";
 
 export const runtime = "nodejs";
 
@@ -19,9 +20,18 @@ export async function POST(request: Request): Promise<Response> {
   let form: FormData;
   try { form = await request.formData(); }
   catch { return integrationJson({ error: "Expected a multipart form containing the profile file." }, 400); }
-  const profile = form.get("profile");
-  if (!(profile instanceof File) || profile.size === 0) return integrationJson({ error: "A profile file is required." }, 400);
-  if (profile.size > maxUploadBytes()) return integrationJson({ error: uploadTooLargeMessage() }, 413);
+  const uploaded = form.get("profile");
+  if (!(uploaded instanceof File) || uploaded.size === 0) return integrationJson({ error: "A profile file is required." }, 400);
+  if (uploaded.size > maxUploadBytes()) return integrationJson({ error: uploadTooLargeMessage() }, 413);
+
+  // A trace captured by `tracesift record` or exported from the web app
+  // arrives gzipped; everything below here reads it as text.
+  let profile: File;
+  try { profile = await decompressedProfile(uploaded); }
+  catch (error) {
+    if (error instanceof ProfileUploadError) return integrationJson({ error: error.message }, error.status);
+    throw error;
+  }
 
   const requested = form.get("profileType");
   if (requested !== null && requested !== "auto" && requested !== "cpu" && requested !== "react") {
