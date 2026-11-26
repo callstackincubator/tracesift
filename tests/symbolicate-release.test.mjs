@@ -5,13 +5,8 @@ import { test } from 'node:test';
 import { coerceCdpProfile } from '../src/lib/js-profile.ts';
 import { collectRetainedSourceMaps, symbolicateProfile } from '../src/lib/symbolicate.ts';
 
-/**
- * A real release capture: 30,875 samples taken from a Hermes release build of
- * an Expo app on a physical iPhone, with the map `profile build` left beside
- * it. The map is pruned to the segments this trace's frames land on (see
- * test-fixtures/release-ios/make-fixture.mjs); resolving against the pruned map
- * gives the same answer as the 8 MB one for every node.
- */
+/** A real release capture: 30,875 samples taken from a Hermes release build of an Expo app on a
+ * physical iPhone, with the map `profile build` left beside it. */
 const FIXTURE = new URL('../test-fixtures/release-ios/trace.json.gz', import.meta.url);
 
 function load() {

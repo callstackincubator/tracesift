@@ -1,16 +1,4 @@
 // The link to a release build carrying @callstack/tracesift-rn-profiler.
-//
-// The app dials us rather than the other way round. That is how React
-// Native's own inspector works, and it means there is nothing to discover: no
-// device list, no adb enumeration, no guessing which emulator is the one. On
-// Android `adb reverse tcp:8089 tcp:8089` makes the device's localhost ours,
-// and a simulator shares the host's already. A physical iPhone cannot dial us
-// so there the roles flip: the app listens on its CoreDevice tunnel address
-// and we dial in. See ios-devices.js.
-//
-// The wire is newline-delimited JSON over a plain TCP socket. A websocket
-// would need a server implementation this package does not ship, and buys
-// nothing here: both ends are ours and the framing is one line per message.
 import { createServer } from 'node:net';
 
 import { connectTunnel, holdTunnel, listBootedSimulators, listTunnelDevices } from './ios-devices.js';
@@ -23,11 +11,7 @@ const HELLO_TIMEOUT_MS = 10_000;
 // Base64 of a multi-megabyte profile, split so no single line is unbounded.
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 
-/**
- * Wrap a socket as a line-delimited JSON channel.
- *
- * @param {import('node:net').Socket} socket
- */
+/** Wrap a socket as a line-delimited JSON channel. */
 function jsonChannel(socket) {
   let buffer = '';
   const waiting = [];
@@ -87,39 +71,14 @@ function jsonChannel(socket) {
 // devicectl takes about a second per listing, so poll gently.
 const USB_POLL_MS = 3_000;
 
-/**
- * Wait for a profiling-enabled app and return the channel once it has
- * introduced itself. Two routes lead here, and whichever hello arrives first
- * wins:
- *
- * - the app dials us, on loopback only (Android after `adb reverse`, and the
- *   iOS simulator, which shares the host's network);
- * - the app is on a wired iPhone, where it listens on its CoreDevice tunnel
- *   address and we dial in. Nothing can dial from the phone to the Mac.
- *
- * The listening socket here is loopback only, deliberately: it drives a
- * profiler inside somebody's application and has no business being on the
- * network. The device-side socket is bound to the tunnel address alone, a
- * point-to-point link between this Mac and that phone.
- *
- * `accept(hello, origin)` lets a caller that has chosen one device ignore the
- * others: `origin` is `{ route: 'loopback' }` or `{ route: 'tunnel', udid }`, and
- * a refused connection is dropped without ending the wait.
- *
- * @param {{ port?: number, signal?: AbortSignal, accept?: (hello: Record<string, unknown>, origin: { route: string, udid?: string }) => boolean, usb?: false | { list: () => Promise<{ udid: string, tunnelAddress: string }[]>, connect: typeof connectTunnel }, usbPollMs?: number }} [options]
- * @returns {Promise<{ channel: ReturnType<typeof jsonChannel>, hello: Record<string, unknown>, close(): void }>}
- */
+/** Wait for a profiling-enabled app and return the channel once it has introduced itself. */
 export function awaitProfilerApp({ port = DEFAULT_PROFILER_PORT, signal, accept, usb = { list: () => listTunnelDevices(), connect: connectTunnel }, usbPollMs = USB_POLL_MS } = {}) {
   return new Promise((resolve, reject) => {
     const server = createServer();
     let settled = false;
     let poller = null;
     const busy = new Set();
-    // The app binds its listener to the tunnel address, and can only do so
-    // while a tunnel exists. CoreDevice drops one nothing is holding within
-    // about twelve seconds, so without this the phone spends most of the wait
-    // unbound and unreachable. Held from the first sighting until the wait
-    // ends; the recording then takes over its own hold.
+    // The app binds its listener to the tunnel address, and can only do so while a tunnel exists.
     const holds = new Map();
     const done = (fn) => (value) => {
       if (settled) return;
@@ -197,22 +156,7 @@ export function awaitProfilerApp({ port = DEFAULT_PROFILER_PORT, signal, accept,
   });
 }
 
-/**
- * Look for a release build without recording one.
- *
- * `record targets` has to be able to see a profiling build, or a caller that
- * lists before it records — the panel does, and so does the agent's skill —
- * concludes there is nothing to record when there is. The app's dial loop
- * retries every couple of seconds, so a short window catches one that is
- * already running without making the listing feel like a wait.
- *
- * The connection is dropped as soon as the app has introduced itself. The app
- * reconnects on its next retry, which is what leaves the port free for the
- * `record start` that usually follows.
- *
- * @param {{ port?: number, timeoutMs?: number, signal?: AbortSignal }} [options]
- * @returns {Promise<Record<string, unknown> | null>} the app's hello, or null
- */
+/** Look for a release build without recording one. */
 export async function probeProfilerApp({ port = DEFAULT_PROFILER_PORT, timeoutMs = 6_000, signal } = {}) {
   const controller = new AbortController();
   const abort = () => controller.abort(new Error('Stopped looking for a release build.'));
@@ -234,30 +178,15 @@ export async function probeProfilerApp({ port = DEFAULT_PROFILER_PORT, timeoutMs
   }
 }
 
-/**
- * Collect every profiling build that answers within a window, instead of the
- * first. Loopback apps (simulators, Android after `adb reverse`) cannot be told
- * apart by the socket, so they carry only their own hello; a phone is
- * identified by the tunnel that reached it.
- *
- * Each connection is dropped once it has said hello; the app redials, which
- * is what leaves the port free for the recording that follows.
- *
- * @returns {Promise<{ hello: Record<string, unknown>, origin: { route: string, udid?: string } }[]>}
- */
+/** Collect every profiling build that answers within a window, instead of the first. */
 export function discoverProfilerApps({ port = DEFAULT_PROFILER_PORT, windowMs = 4_000, maxWindowMs = 15_000, usb = { list: () => listTunnelDevices(), connect: connectTunnel } } = {}) {
   return new Promise((resolve) => {
     const found = [];
     const seen = new Set();
     const sockets = new Set();
     const server = createServer();
-    // A phone whose tunnel has gone to sleep is woken by `listTunnelDevices`,
-    // and `devicectl` takes its time about it. Closing the window on the clock
-    // alone reports "no device" for a phone that was about to answer, which is
-    // exactly what a refresh right after plugging in used to do. So the window
-    // is a minimum: while a device is still being listed, dialled, or is yet to
-    // say hello, it is pushed back — up to `maxWindowMs`, so a phone that never
-    // answers cannot hang the listing.
+    // A phone whose tunnel has gone to sleep is woken by `listTunnelDevices`, and `devicectl` takes
+    // its time about it.
     const started = Date.now();
     let deadline = started + windowMs;
     let inFlight = 0;
@@ -288,24 +217,15 @@ export function discoverProfilerApps({ port = DEFAULT_PROFILER_PORT, windowMs = 
       hold();
       let devices = [];
       try { devices = await usb.list(); } catch { devices = []; }
-      // A listing that took seconds leaves no time to dial inside the original
-      // window, so the devices it found get one. Only devices this poll is the
-      // first to see count, or a repeating poll would push the window out to
-      // the cap every time.
-      // Only a device seen here for the first time earns the window an
-      // extension. A failed dial puts its udid back in play so a later poll
-      // retries it — but a phone with no app running refuses every time, and
-      // extending on each retry would stretch every listing to the cap.
+      // A listing that took seconds leaves no time to dial inside the original window, so the
+      // devices it found get one.
       const first = devices.some((device) => !sighted.has(device.udid));
       for (const device of devices) {
         sighted.add(device.udid);
         // Holding the tunnel is what lets the app bind at all; see holdTunnel.
         if (!holds.has(device.udid)) holds.set(device.udid, holdTunnel(device.udid));
       }
-      // A phone seen for the first time may have had no tunnel a moment ago,
-      // so its app has not bound yet. It rebinds within a couple of seconds of
-      // the tunnel appearing; six gives that room without stretching a listing
-      // that has nothing to wait for.
+      // A phone seen for the first time may have had no tunnel a moment ago, so its app has not bound yet.
       release(first ? 6_000 : 0);
       for (const device of devices) {
         if (dialled.has(device.udid)) continue;
@@ -356,15 +276,7 @@ export function describeProfilerApp(hello) {
 /** Release targets are `release:<device>`; bare `release` means whichever answers first. */
 export const RELEASE_TARGET_PREFIX = 'release:';
 
-/**
- * One listing row per profiling build that answered, named by the device it is
- * on. A phone is known by its tunnel's udid, an iOS simulator by matching the
- * app's reported device name to a booted simulator, Android by platform.
- *
- * @param {{ hello: Record<string, unknown>, origin: { route: string, udid?: string } }[]} apps
- * @param {{ id: string, name: string }[]} simulators booted simulators
- * @param {{ udid: string, name: string }[]} phones devices with a tunnel up
- */
+/** One listing row per profiling build that answered, named by the device it is on. */
 export function describeReleaseApps(apps, simulators = [], phones = []) {
   const used = new Set();
   return apps.map(({ hello, origin }) => {
@@ -394,12 +306,8 @@ export function describeReleaseApps(apps, simulators = [], phones = []) {
   });
 }
 
-/**
- * Turn a chosen release target id into the filters `awaitProfilerApp` takes, so
- * a recording attaches to the app that was picked and no other.
- *
- * @returns {Promise<{ accept?: Function, usb?: false | object }>}
- */
+/** Turn a chosen release target id into the filters `awaitProfilerApp` takes, so a recording
+ * attaches to the app that was picked and no other. */
 export async function releaseSelection(targetId) {
   if (!targetId || !targetId.startsWith(RELEASE_TARGET_PREFIX)) return {};
   const key = targetId.slice(RELEASE_TARGET_PREFIX.length).replace(/-\d+$/, '');

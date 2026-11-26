@@ -278,10 +278,8 @@ test('a trace that never names the profiler leaves every task alone', () => {
 });
 
 test("a browser capture's attach window is read off TraceSift's own mark", () => {
-  // Chrome emits no `CpuProfiler::StartProfiling` for a trace started through
-  // `chrome.debugger`, so the attach arrives as a first block of `(program)`
-  // with no JS frame in it. The mark the extension writes once `Tracing.start`
-  // returns is the only statement of when the recording really began.
+  // Chrome emits no `CpuProfiler::StartProfiling` for a trace started through `chrome.debugger`, so
+  // the attach arrives as a first block of `(program)` with no JS frame in it.
   const byThread = profilerOverheadIntervals([
     { name: 'Profile', ph: 'P', ts: 1000, pid: 1, tid: 1 },
     { name: '__tracesift_main_734ab274-fb87-481f-ba3b-d5f813fee252', ph: 'I', ts: 6000, pid: 1, tid: 1 },

@@ -8,22 +8,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.util.Log
 
-/**
- * Starts profiling without the app having to call anything.
- *
- * A `ContentProvider` is Android's earliest third-party entry point — it runs
- * before `Application.onCreate` and needs no app code, no `index.js` import
- * and no React context. That matters for two reasons: the integration stays a
- * dependency and nothing else, and the sampler can be armed early enough to
- * see startup.
- *
- * It is **off unless a build asks for it**. A release binary that opens a
- * control socket for the asking is a remote-profiling backdoor, so enabling
- * it is a build-time decision: this package's manifest declares the meta-data
- * below from a placeholder that resolves to false unless the build passes
- * `-PtracesiftProfiler=true`. Reading it costs one bundle lookup, and without
- * it no socket is ever opened.
- */
+/** Starts profiling without the app having to call anything. */
 class ProfilerInitProvider : ContentProvider() {
   override fun onCreate(): Boolean {
     val context = context ?: return false

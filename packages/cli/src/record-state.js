@@ -5,22 +5,7 @@ import { join } from 'node:path';
 export const RECORD_STATE = 'record.json';
 export const RECORD_API_VERSION = 1;
 
-/**
- * @typedef {{
- *   apiVersion: 1,
- *   pid: number,
- *   mode: 'ingest' | 'local',
- *   state: 'starting' | 'recording' | 'flushing' | 'captured' | 'failed',
- *   startedAt: number,
- *   url: string,
- *   captureId?: string,
- *   baseUrl?: string,
- *   directory?: string,
- *   export?: { path: string, sizeBytes: number, eventCount: number },
- *   warnings?: string[],
- *   error?: string,
- * }} RecordState
- */
+/** @typedef {{ apiVersion: 1, pid: number, mode: 'ingest' | 'local', state: 'starting' | 'recording' | 'flushing' | 'captured' | 'failed', startedAt: number, url: string, captureId?: string, baseUrl?: string, directory?: string, export?: { path: string, sizeBytes: number, eventCount: number }, warnings?: string[], error?: string, }} RecordState */
 
 function statePath(home) { return join(home, RECORD_STATE); }
 

@@ -37,12 +37,8 @@ const PROFILE = {
   },
 };
 
-/**
- * A release build carrying the profiler package: dials in, says hello, and
- * answers `stop` with a chunked base64 Tracery dump.
- *
- * @param {{ port: number, chunks?: number, hello?: object, onStop?: (send: Function) => void }} options
- */
+/** A release build carrying the profiler package: dials in, says hello, and answers `stop` with a
+ * chunked base64 Tracery dump. */
 function fakeApp(t, { port, chunks = 1, hello, onStop }) {
   const received = [];
   const socket = connect(port, '127.0.0.1');

@@ -6,12 +6,7 @@ import { cpuProfileToTraceEvents } from '../src/record-rn-session.js';
 
 const BUNDLE = 'index.android.bundle';
 
-/**
- * A Tracery profile the way Hermes actually writes one: frame ids are decimal
- * string keys, `parent` and `sf` are numbers, `ts` is a string of microseconds
- * on a steady clock, and a release bundle's JS frames carry `funcVirtAddr` and
- * `offset` instead of a line, a column or a url.
- */
+/** A Hermes Tracery profile with string frame IDs and steady-clock timestamps. */
 function tracery({ samples } = {}) {
   return {
     traceEvents: [

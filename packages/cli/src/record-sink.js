@@ -4,23 +4,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import { writeTraceExport } from './trace-export.js';
 
-/**
- * A sink receives the raw trace Chrome streams back and turns it into a
- * finished export. Two exist: one hands the bytes to a running TraceSift so the
- * capture appears in its UI, the other writes the same `.json.gz` on its own.
- *
- * @typedef {{
- *   mode: 'ingest' | 'local',
- *   captureId: string,
- *   directory?: string,
- *   baseUrl?: string,
- *   status(update: Record<string, unknown>): Promise<void>,
- *   stopRequested(): Promise<boolean>,
- *   chunk(bytes: Uint8Array): Promise<void>,
- *   finalize(input: Record<string, unknown>): Promise<{ path?: string, fileName: string, sizeBytes: number, eventCount: number, warnings: string[] }>,
- *   fail(message: string, reason?: string): Promise<void>,
- * }} RecordSink
- */
+/** @typedef {{ mode: 'ingest' | 'local', captureId: string, directory?: string, baseUrl?: string, status(update: Record<string, unknown>): Promise<void>, stopRequested(): Promise<boolean>, chunk(bytes: Uint8Array): Promise<void>, finalize(input: Record<string, unknown>): Promise<{ path?: string, fileName: string, sizeBytes: number, eventCount: number, warnings: string[] }>, fail(message: string, reason?: string): Promise<void>, }} RecordSink */
 
 async function jsonFetch(url, init = {}) {
   const response = await fetch(url, init);
@@ -37,10 +21,8 @@ function exportStamp(createdAt) {
   return new Date(createdAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
-/**
- * Build the enhanced-trace `metadata` object, matching what the web app writes
- * for an extension capture so both exports import identically.
- */
+/** Build the enhanced-trace `metadata` object, matching what the web app writes for an extension
+ * capture so both exports import identically. */
 function exportMetadata(captureId, target, createdAt, scripts, sourceMaps) {
   return {
     enhancedTraceVersion: 1,
@@ -103,11 +85,7 @@ export async function createIngestSink(service, target, title) {
   };
 }
 
-/**
- * Write the trace without a running TraceSift. Recordings live beside the
- * capture store rather than inside it: they carry none of the store's
- * bookkeeping, so they must not look like records it owns.
- */
+/** Write the trace without a running TraceSift. */
 export async function createLocalSink(home, target, options = {}) {
   const captureId = randomUUID();
   const createdAt = Date.now();

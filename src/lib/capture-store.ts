@@ -264,12 +264,8 @@ function sourceMapBasename(value: string): string {
   return clean.slice(clean.lastIndexOf("/") + 1);
 }
 
-/**
- * A bundled module's own `//# sourceMappingURL` comment can survive
- * concatenation, and Chrome reports the last comment it finds in a script. A
- * name that cannot belong to the script points at a file the bundler never
- * emitted, so it is no evidence that this script has a retrievable map.
- */
+/** A bundled module's own `//# sourceMappingURL` comment can survive concatenation, and Chrome
+ * reports the last comment it finds in a script. */
 function sourceMapBelongsToScript(scriptUrl: string, sourceMapURL: string): boolean {
   const script = sourceMapBasename(scriptUrl);
   const map = sourceMapBasename(sourceMapURL).replace(/\.map$/, "");
@@ -309,11 +305,8 @@ async function writeGzipExport(record: StoredCapture, scripts: CaptureScriptMeta
       target: record.target,
       createdAt: new Date(record.createdAt).toISOString(),
       scripts,
-      // Why a recording carries no source maps is decided at capture time and
-      // was, until now, written only to `record.json` — which the next
-      // recording overwrites. By the time someone opens the export and finds
-      // every frame still at a bundle position, the reason is gone. It
-      // belongs in the file it explains.
+      // Why a recording carries no source maps is decided at capture time and was, until now,
+      // written only to `record.json` — which the next recording overwrites.
       warnings,
     },
   };

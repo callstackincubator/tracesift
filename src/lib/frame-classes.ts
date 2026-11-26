@@ -62,32 +62,13 @@ function isVendorChunkUrl(url: string): boolean {
  * its URL says nothing about either. Frames carrying one are exactly the
  * residue the model call exists to resolve.
  */
-/*
- * Metro writes a bundle's parameters into the path rather than the query, so
- * the extension is followed by a slash and not by `?`: a React Native frame
- * arrives at `/index.ts.bundle//&platform=ios&dev=true`. A release iOS build
- * has no Metro: its bundle is `main.jsbundle`, hence the optional `js`. The `[?#]|$` tail
- * refused every one of them, which left the single case this rule was written
- * for falling through to `isReadableSourcePath` — false for anything carrying
- * a scheme — and reaching the residue branch by accident rather than by rule.
- */
+/** Metro bundle URLs may include parameters after a slash instead of a query. */
 const BUNDLE_URL = /\.(?:(?:js)?bundle|min\.js)(?:[?#/]|$)/i;
 
 /** Schemes that name no file on disk: engine internals, extensions, eval'd code. */
 const VIRTUAL_SCHEME = /^(?:node|extensions|chrome|chrome-extension|v8|evalmachine|blob|data):/i;
 
-/**
- * webpack's own schemes are wrapping, not a statement that the module has no
- * file: `webpack-internal:///./node_modules/react-dom/cjs/react-dom-client.development.js`
- * carries the path webpack compiled, and a dev server hands every single frame
- * one. Filing those with the engine collapsed a whole recording to `native` —
- * no frame reached the `node_modules` or readable-path rules, so nothing was
- * ever the developer's own code, no card found a boundary, and the collapse
- * that hides React's internals had nothing left to recognise.
- *
- * Both spellings appear: `webpack-internal:///(layer)/./src/app.ts` from a
- * build with layers, `webpack://namespace/./src/app.ts` from a source map.
- */
+/** A webpack scheme wraps a file path that can still identify a module. */
 const WEBPACK_SCHEME = /^webpack(?:-internal)?:\/\/\/?/i;
 
 /** The path behind a webpack scheme, or the URL untouched when there is none. */

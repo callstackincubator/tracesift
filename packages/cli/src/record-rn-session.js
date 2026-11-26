@@ -5,23 +5,13 @@ import { writeRecordState } from './record-state.js';
 import { createTraceEventWriter } from './trace-chunker.js';
 
 const MAX_UPLOAD_BYTES = 192 * 1024;
-// A Metro development bundle is one file for the whole app, and its map runs
-// past Chrome's 8 MB per-script limit routinely — an Expo starter is already
-// over 10 MB. The aggregate limit is what actually bounds the export, and
-// there is normally one bundle to retain.
-// Two different questions. The fetch limit is how much of a response we are
-// willing to hold as a string at all; the retention limit is how much of it
-// goes into the export, and it is applied after `sourcesContent` is dropped.
-// Metro's map for Bluesky is 56 MB whole and 26 MB without it, so the old
-// single 48 MB test rejected a map that is comfortably retainable.
+// A Metro development bundle is one file for the whole app, and its map runs past Chrome's 8 MB
+// per-script limit routinely — an Expo starter is already over 10 MB.
 const MAX_SOURCE_MAP_FETCH_BYTES = 256 * 1024 * 1024;
 const MAX_SOURCE_MAP_BYTES = 48 * 1024 * 1024;
 const MAX_ALL_SOURCE_MAP_BYTES = 96 * 1024 * 1024;
-// Metro builds a bundle's map on demand, and for a large app that is a cold
-// multi-minute job: a Bluesky-sized bundle is ~900k lines. Thirty seconds was
-// enough for an Expo starter and silently gave up on everything bigger, which
-// is exactly the recording that needs the map most. This matches the trace
-// flush budget below — the export is already waiting on the device by then.
+// Metro builds a bundle's map on demand, and for a large app that is a cold multi-minute job: a
+// Bluesky-sized bundle is ~900k lines.
 const SOURCE_MAP_FETCH_TIMEOUT_MS = 120_000;
 const STOP_POLL_MS = 1000;
 const FLUSH_TIMEOUT_MS = 120_000;
@@ -30,11 +20,8 @@ const METHOD_NOT_FOUND = -32601;
 // under the route's 1 MB cap the same way the streamed Chrome path does.
 const SAMPLES_PER_CHUNK = 10_000;
 
-/**
- * React Native refuses to trace for three specific reasons, each of which the
- * developer can act on — but only if they are told which one it was. The
- * protocol only gives us the text, so match on it.
- */
+/** React Native refuses to trace for three specific reasons, each of which the developer can act on
+ * — but only if they are told which one it was. */
 function tracingStartFailure(error) {
   const text = errorText(error);
   if (/Debugger domain is expected to be disabled/i.test(text)) {
@@ -49,12 +36,8 @@ function tracingStartFailure(error) {
   return null;
 }
 
-/**
- * Turn a `Profiler.stop` result into the trace events a `Tracing` recording
- * would have produced, so both routes hand the analyzer one format.
- *
- * @param {{ nodes: unknown[], startTime?: number, endTime?: number, samples?: number[], timeDeltas?: number[] }} profile
- */
+/** Turn a `Profiler.stop` result into the trace events a `Tracing` recording would have produced, so
+ * both routes hand the analyzer one format. */
 export function cpuProfileToTraceEvents(profile, { pid = 1, tid = 1, profileId = '0x1' } = {}) {
   const samples = Array.isArray(profile.samples) ? profile.samples : [];
   const timeDeltas = Array.isArray(profile.timeDeltas) ? profile.timeDeltas : [];
@@ -94,14 +77,7 @@ export function cpuProfileToTraceEvents(profile, { pid = 1, tid = 1, profileId =
   return events;
 }
 
-/**
- * Retain the Metro source maps for the bundles a profile's frames came from.
- *
- * Chrome harvests these over `Debugger.scriptParsed`, which React Native
- * cannot offer: enabling the Debugger domain makes `Tracing.start` fail
- * outright. Metro serves the map for a bundle at the same URL with a `.map`
- * extension, so the bundle URLs the profile already carries are enough.
- */
+/** Retain the Metro source maps for the bundles a profile's frames came from. */
 function metroSourceMaps(origin) {
   const seen = new Set();
   const retained = [];
@@ -109,19 +85,13 @@ function metroSourceMaps(origin) {
   let bytes = 0;
 
   // Metro writes a bundle's parameters inside the path rather than the query
-  // (`/index.bundle//&platform=ios&dev=true`), and the map is served from the
-  // same request with a `.map` extension. So the rewrite has to find `.bundle`
-  // where it sits rather than assume it ends the path.
+  // (`/index.bundle//&platform=ios&dev=true`), and the map is served from the same request with a
+  // `.map` extension.
   const mapUrlFor = (bundleUrl) => {
     const url = new URL(bundleUrl);
     const mapped = url.pathname.replace(/\.(bundle|js)(?=$|[/?])/, '.map');
     if (mapped === url.pathname) return null;
-    // Expo hands the device a LAN address for the same Metro that discovery
-    // reached on loopback, so a frame's bundle URL is routinely
-    // `http://192.168.1.5:8081/...` while `origin` is `127.0.0.1:8081`. The
-    // port is what identifies the server; the map is then fetched from the
-    // loopback origin we already validated rather than from the LAN one, so
-    // this never reaches off the machine.
+    // Expo bundle URLs may use a LAN host; fetch the map through the trusted Metro origin.
     if (url.port !== origin.port) return null;
     const target = new URL(origin.href);
     target.pathname = mapped;
@@ -164,10 +134,8 @@ function metroSourceMaps(origin) {
           if (raw.length > MAX_SOURCE_MAP_FETCH_BYTES) throw new Error(`is ${Math.round(raw.length / 1048576)} MB, past the fetch limit`);
           const sourceMap = JSON.parse(raw);
           if (!sourceMap || typeof sourceMap !== 'object' || Array.isArray(sourceMap)) throw new Error('not a JSON object');
-          // More than half a Metro map is the authored files inlined, and
-          // nothing downstream reads them: a frame is moved by `mappings`,
-          // `sources` and `names` alone. Carrying the sources would put a
-          // copy of the whole app inside every recording of it.
+          // More than half a Metro map is the authored files inlined, and nothing downstream reads
+          // them: a frame is moved by `mappings`, `sources` and `names` alone.
           delete sourceMap.sourcesContent;
           const size = JSON.stringify(sourceMap).length;
           if (size > MAX_SOURCE_MAP_BYTES) throw new Error(`is ${Math.round(size / 1048576)} MB without its sources, past the retention limit`);
@@ -187,12 +155,7 @@ function metroSourceMaps(origin) {
   };
 }
 
-/**
- * Reject as soon as the inspector socket goes away.
- *
- * @param {{ closed: boolean }} cdp
- * @returns {{ promise: Promise<never>, stop(): void }}
- */
+/** Reject as soon as the inspector socket goes away. */
 function watchDisconnect(cdp) {
   let timer;
   const promise = new Promise((_resolve, reject) => {
@@ -226,29 +189,8 @@ function recordState(home, sink, target, state, extra = {}) {
   });
 }
 
-/**
- * Record a Hermes CPU profile from an app already running on a simulator,
- * emulator or device, over React Native's Metro inspector proxy.
- *
- * Nothing is launched and no window opens: the app is where the developer put
- * it, so an agent can start and stop a recording without handing control back
- * to a person. The trace is written in the same enhanced-trace envelope the
- * Chrome path produces, because React Native emits the same Profile and
- * ProfileChunk events V8 does.
- *
- * @param {{
- *   home: string,
- *   metro?: string,
- *   app?: string,
- *   device?: string,
- *   targetId?: string,
- *   sourceMaps?: boolean,
- *   out?: string,
- *   duration?: number,
- *   sink?: 'auto' | 'ingest' | 'local',
- *   onReady?: (info: { captureId: string, mode: string }) => void,
- * }} options
- */
+/** Record a Hermes CPU profile from an app already running on a simulator, emulator or device, over
+ * React Native's Metro inspector proxy. */
 export async function runRnRecording(options) {
   const { home } = options;
   const origin = parseMetroOrigin(options.metro || defaultMetroOrigin());
@@ -297,10 +239,7 @@ export async function runRnRecording(options) {
     let collecting = Promise.resolve();
     let collectError = null;
 
-    // React Native can send dataCollected throughout the recording, so the
-    // listener goes on now. Its deadline does not: the flush has not been
-    // asked for yet, and a timer started here would cap how long a recording
-    // may run rather than how long it may take to finish.
+    // React Native can send dataCollected throughout the recording, so the listener goes on now.
     let completed;
     const complete = new Promise((resolve) => { completed = resolve; });
     cdp.on((method, params) => {

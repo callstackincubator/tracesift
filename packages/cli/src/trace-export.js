@@ -14,12 +14,7 @@ async function writeWithBackpressure(stream, chunk) {
   if (!stream.write(chunk)) await new Promise((resolveDrain) => stream.once('drain', resolveDrain));
 }
 
-/**
- * Locate the opening bracket of the trace-event array in a spooled prefix.
- *
- * The stream can be either a bare trace-event array or Chrome's usual
- * {"traceEvents":[...]} object.
- */
+/** Locate the opening bracket of the trace-event array in a spooled prefix. */
 function traceEventsOpening(text) {
   const first = text.search(/\S/);
   if (first >= 0 && text[first] === '[') return first;
@@ -27,18 +22,7 @@ function traceEventsOpening(text) {
   return marker >= 0 ? text.indexOf('[', marker + 13) : -1;
 }
 
-/**
- * Copy only the traceEvents array body from Chrome's JSON trace stream.
- *
- * ReturnAsStream still produces one valid JSON document. We never parse or
- * retain its events: this small byte-level state machine locates the array and
- * streams its contents into the enhanced-trace wrapper. JSON punctuation is
- * ASCII, so scanning bytes remains correct across UTF-8 and input boundaries.
- *
- * @param {string} spool
- * @param {NodeJS.WritableStream} output
- * @returns {Promise<number>} the number of events copied
- */
+/** Copy only the traceEvents array body from Chrome's JSON trace stream. */
 export async function copyTraceEvents(spool, output) {
   let prefix = Buffer.alloc(0);
   let started = false;
@@ -98,14 +82,7 @@ export async function copyTraceEvents(spool, output) {
   return eventCount;
 }
 
-/**
- * Does this event actually identify the frames the trace belongs to?
- *
- * The name alone is not enough. Tracing started on the browser target before
- * any navigation emits a TracingStartedInBrowser whose args are empty, and
- * treating that as metadata would suppress the rebuilt record and leave the
- * export with no frame information at all.
- */
+/** Does this event actually identify the frames the trace belongs to? */
 function describesFrames(event) {
   const name = String(event.name);
   if (name === 'CpuProfile' || name === 'TracingStartedInPage') return true;
@@ -114,13 +91,7 @@ function describesFrames(event) {
   return Array.isArray(frames) && frames.length > 0;
 }
 
-/**
- * Scan the spooled trace for inspector metadata and the renderer-main marker.
- *
- * @param {string} spool
- * @param {string} traceMarker
- * @returns {Promise<{ hasInspectorMetadata: boolean, marker?: TraceMarkerLocation }>}
- */
+/** Scan the spooled trace for inspector metadata and the renderer-main marker. */
 export async function inspectTraceMetadata(spool, traceMarker) {
   let prefix = Buffer.alloc(0);
   let started = false;
@@ -203,12 +174,8 @@ export async function inspectTraceMetadata(spool, traceMarker) {
   return { hasInspectorMetadata };
 }
 
-/**
- * Chrome 156+ intentionally removes browser-process metadata from traces
- * started over the debugger protocol. When the trace carries no inspector
- * metadata of its own, rebuild the equivalent frame metadata from the
- * renderer-main marker the recorder left behind.
- */
+/** Chrome 156+ intentionally removes browser-process metadata from traces started over the debugger
+ * protocol. */
 function syntheticFrameMetadata(traceMetadata, mainFrame, fallbackUrl) {
   if (traceMetadata.hasInspectorMetadata || !traceMetadata.marker || !mainFrame) return undefined;
   return {
@@ -230,19 +197,7 @@ function syntheticFrameMetadata(traceMetadata, mainFrame, fallbackUrl) {
   };
 }
 
-/**
- * Write a spooled Chrome trace out as a gzipped enhanced-trace document.
- *
- * @param {{
- *   spool: string,
- *   destination: string,
- *   metadata: Record<string, unknown>,
- *   mainFrame?: MainFrame,
- *   fallbackUrl?: string,
- *   traceMarker?: string,
- * }} options
- * @returns {Promise<{ sizeBytes: number, eventCount: number }>}
- */
+/** Write a spooled Chrome trace out as a gzipped enhanced-trace document. */
 export async function writeTraceExport(options) {
   const { spool, destination, metadata, mainFrame, fallbackUrl, traceMarker } = options;
   const temporary = `${destination}.${randomUUID()}.tmp`;

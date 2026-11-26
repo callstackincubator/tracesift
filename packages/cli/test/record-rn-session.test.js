@@ -18,10 +18,8 @@ async function temporaryDirectory(t) {
 
 const TARGET = { id: 'page-1', title: 'Hermes React Native', appId: 'com.example.app', deviceName: 'iPhone 17 Pro', vm: 'Hermes' };
 
-/**
- * A Metro that serves /json/list, plus a stand-in for the global WebSocket that
- * speaks the CDP message protocol. `script(message, socket)` plays the app.
- */
+/** A Metro that serves /json/list, plus a stand-in for the global WebSocket that speaks the CDP
+ * message protocol. */
 async function fakeApp(t, script, map) {
   const server = createServer((request, response) => {
     const port = server.address().port;
@@ -267,11 +265,7 @@ test('a long CPU profile is split into chunks that carry the node table once', (
   assert.deepEqual(chunks[2].args.data.timeDeltas, timeDeltas.slice(20_000));
 });
 
-/**
- * Metro inlines every authored file it mapped. For an app the size of Bluesky
- * that is 30 of the map's 56 MB, and it is the half nothing reads: a frame
- * moves onto its source by `mappings`, `sources` and `names`.
- */
+/** Metro inlines every authored file it mapped. */
 test('the authored sources Metro inlines are dropped, because a recording is not a copy of the app', async (t) => {
   const home = await temporaryDirectory(t);
   const sourceMap = {

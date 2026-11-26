@@ -1,24 +1,6 @@
 #!/bin/bash
-#
-# Serve this checkout of TraceSift to a locally installed Mobile Dev plugin, so
-# the plugin's panel exercises the code in this working tree rather than the
-# published CLI and the installed app.
-#
-# Three things have to come from here rather than from a release: `tracesift
-# record`, which no published CLI has yet; `record --platform rn`, which only
-# 0.6.0 has; and gzip support in the analyze route, without which a recorded
-# trace reaches no cards. All live in this tree, so this script points the
-# plugin at the tree.
-#
-# It leaves two pointer files in $TMPDIR, tracesift-codex-test-home and
-# tracesift-codex-test-cli, then stays in the foreground serving the app. Stop
-# it with Ctrl-C, which removes them. The plugin's test-codex-local.sh (at the
-# root of codex-mobile-dev-plugin) reads them and launches the desktop app
-# binary directly with TRACE_SIFT_HOME and TRACE_SIFT_COMMAND set from them,
-# since `open` drops the environment.
-#
-#   scripts/test-codex-local.sh [--port 3100] [--home <path>] [--metro <url>]
-#
+# Serve this checkout of TraceSift to a locally installed Mobile Dev plugin, so the plugin's panel
+# exercises the code in this working tree rather than the published CLI and the installed app.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -134,11 +116,8 @@ chmod 600 "$HOME_DIR/service.json"
 printf '%s' "$HOME_DIR" > "$POINTER_FILE"
 printf '%s' "$CLI_WRAPPER" > "$CLI_POINTER_FILE"
 
-# Say up front whether a React Native app is reachable, because that is the
-# route under test and the answer is one command away. Metro and the app are
-# the developer's to start, so this only reports what it found. Both routes
-# are asked about, since `record targets` now reports a release build dialling
-# in as well as a debug build on Metro.
+# Say up front whether a React Native app is reachable, because that is the route under test and the
+# answer is one command away.
 METRO_URL="${METRO_URL:-http://127.0.0.1:8081}"
 RN_STATUS="$(
   TRACE_SIFT_HOME="$HOME_DIR" "$CLI_WRAPPER" record targets --platform rn --metro "$METRO_URL" --json 2>/dev/null |

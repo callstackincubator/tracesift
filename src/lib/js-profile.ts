@@ -337,10 +337,7 @@ export function summarizeCpuProfile(
   // Parsed once: this runs over the whole upload, and the profiles this tool
   // exists for are hundreds of megabytes.
   const profile = coerceCdpProfile(raw);
-  // Before anything reads a frame's URL. Classification, the call tree, the
-  // task splitter and every location printed downstream all take that URL at
-  // its word, so the move from bundle positions to authored files has to
-  // happen once, here, rather than in whichever of them noticed first.
+  // Before anything reads a frame's URL.
   const sourceMaps = symbolicateProfile(profile, collectRetainedSourceMaps(raw), collectCaptureWarnings(raw));
   const session = normalizeProfile(profile, {
     sessionId,

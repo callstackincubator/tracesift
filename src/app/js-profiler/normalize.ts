@@ -30,11 +30,7 @@ interface NormalizeMeta {
   startedAt: number;
   stoppedAt: number;
   samplingIntervalUs: number | undefined;
-  /**
-   * What `symbolicate.ts` managed to resolve before the frames reached here.
-   * Absent for a caller that never ran it, which is reported as `none` — the
-   * same answer this gave unconditionally before anything read the maps back.
-   */
+  /** What `symbolicate.ts` managed to resolve before the frames reached here. */
   sourceMaps?: SourceMapsInfo;
 }
 

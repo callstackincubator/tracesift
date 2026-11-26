@@ -7,20 +7,7 @@ function closeReason(event) {
   return event?.reason ? `${event.reason} (code ${event.code})` : `code ${event?.code ?? 'unknown'}`;
 }
 
-/**
- * A minimal Chrome DevTools Protocol client over Node's global WebSocket.
- *
- * Flattened sessions are the only mode used here: every command carries the
- * session it belongs to, so one socket drives the browser target and each
- * attached page, worker and frame without nesting.
- *
- * `label` names whatever is on the other end in the connection errors. The
- * React Native inspector is not a browser, and telling its user that "Chrome
- * closed the debugging connection" sends them looking for a Chrome.
- *
- * @param {string} url
- * @param {{ createSocket?: (url: string) => WebSocket, label?: string }} [options]
- */
+/** A minimal Chrome DevTools Protocol client over Node's global WebSocket. */
 export async function connectCdp(url, { createSocket = (target) => new WebSocket(target), label = 'Chrome' } = {}) {
   const socket = createSocket(url);
   const pending = new Map();
@@ -76,11 +63,7 @@ export async function connectCdp(url, { createSocket = (target) => new WebSocket
   });
 
   return {
-    /**
-     * @param {string} method
-     * @param {Record<string, unknown>} [params]
-     * @param {string} [sessionId] omit to address the browser target itself
-     */
+    /** @param {string} method */
     send(method, params = {}, sessionId) {
       if (shutdown) return Promise.reject(shutdown);
       const id = nextId++;
@@ -113,14 +96,7 @@ export async function connectCdp(url, { createSocket = (target) => new WebSocket
   };
 }
 
-/**
- * Read a stream handle returned by a CDP command to completion.
- *
- * @param {{ send: Function }} cdp
- * @param {string} handle
- * @param {{ sessionId?: string, size?: number, onChunk?: (bytes: Uint8Array) => Promise<void> }} options
- * @returns {Promise<string | undefined>} concatenated text when no onChunk is given
- */
+/** Read a stream handle returned by a CDP command to completion. */
 export async function readProtocolStream(cdp, handle, options = {}) {
   const { sessionId, size = 512 * 1024, onChunk, limitBytes } = options;
   const parts = [];

@@ -1,18 +1,4 @@
-/**
- * Serialise parsed trace events into the byte shape a record sink expects.
- *
- * The React Native path receives events as objects from `Tracing.dataCollected`
- * rather than as a byte stream from `IO.read`, so this rebuilds the
- * `{"traceEvents":[...]}` document and hands it to `sink.chunk` in bounded
- * pieces. Chunk boundaries fall at arbitrary byte offsets, even mid-string or
- * mid-escape. That is fine: both sinks are pure byte pipes (the ingest sink
- * POSTs each chunk, the local sink appends it to the spool) and only the
- * reassembled whole is ever parsed.
- *
- * @param {{ chunk(bytes: Uint8Array): Promise<void> }} sink
- * @param {{ maxBytes?: number }} [options] `maxBytes` mirrors MAX_UPLOAD_BYTES
- *   in record-session.js, which keeps each ingest POST under the route's cap.
- */
+/** Serialise parsed trace events into the byte shape a record sink expects. */
 export function createTraceEventWriter(sink, { maxBytes = 192 * 1024 } = {}) {
   /** @type {string[]} */
   let parts = [];

@@ -1,17 +1,9 @@
-// Physical iOS devices, as CoreDevice reports them.
-//
-// iOS has no `adb reverse`, and a phone cannot dial the Mac's loopback. What a
-// wired iPhone does have is a CoreDevice tunnel: a point-to-point IPv6 link
-// (a utun interface carrying a ULA /64) between this Mac and that phone only.
-// A profiling build therefore *listens* on the phone's tunnel address and the
-// CLI dials it. The address is per-session, so it is re-read on every look.
+// Physical iOS devices, as CoreDevice reports them. iOS has no `adb reverse`, and a phone cannot
+// dial the Mac's loopback.
 import { spawn } from 'node:child_process';
 import { connect } from 'node:net';
 
-/**
- * Run a command and capture stdout, for the ones we read rather than show.
- * `includeStderr` appends stderr, for tools like codesign that report there.
- */
+/** Run a command and capture stdout, for the ones we read rather than show. */
 export function capture(command, args, { includeStderr = false } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -27,14 +19,8 @@ export function capture(command, args, { includeStderr = false } = {}) {
   });
 }
 
-/**
- * Physical iOS devices CoreDevice knows about, as
- * `{ id, udid, name, platform, wired, available, tunnelAddress }`.
- * `tunnelAddress` is set only while the tunnel is up.
- *
- * Returns [] rather than throwing when devicectl is missing (Xcode < 15) or
- * prints something unexpected: callers then treat the target as a simulator.
- */
+/** Physical iOS devices CoreDevice knows about, as `{ id, udid, name, platform, wired, available,
+ * tunnelAddress }`. */
 export async function listPhysicalIosDevices(execCapture = capture) {
   let parsed;
   try {
@@ -79,13 +65,8 @@ export function matchPhysicalDevice(devices, selector) {
 
 let waking = null;
 
-/**
- * CoreDevice drops an idle tunnel (`tunnelState: disconnected`, no address)
- * even though the phone is still plugged in, and brings it back the first time
- * anything addresses the device. A read-only `devicectl device info details`
- * is that something. It fails quietly when the phone is locked or unplugged;
- * the caller re-lists and sees the tunnel is still down.
- */
+/** CoreDevice drops an idle tunnel (`tunnelState: disconnected`, no address) even though the phone
+ * is still plugged in, and brings it back the first time anything addresses the device. */
 async function wakeTunnels(devices, execCapture) {
   const sleeping = devices.filter((device) => device.wired && device.available && !device.tunnelAddress);
   if (!sleeping.length) return;
@@ -104,33 +85,10 @@ export async function listPhysicalIosDevicesAwake(execCapture) {
   return listPhysicalIosDevices(execCapture);
 }
 
-/**
- * How often to touch a device so CoreDevice keeps its tunnel.
- *
- * Measured: the tunnel goes to `disconnected` between twelve and fifteen
- * seconds after the last `devicectl device info details`, whatever is crossing
- * it. Five seconds leaves room for a slow call without ever reaching that.
- */
+/** How often to touch a device so CoreDevice keeps its tunnel. */
 const TUNNEL_HOLD_MS = 5_000;
 
-/**
- * Keep a device's tunnel alive for as long as the returned function is not
- * called.
- *
- * CoreDevice reaps a tunnel no CoreDevice client is holding. A plain TCP
- * socket riding the interface is not one — a recording could sit there sending
- * a heartbeat every two seconds and still lose the tunnel under it, which is
- * exactly how a long recording used to die with EHOSTUNREACH at `stop`.
- * Addressing the device through CoreDevice is what counts, so that is what
- * this does. `list devices` is not enough; `info details` is.
- *
- * The address stays put while the tunnel is held, so a socket already open
- * over it keeps working. Calls never overlap and failures are ignored: if the
- * phone has gone, the recording's own error is the one worth reporting.
- *
- * @param {string} deviceId a CoreDevice identifier or UDID
- * @returns {() => void} stop holding
- */
+/** Keep a device's tunnel alive for as long as the returned function is not called. */
 export function holdTunnel(deviceId, { intervalMs = TUNNEL_HOLD_MS, execCapture = capture } = {}) {
   if (!deviceId) return () => {};
   let stopped = false;
@@ -153,12 +111,8 @@ export async function listTunnelDevices(execCapture) {
   return (await listPhysicalIosDevicesAwake(execCapture)).filter((device) => device.tunnelAddress);
 }
 
-/**
- * What to tell someone whose iPhone is plugged in but cannot be reached, so a
- * missing tunnel never looks like "no device". One line per phone.
- * `reachable` says whether any phone is dialable, for callers that also want
- * to say "open the app".
- */
+/** What to tell someone whose iPhone is plugged in but cannot be reached, so a missing tunnel never
+ * looks like "no device". */
 export async function iosDeviceHints(execCapture) {
   const devices = await listPhysicalIosDevicesAwake(execCapture);
   const hints = [];
@@ -172,11 +126,7 @@ export async function iosDeviceHints(execCapture) {
   return { hints, reachable: devices.filter((device) => device.tunnelAddress) };
 }
 
-/**
- * Dial `port` on a device's tunnel address. Rejects while nothing listens
- * there (the normal state until the app is running); the caller retries.
- * The socket comes back paused so no byte is read before a listener exists.
- */
+/** Dial `port` on a device's tunnel address. */
 export function connectTunnel(host, port, { timeoutMs = 2_000 } = {}) {
   return new Promise((resolvePromise, reject) => {
     const socket = connect({ host, port, });

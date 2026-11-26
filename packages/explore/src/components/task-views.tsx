@@ -13,13 +13,7 @@ import { focusedTree, type TaskCulprit, type TaskTreeNode } from "../lib/task-ca
 import { isShownFrame, OWN_CODE_CLASSES } from "../lib/task-timeline.ts";
 import type { FrameClass } from "../lib/frame-classes.ts";
 
-/**
- * The classes the culprit table keeps, as the set `isShownFrame` tests
- * against. Narrower than the `SHOWN_CLASSES` the chart and the tree draw by:
- * they carry `library` to keep their nesting intact, a table of independent
- * rows does not have to, and a reader who asked for their code only did not
- * mean React Native's `Pressability` either. `task-timeline.ts` says why.
- */
+/** The classes the culprit table keeps, as the set `isShownFrame` tests against. */
 const OWN_CODE = new Set<FrameClass>(OWN_CODE_CLASSES);
 
 /**

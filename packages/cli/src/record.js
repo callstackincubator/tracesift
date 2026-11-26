@@ -71,14 +71,7 @@ function describe(state) {
   return `Recording ${state.targetLabel || state.url || 'the app'} (${state.state}).`;
 }
 
-/**
- * Poll record.json until it says what the caller is waiting for.
- *
- * `pid` scopes the wait to one recorder. The file outlives the process that
- * wrote it, so a finished recording still sitting there answers `captured`
- * instantly — and a caller waiting for the recorder it just spawned would
- * take that as its own and report the previous capture's path.
- */
+/** Poll record.json until it says what the caller is waiting for. */
 async function waitFor(home, predicate, timeout, onTimeout, pid) {
   const deadline = Date.now() + timeout;
   for (;;) {
@@ -97,17 +90,7 @@ async function waitFor(home, predicate, timeout, onTimeout, pid) {
   }
 }
 
-/**
- * List the React Native apps a recording could attach to, over either route.
- *
- * Both are reported because the two are not a preference but a property of
- * the build, and a caller that lists before it records — the panel does, and
- * so does the agent — would otherwise conclude there is nothing to record
- * whenever the app is a release build.
- *
- * Metro is awaited first. Only when it has nothing to show is the profiler
- * port given its window, so the ordinary debug listing stays immediate.
- */
+/** List the React Native apps a recording could attach to, over either route. */
 export async function recordTargets(options = {}) {
   const platform = options.platform ?? 'rn';
   if (platform !== 'rn') {

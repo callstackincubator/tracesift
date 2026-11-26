@@ -1,31 +1,13 @@
 // Choosing between the two React Native capture routes.
-//
-// There are two, and which one applies is a property of the build, not of the
-// developer's intent: a debug build registers an inspector target with Metro,
-// a release build carrying @callstack/tracesift-rn-profiler dials us instead.
-// Asking the user to name the one they are on would be asking them to tell us
-// something we can see for ourselves.
-//
-// So both are offered at once. Metro is tried first because it is a single
-// HTTP request that fails immediately when nothing is listening, and because
-// a debug build is what a developer has running by default.
 import { defaultMetroOrigin, metroTargets, parseMetroOrigin, selectMetroTarget } from './metro.js';
 import { awaitProfilerApp, DEFAULT_PROFILER_PORT, noAppConnectedMessage, RELEASE_TARGET_PREFIX, releaseSelection } from './rn-profiler-link.js';
 import { errorText } from './record-common.js';
 import { writeRecordState } from './record-state.js';
 
-// How long to hold the port open for a release build before giving up. The
-// profiler retries its dial every couple of seconds, so this only has to
-// outlast a few of those. It also has to leave room inside `record start`'s
-// own budget for waiting on the recorder, or the caller times out first and
-// reports that instead of the reason collected here.
+// How long to hold the port open for a release build before giving up.
 const CONNECT_TIMEOUT_MS = 20_000;
 
-/**
- * Record from whichever React Native app we can reach.
- *
- * @param {Record<string, unknown>} options
- */
+/** Record from whichever React Native app we can reach. */
 export async function runRnAnyRecording(options) {
   const port = options.profilerPort ?? DEFAULT_PROFILER_PORT;
   // A chosen `release:<device>` target is never a Metro target: skip Metro and
@@ -83,11 +65,7 @@ export async function runRnAnyRecording(options) {
   return runRnReleaseRecording({ ...options, link });
 }
 
-/**
- * Is there a debug build on Metro we can attach to?
- *
- * @returns {Promise<string | null>} null when there is, otherwise why not
- */
+/** Is there a debug build on Metro we can attach to? */
 async function probeMetro(options) {
   try {
     const origin = parseMetroOrigin(options.metro || defaultMetroOrigin());

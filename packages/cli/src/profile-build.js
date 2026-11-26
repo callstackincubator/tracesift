@@ -1,15 +1,5 @@
-// `tracesift profile build` — turn an app into a profiling build and get it
-// onto the device, without the developer editing anything.
-//
-// Profiling a release build needs three things to line up: the profiler
-// package in the app, the Gradle property that arms it, and a reverse port so
-// the app's localhost is the developer's. None is difficult and all three are
-// easy to get wrong in a way that fails silently — an app built without the
-// property simply never dials, and the recording times out saying so.
-//
-// So the command does all three. It is the difference between "install this,
-// add a line to your manifest, remember a -P flag, remember adb reverse" and
-// one command.
+// `tracesift profile build` — turn an app into a profiling build and get it onto the device,
+// without the developer editing anything.
 import { spawn } from 'node:child_process';
 import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -34,10 +24,8 @@ const PROFILE_OPTIONS = {
   devices: [],
 };
 
-/**
- * Reject an option `profile` would silently ignore, the way `record` does:
- * a flag that looks honoured but is not is worse than one that is refused.
- */
+/** Reject an option `profile` would silently ignore, the way `record` does: a flag that looks
+ * honoured but is not is worse than one that is refused. */
 export function assertProfileOptions(subcommand, values, allKnownOptions) {
   const allowed = PROFILE_OPTIONS[subcommand] ?? [];
   const given = allKnownOptions.filter((option) => values[option]);
@@ -53,12 +41,7 @@ export function assembleTask(variant) {
   return `assemble${variant[0].toUpperCase()}${variant.slice(1)}`;
 }
 
-/**
- * Which package manager the project uses.
- *
- * Read off the lockfile rather than asked for: installing with the wrong one
- * leaves two lockfiles disagreeing, which is a worse day than a missing flag.
- */
+/** Which package manager the project uses. */
 export async function detectPackageManager(root) {
   const lockfiles = [
     ['pnpm-lock.yaml', 'pnpm'],
@@ -91,15 +74,8 @@ async function exists(path) {
   }
 }
 
-/**
- * Read the applicationId and apk filename out of the metadata the Android
- * Gradle plugin writes beside the build. Guessing either from the Gradle
- * files means reproducing AGP's variant and flavour rules, and getting it
- * wrong installs the wrong apk.
- *
- * @param {string} androidRoot
- * @param {string} variant
- */
+/** Read the applicationId and apk filename out of the metadata the Android Gradle plugin writes
+ * beside the build. */
 export async function readApkMetadata(androidRoot, variant) {
   const path = join(androidRoot, 'app', 'build', 'outputs', 'apk', variant, 'output-metadata.json');
   let parsed;
@@ -134,10 +110,7 @@ export function iosConfiguration(variant) {
   return `${variant[0].toUpperCase()}${variant.slice(1)}`;
 }
 
-/**
- * Stop before a device build that cannot be signed, saying which of the two
- * reasons it is. A project that names its own team signs itself, so it passes.
- */
+/** Stop before a device build that cannot be signed, saying which of the two reasons it is. */
 async function assertDeviceCanBeSigned(physical, iosRoot, options = {}) {
   if (await (options.projectTeam ?? projectDevelopmentTeam)(iosRoot)) return;
   const { expired } = await (options.deviceProfiles ?? profilesForDevice)(physical.udid);
@@ -221,20 +194,7 @@ export async function profileDevices(options = {}) {
   return rows;
 }
 
-/**
- * Build, arm, install and launch a profiling build in the iOS simulator or on a wired iPhone.
- *
- * The gate is an Info.plist key, set on the *built* app rather than in the
- * project: the developer edits nothing, and the key exists only in the binary
- * this command installs. The simulator shares the host's network, so no port
- * reverse is needed.
- *
- * A physical device cannot dial the host (no `adb reverse` equivalent),
- * so there the build is armed with the "listen" transport and the CLI dials the
- * phone's CoreDevice tunnel address at record time. It is built for iphoneos and signed
- * for real: the identity xcodebuild picked is reused to re-seal the app after
- * the plist edit, because an ad-hoc signature does not install on a device.
- */
+/** Build, arm, install and launch a profiling build in the iOS simulator or on a wired iPhone. */
 async function profileBuildIos(options) {
   const exec = options.exec ?? run;
   const execCapture = options.execCapture ?? capture;
@@ -283,11 +243,8 @@ async function profileBuildIos(options) {
   }
   const sdk = physical ? 'iphoneos' : 'iphonesimulator';
 
-  // A device build has to be signed, and `expo prebuild` leaves no
-  // DEVELOPMENT_TEAM in the project, so without this the build fails until the
-  // developer looks their team id up. The profile that already covers this
-  // phone names it. Nothing is guessed: no profile means no team, and
-  // xcodebuild's own error is better than a wrong one.
+  // A device build has to be signed, and `expo prebuild` leaves no DEVELOPMENT_TEAM in the project,
+  // so without this the build fails until the developer looks their team id up.
   let team = options.team;
   if (physical && !team) {
     const detected = await (options.detectTeam ?? detectDevelopmentTeam)(physical.udid);
@@ -395,21 +352,8 @@ export function sourceMapPathFor(androidRoot, variant) {
 
 const OUTPUT_SOURCE_MAP_FLAG = '-output-source-map';
 
-/**
- * Best-effort, text-level read of `hermesFlags` in android/app/build.gradle,
- * done before the Gradle build so a misconfigured app fails in seconds.
- *
- * Returns { dropsSourceMap: true, flags } only when EVERY `hermesFlags`
- * assignment in the file is a plain string or list literal and none of them
- * contains `-output-source-map`. Everything else returns { dropsSourceMap:
- * false }: no file, no assignment (the default keeps the flag), a value that
- * is a variable, a call or a concatenation (`base + [...]`), or at least one
- * assignment that does contain the flag. Gradle is a program, not a config
- * format, so anything that needs evaluating is left to the post-build guard.
- * Not followed: `apply from:` files, gradle.properties, build.gradle.kts.
- *
- * @param {string} gradleText
- */
+/** Best-effort, text-level read of `hermesFlags` in android/app/build.gradle, done before the Gradle
+ * build so a misconfigured app fails in seconds. */
 export function hermesFlagsDropSourceMap(gradleText) {
   const text = gradleText.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$|\s\/\/.*$/gm, '');
   const assignment = /\bhermesFlags\s*(?:=|\.set\(|\.convention\()\s*/g;
@@ -443,17 +387,11 @@ export async function assertHermesFlagsKeepSourceMap(androidRoot) {
   }
 }
 
-/**
- * A map should be written by the same step as the bundle it describes, so it
- * cannot be meaningfully older. Allow a couple of minutes for the build steps
- * between the two (the apk fallback spans dexing and packaging).
- */
+/** A map should be written by the same step as the bundle it describes, so it cannot be meaningfully
+ * older. */
 export const STALE_MAP_TOLERANCE_MS = 2 * 60 * 1000;
 
-/**
- * Is `mapPath` older than `artefactPath`, the file the build just produced?
- * Missing files are not stale: that is the existence guards' job.
- */
+/** Is `mapPath` older than `artefactPath`, the file the build just produced? */
 export async function mapIsStale(mapPath, artefactPath, toleranceMs = STALE_MAP_TOLERANCE_MS) {
   try {
     const [map, artefact] = await Promise.all([stat(mapPath), stat(artefactPath)]);
@@ -472,13 +410,7 @@ function warnStaleMap(mapPath, artefactPath, stale) {
   );
 }
 
-/**
- * Where the Android bundle (Hermes bytecode) is written, beside which the map
- * is produced. The React Native Gradle plugin has used both layouts: the task
- * directory (RN 0.71+ bare projects) and the plain `react/<variant>` one that
- * Expo's prebuild produces. Both are offered; the caller takes the first that
- * exists and falls back to the apk.
- */
+/** Where the Android bundle (Hermes bytecode) is written, beside which the map is produced. */
 export function androidBundlePathsFor(androidRoot, variant) {
   const name = `${variant[0].toUpperCase()}${variant.slice(1)}`;
   const assets = join(androidRoot, 'app', 'build', 'generated', 'assets');
@@ -488,14 +420,7 @@ export function androidBundlePathsFor(androidRoot, variant) {
   ];
 }
 
-/**
- * Run a command, inheriting stdio so the build's own output is the output.
- *
- * `keepTail` mirrors the output instead of inheriting it and keeps the last
- * lines, so a failure can say *why*. A panel that shows only "failed with exit
- * code 1" leaves the developer with nothing: the reason was on a stdout they
- * never see.
- */
+/** Run a command, inheriting stdio so the build's own output is the output. */
 function run(command, args, { keepTail = 0, ...options } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { stdio: keepTail ? ['ignore', 'pipe', 'pipe'] : 'inherit', ...options });
@@ -516,13 +441,7 @@ function run(command, args, { keepTail = 0, ...options } = {}) {
   });
 }
 
-/**
- * The part of a build's output worth repeating in the error.
- *
- * Gradle already summarises its own failure under "What went wrong"; anything
- * else is the task list, which says nothing. Without a summary the last few
- * lines are still better than silence.
- */
+/** The part of a build's output worth repeating in the error. */
 export function failureDetail(tail) {
   const text = (tail ?? '').trim();
   if (!text) return '';
@@ -534,22 +453,7 @@ export function failureDetail(tail) {
   return cleaned ? `\n${cleaned}` : '';
 }
 
-/**
- * Build, install and arm a profiling build.
- *
- * @param {{
- *   platform?: string,
- *   projectRoot?: string,
- *   variant?: string,
- *   device?: string,
- *   team?: string,
- *   profilerPort?: number,
- *   install?: boolean,
- *   launch?: boolean,
- *   exec?: typeof run,
- *   execCapture?: typeof capture,
- * }} options
- */
+/** Build, install and arm a profiling build. */
 export async function profileBuild(options = {}) {
   const platform = options.platform ?? 'android';
   if (platform === 'ios') return profileBuildIos(options);
@@ -588,11 +492,7 @@ export async function profileBuild(options = {}) {
   // platform-tools; see buildEnv.
   await exec(gradlew, [task, `-P${PROFILER_GRADLE_PROPERTY}=true`], { cwd: androidRoot, env: await buildEnv(), keepTail: 60 });
 
-  // Checked before anything is installed. React Native's Gradle plugin has no
-  // property that forces a map: it writes one only while the app's `react {}`
-  // block leaves `-output-source-map` in `hermesFlags` (the default). An app
-  // that removed it still builds, installs and records, and every frame comes
-  // out as a bundle offset, which looks like a clean capture.
+  // Checked before anything is installed.
   const sourceMap = sourceMapPathFor(androidRoot, variant);
   if (!await exists(sourceMap)) {
     throw new Error(

@@ -6,11 +6,7 @@ import { frameNameTier } from '../src/lib/frame-names.ts';
 
 const BUNDLE = 'http://192.168.1.5:8081/index.bundle//&platform=ios&dev=true';
 
-/**
- * Three generated lines, one per source. Hand-encoded rather than generated so
- * the test states the mapping it is asserting: `AAAA` is the first line at
- * source 0, and each following segment carries its deltas.
- */
+/** Three generated lines, one per source. */
 const sourceMap = {
   version: 3,
   sources: [

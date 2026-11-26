@@ -1,12 +1,5 @@
-// Starts profiling without the app calling anything, and speaks the same
-// newline-delimited JSON as the Android ProfilerLink.
-//
-// It is off unless the *build* asks for it: the app's Info.plist must carry
-// TracesiftProfilingEnabled = YES, which `tracesift profile build` writes into
-// the binary it installs and nothing else does. A release binary that opens a
-// control socket on request is a remote-profiling backdoor, so this is
-// deliberately not a runtime flag, an environment variable or a launch
-// argument.
+// Starts profiling without the app calling anything, and speaks the same newline-delimited JSON as
+// the Android ProfilerLink.
 #import <UIKit/UIKit.h>
 
 #include <arpa/inet.h>
@@ -29,10 +22,6 @@
 static NSString *const kEnabledKey = @"TracesiftProfilingEnabled";
 static NSString *const kPortKey = @"TracesiftProfilerPort";
 // "listen" makes the app serve on its own loopback instead of dialling out.
-// Physical devices need it: nothing on the phone can dial the Mac, so the CLI
-// has to connect in. It binds the CoreDevice tunnel address only (never "::"
-// or 0.0.0.0), a point-to-point link to the one Mac. Written by
-// `profile build` alongside the gate, never a runtime flag.
 static NSString *const kTransportKey = @"TracesiftProfilerTransport";
 static const int kDefaultPort = 8089;
 static const NSTimeInterval kRetryDelay = 2.0;
@@ -41,10 +30,7 @@ static const NSTimeInterval kRetryDelay = 2.0;
 static const NSUInteger kChunkChars = 256 * 1024;
 static const double kDefaultHz = 1000;
 
-/// Hermes' root API. Reached only in response to a start or stop from the CLI —
-/// the iOS counterpart of Android's rule about naming HermesSamplingProfiler
-/// early, where doing so once poisoned the class for the life of the process.
-/// Nothing here runs at load or at connect.
+/// Hermes' root API.
 static facebook::hermes::IHermesRootAPI *HermesRoot(void) {
   auto *api = facebook::hermes::makeHermesRootAPI();
   if (api == nullptr) return nullptr;
@@ -103,10 +89,7 @@ static BOOL sSampling = NO;
   }
 }
 
-/// The phone's end of the CoreDevice tunnel: a unique-local (fc00::/7) IPv6
-/// address on a utun interface. nil while no tunnel is up. Deliberately no
-/// fallback to a wildcard address, which would put the port on every network
-/// the phone joins.
+/// The phone's end of the CoreDevice tunnel: a unique-local (fc00::/7) IPv6 address on a utun interface. nil while no tunnel is up.
 + (BOOL)tunnelAddress:(sockaddr_in6 *)out {
   struct ifaddrs *list = NULL;
   if (getifaddrs(&list) != 0) return NO;
@@ -141,13 +124,8 @@ static BOOL sSampling = NO;
             inet_ntop(AF_INET6, &address.sin6_addr, text, sizeof(text));
             NSLog(@"[TracesiftProfiler] listening on [%s]:%d for the CLI over the device tunnel", text, port);
             for (;;) {
-              // CoreDevice tears the tunnel down when idle and brings it back
-              // under a new address, leaving this socket bound to one that no
-              // longer exists. So wait for a client in bounded slices and, on
-              // each one, look the tunnel up again: if it is gone or has moved,
-              // drop this socket and bind afresh. The lookup is the same
-              // fc00::/7 utun-only one as above, so a rebind can never land on
-              // "::" or any address a network could reach.
+              // CoreDevice tears the tunnel down when idle and brings it back under a new address,
+              // leaving this socket bound to one that no longer exists.
               pollfd waiting = { server, POLLIN, 0 };
               int ready = poll(&waiting, 1, (int)(kRetryDelay * 1000));
               if (ready < 0 && errno != EINTR) break;

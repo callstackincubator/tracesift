@@ -1,10 +1,4 @@
 // Android devices, as adb reports them, and finding adb in the first place.
-//
-// Both halves exist for the same reason: the CLI is not always started from a
-// shell. Launched by the desktop app it inherits launchd's environment, which
-// has neither the Android SDK's platform-tools on PATH nor the Node that the
-// React Native Gradle plugin shells out to. Everything here is about making
-// that environment look like the developer's own.
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
@@ -31,14 +25,7 @@ async function exists(path) {
   }
 }
 
-/**
- * The adb to run.
- *
- * Plain `adb` when PATH has one, because that is the developer's own choice of
- * SDK. Otherwise the SDK's own copy. Falls back to `adb` so the failure a
- * caller reports is the honest "could not run adb" rather than a path we
- * invented.
- */
+/** The adb to run. */
 export async function resolveAdb(env = process.env) {
   const binary = process.platform === 'win32' ? 'adb.exe' : 'adb';
   for (const entry of (env.PATH ?? '').split(delimiter)) {
@@ -52,13 +39,7 @@ export async function resolveAdb(env = process.env) {
   return binary;
 }
 
-/**
- * The Android SDK, as the environment names it or as it is usually installed.
- *
- * Returns undefined when there is none to find, so a caller leaves the
- * environment alone rather than pointing Gradle at a directory that is not
- * there: "SDK location not found" is a better error than a wrong location.
- */
+/** The Android SDK, as the environment names it or as it is usually installed. */
 export async function resolveSdkRoot(env = process.env) {
   for (const root of [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, ...defaultSdkRoots()]) {
     if (root && await exists(join(root, 'platform-tools'))) return root;
@@ -66,22 +47,7 @@ export async function resolveSdkRoot(env = process.env) {
   return undefined;
 }
 
-/**
- * An environment a child can build an Android app in.
- *
- * Started from a shell the CLI inherits the developer's own setup and this
- * changes nothing. Started by the desktop app it inherits launchd's, which has
- * neither of the two things an Android build needs, and the build fails for a
- * reason that has nothing to do with the app:
- *
- *   - `node`, which the React Native Gradle plugin shells out to. A CLI that
- *     is itself Node knows exactly where one is.
- *   - the SDK, which Gradle finds through ANDROID_HOME or local.properties,
- *     and its platform-tools, which the plugins run adb from.
- *
- * Both go on *after* what is already there, and ANDROID_HOME is only filled in
- * when it is empty, so a developer's own choices always win.
- */
+/** An environment a child can build an Android app in. */
 export async function buildEnv(env = process.env) {
   const extra = [dirname(process.execPath)];
   const root = await resolveSdkRoot(env);
@@ -95,14 +61,8 @@ export async function buildEnv(env = process.env) {
   };
 }
 
-/**
- * Attached Android devices and running emulators, as
- * `{ kind, id, name, note }` — the same shape `profile devices` prints for
- * iOS, because the panel lists them side by side.
- *
- * Returns [] rather than throwing when there is no adb: no Android devices is
- * a fine answer for a Mac that is only doing iOS.
- */
+/** Attached Android devices and running emulators, as `{ kind, id, name, note }` — the same shape
+ * `profile devices` prints for iOS, because the panel lists them side by side. */
 export async function listAndroidDevices(execCapture = capture) {
   let output;
   try {
@@ -127,10 +87,8 @@ export async function listAndroidDevices(execCapture = capture) {
     return {
       kind: 'android',
       id: device.id,
-      // `adb devices -l` reports the model with every punctuation mark turned
-      // into an underscore, so SM-S908E arrives as SM_S908E. The device's own
-      // properties have the name the developer would recognise; the listing
-      // stands in when the device is not in a state to answer.
+      // `adb devices -l` reports the model with every punctuation mark turned into an underscore,
+      // so SM-S908E arrives as SM_S908E.
       name: (device.state === 'device' ? await readName(device.id, emulator, execCapture) : '')
         || device.model
         || (emulator ? 'Android emulator' : device.id),

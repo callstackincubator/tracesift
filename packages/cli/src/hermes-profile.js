@@ -1,20 +1,5 @@
-// Hermes "Tracery" sampling profiles, converted to the CDP profile shape the
-// rest of the pipeline already speaks.
-//
-// `HermesRuntime::dumpSampledTraceToFile` and `dumpSampledTraceToStream` are
-// the only sampling-profiler entry points reachable without a jsi::Runtime
-// reference, which is what lets a release build be profiled from a plain
-// native hook with no JS and no TurboModule. They write Hermes' own Tracery
-// format rather than a CDP profile:
-//
-//   { traceEvents: [...metadata only...],
-//     samples: [{ cpu, name, ts, pid, tid, weight, sf }],
-//     stackFrames: { "<id>": { name, category, parent?, ... } } }
-//
-// Hermes' other serializer does emit a CDP profile, but only from
-// `IHermes::sampledTraceToStreamInDevToolsFormat`, which is per-runtime. The
-// conversion is cheap and lives here, in JS, where it is testable against a
-// fixture and fixable without rebuilding anybody's app.
+// Hermes "Tracery" sampling profiles, converted to the CDP profile shape the rest of the pipeline
+// already speaks.
 
 // Hermes' id generator starts at 1 and the first node it allocates is the
 // root, which is also the only node emitted without a `parent`.
@@ -26,14 +11,7 @@ const NAMED_LOCATION = /^(.*)\((.+):(\d+):(\d+)\)$/;
 /** Hermes spells the root `[root]`; the analyzer's idle/root handling wants `(root)`. */
 const ROOT_FUNCTION_NAME = '(root)';
 
-/**
- * Parse the bytes a Hermes dump produced.
- *
- * An empty body is not corruption: `dumpTraceryTraceGlobal` writes nothing at
- * all when no runtime has a profiler registered, so say what that means.
- *
- * @param {string} text
- */
+/** Parse the bytes a Hermes dump produced. */
 export function parseTraceryProfile(text) {
   const trimmed = typeof text === 'string' ? text.trim() : '';
   if (trimmed === '') {
@@ -51,16 +29,7 @@ export function parseTraceryProfile(text) {
   return raw;
 }
 
-/**
- * The thread that did the most sampling.
- *
- * Hermes folds every thread's stacks into one tree and tags only the samples
- * with a `tid`, so a profile can carry the JS thread and whatever else was
- * running. A CDP profile is one thread, and the busiest one is the JS thread
- * in every case we care about.
- *
- * @param {Array<Record<string, unknown>>} samples
- */
+/** The thread that did the most sampling. */
 function busiestThread(samples) {
   const counts = new Map();
   for (const sample of samples) {
@@ -75,21 +44,7 @@ function busiestThread(samples) {
   return best;
 }
 
-/**
- * Build a CDP `callFrame` from one Tracery stack frame.
- *
- * A release bundle carries no debug info, so the common case is a JavaScript
- * frame with `funcVirtAddr` and `offset` and nothing else — no line, no
- * column, and no url, because Tracery never emits one. Hermes generates a
- * bundle's source map against the bytecode virtual offset expressed as a
- * column on line 1, so that is what the frame is given, converted to CDP's
- * zero-based line and column. The url is stamped by the caller, since only it
- * knows which bundle the app is running, and the source map is registered
- * under the same string: symbolication matches the two by exact equality.
- *
- * @param {Record<string, unknown>} frame
- * @param {string} bundleUrl
- */
+/** Build a CDP `callFrame` from one Tracery stack frame. */
 function callFrameFor(frame, bundleUrl) {
   const name = typeof frame.name === 'string' ? frame.name : '';
   const category = typeof frame.category === 'string' ? frame.category : '';
@@ -132,19 +87,7 @@ function callFrameFor(frame, bundleUrl) {
   };
 }
 
-/**
- * Convert a parsed Hermes Tracery profile into the CDP profile shape
- * `cpuProfileToTraceEvents` takes.
- *
- * Timestamps are microseconds on a steady clock — boot time on Android, the
- * mach origin on Darwin — so they are only meaningful relative to each other.
- * The first sample becomes the origin and the rest become deltas, which is
- * what the analyzer reads anyway; it recomputes `endTime` from their sum.
- *
- * @param {Record<string, unknown>} raw a parsed Tracery profile
- * @param {{ bundleUrl?: string }} [options]
- * @returns {{ nodes: object[], samples: number[], timeDeltas: number[], startTime: number }}
- */
+/** Convert a parsed Hermes Tracery profile into the CDP profile shape `cpuProfileToTraceEvents` takes. */
 export function traceryToCpuProfile(raw, { bundleUrl = '' } = {}) {
   const stackFrames = raw.stackFrames && typeof raw.stackFrames === 'object' ? raw.stackFrames : null;
   const rawSamples = Array.isArray(raw.samples) ? raw.samples : null;

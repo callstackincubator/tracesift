@@ -24,19 +24,7 @@ async function isGzip(profile: File): Promise<boolean> {
   return GZIP_MAGIC.every((byte, index) => head[index] === byte);
 }
 
-/**
- * The profile as the analyzers want it: plain JSON bytes.
- *
- * A trace exported by the web app or by `tracesift record` is gzipped — the
- * uncompressed document runs to tens of megabytes — and every reader below
- * this point parses the upload as text. Rather than teach each of them about
- * compression, inflate once here and hand on an ordinary `File`, so an
- * exported `.json.gz` can be uploaded or sent to the Integration API exactly
- * as a `.json` is.
- *
- * Content, not the extension, decides: a trace saved without its suffix still
- * opens, and a `.json` that happens to be named `.gz` is left alone.
- */
+/** The profile as the analyzers want it: plain JSON bytes. */
 export async function decompressedProfile(profile: File): Promise<File> {
   if (!(await isGzip(profile))) return profile;
 

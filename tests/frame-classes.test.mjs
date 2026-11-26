@@ -90,10 +90,7 @@ test('no model runs for a classification, whatever is configured', async () => {
 });
 
 test('a webpack scheme is unwrapped, not filed with the engine', () => {
-  // A webpack dev server hands every frame a `webpack-internal:` URL. Reading
-  // the scheme as "no file on disk" collapsed a whole recording to `native`:
-  // no frame was ever the developer's own, so no card found a boundary and the
-  // collapse that hides React had nothing left to recognise.
+  // A webpack dev server hands every frame a `webpack-internal:` URL.
   assert.equal(classifyByRule(frame('blockMainThread', 'webpack-internal:///./src/app/index.web.ts')), 'app');
   assert.equal(
     classifyByRule(frame('logComponentRender', 'webpack-internal:///./node_modules/react-dom/cjs/react-dom-client.development.js')),
@@ -110,10 +107,7 @@ test('a webpack scheme is unwrapped, not filed with the engine', () => {
 });
 
 test("Metro writes a bundle's parameters into the path, so the extension is followed by a slash", () => {
-  // The real shape off a React Native capture: no `?` anywhere, the build
-  // options live in the path. A rule anchored at `?`, `#` or end of string
-  // matched none of them, which left the one bundler this rule exists for
-  // reaching the residue branch by accident rather than by rule.
+  // The real shape off a React Native capture: no `?` anywhere, the build options live in the path.
   const metro = 'http://192.168.68.55:8081/index.ts.bundle//&platform=ios&dev=true&lazy=true';
   assert.equal(classifyByRule(frame('loadModuleImplementation', metro)), undefined);
   // With a vendor chunk seen elsewhere in the recording, a meaningful name in

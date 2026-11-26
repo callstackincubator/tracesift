@@ -24,11 +24,7 @@ android {
   defaultConfig {
     minSdk host("minSdkVersion", 24)
 
-    // The gate lives here rather than in the app's manifest so that enabling
-    // profiling costs the app no edit at all — `-PtracesiftProfiler=true`
-    // reaches every project in the build, this one included. Off by default:
-    // a release binary that opens a control socket for the asking is a
-    // remote-profiling backdoor.
+    // The Gradle property arms profiling without editing the host app's manifest.
     manifestPlaceholders = [
       tracesiftProfilerEnabled: (project.findProperty("tracesiftProfiler") ?: "false").toString(),
     ]
@@ -50,9 +46,7 @@ repositories {
 }
 
 dependencies {
-  // Version-less on purpose: the React Native Gradle plugin in the host app
-  // pins this to whatever React Native the app is on. HermesSamplingProfiler
-  // comes from here — it is in the published react-android artifact, so
-  // nothing has to be built from source.
+  // Version-less on purpose: the React Native Gradle plugin in the host app pins this to whatever
+  // React Native the app is on.
   implementation "com.facebook.react:react-android"
 }

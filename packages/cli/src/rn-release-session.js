@@ -1,14 +1,4 @@
 // Recording a release build, which has no Metro and no inspector target.
-//
-// The debug path attaches to the Metro inspector proxy and drives CDP
-// `Tracing.*`. A release build registers no target there, so there is nothing
-// to attach to — and making one appear means rebuilding React Native from
-// source, which on Android is not reachable at all from the published AAR.
-//
-// Instead the app carries @callstack/tracesift-rn-profiler, which drives
-// Hermes' process-global sampling profiler and dials us. Everything after the
-// profile arrives is shared with the Metro path: the same trace-event writer,
-// the same sink, the same export envelope.
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -28,10 +18,7 @@ const SAMPLING_HZ = 1000;
 // whole app. The debug path applies the same limit after stripping.
 const MAX_SOURCE_MAP_BYTES = 48 * 1024 * 1024;
 
-/**
- * Where the React Native Gradle plugin puts a release bundle's source map.
- * It is derived from the variant name, so the common ones are tried in turn.
- */
+/** Where the React Native Gradle plugin puts a release bundle's source map. */
 const GRADLE_SOURCE_MAP_PATHS = [
   'android/app/build/generated/sourcemaps/react/release/index.android.bundle.map',
   'android/app/build/generated/sourcemaps/react/profiling/index.android.bundle.map',
@@ -41,17 +28,7 @@ const GRADLE_SOURCE_MAP_PATHS = [
   'main.jsbundle.map',
 ];
 
-/**
- * Load the source map for the bundle the app reported.
- *
- * There is no Metro to fetch it from, so it comes off disk: the path the user
- * gave, or the deterministic one the Gradle plugin writes. It is registered
- * under the same url the converter stamps onto frames, because symbolication
- * matches the two by exact string equality.
- *
- * @param {{ bundleUrl: string, platform?: string, sourceMapPath?: string, cwd?: string }} options
- * @returns {Promise<{ retained: object[], warnings: string[] }>}
- */
+/** Load the source map for the bundle the app reported. */
 export async function loadReleaseSourceMap({ bundleUrl, platform, sourceMapPath, cwd = process.cwd() }) {
   const warnings = [];
   // An app built for both platforms has both maps on disk. Hermes positions
@@ -104,16 +81,7 @@ function recordState(home, sink, target, state, extra = {}) {
   });
 }
 
-/**
- * Read `profile` messages until the app marks one last, and reassemble them.
- *
- * Hermes hands the whole dump over at once and it is megabytes, so it arrives
- * base64 in ordered pieces. The sequence numbers are checked rather than
- * trusted: a silently dropped chunk would become a truncated profile, which
- * parses into a plausible-looking lie.
- *
- * @param {{ next(): Promise<Record<string, unknown>> }} channel
- */
+/** Read `profile` messages until the app marks one last, and reassemble them. */
 async function readProfile(channel, requestId) {
   const pieces = [];
   for (;;) {
@@ -132,22 +100,7 @@ async function readProfile(channel, requestId) {
   return Buffer.from(pieces.join(''), 'base64').toString('utf8');
 }
 
-/**
- * Record a Hermes CPU profile from a release build carrying the profiler
- * package.
- *
- * @param {{
- *   home: string,
- *   profilerPort?: number,
- *   sourceMapPath?: string,
- *   sourceMaps?: boolean,
- *   out?: string,
- *   duration?: number,
- *   sink?: 'auto' | 'ingest' | 'local',
- *   link?: { channel: object, hello: Record<string, unknown>, close(): void },
- *   onReady?: (info: { captureId: string, mode: string }) => void,
- * }} options
- */
+/** Record a Hermes CPU profile from a release build carrying the profiler package. */
 export async function runRnReleaseRecording(options) {
   const { home } = options;
   const port = options.profilerPort ?? DEFAULT_PROFILER_PORT;

@@ -9,18 +9,7 @@ const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0'];
 // connect somewhere the developer never chose.
 const DEBUGGER_HOSTS = ['127.0.0.1', 'localhost', '[::1]'];
 
-/**
- * @typedef {{
- *   id: string,
- *   title: string,
- *   appId?: string,
- *   deviceName?: string,
- *   deviceId?: string,
- *   vm?: string,
- *   webSocketDebuggerUrl: string,
- *   supportsMultipleDebuggers: boolean,
- * }} MetroTarget
- */
+/** @typedef {{ id: string, title: string, appId?: string, deviceName?: string, deviceId?: string, vm?: string, webSocketDebuggerUrl: string, supportsMultipleDebuggers: boolean, }} MetroTarget */
 
 /** Default Metro origin, honouring RCT_METRO_PORT. */
 export function defaultMetroOrigin() {
@@ -30,12 +19,7 @@ export function defaultMetroOrigin() {
   return `http://127.0.0.1:${valid ? port : DEFAULT_METRO_PORT}`;
 }
 
-/**
- * Validate a user-supplied Metro origin. `localhost:8081` has no scheme, and
- * `new URL` would read `localhost:` as one, so add the default before parsing.
- * @param {string} value
- * @returns {URL}
- */
+/** Validate a user-supplied Metro origin. */
 export function parseMetroOrigin(value) {
   const text = String(value ?? '').trim();
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`;
@@ -65,11 +49,7 @@ function notMetro(label) {
   return new Error(`${label} answered, but it is not a Metro server (no inspector target list). Check the port with --metro.`);
 }
 
-/**
- * Turn one `/json/list` item into a target, or null when it is not one we may
- * connect to. Anything that fails validation is dropped rather than reported:
- * a stale or foreign entry should not hide the apps that are fine.
- */
+/** Turn one `/json/list` item into a target, or null when it is not one we may connect to. */
 function toTarget(item, base) {
   if (!item || typeof item.id !== 'string' || typeof item.webSocketDebuggerUrl !== 'string') return null;
   let url;
@@ -93,12 +73,7 @@ function toTarget(item, base) {
   };
 }
 
-/**
- * List the debuggable targets Metro's inspector proxy knows about.
- * @param {string | URL} origin
- * @param {{ signal?: AbortSignal }} [options]
- * @returns {Promise<MetroTarget[]>}
- */
+/** List the debuggable targets Metro's inspector proxy knows about. */
 export async function metroTargets(origin, { signal } = {}) {
   const base = origin instanceof URL ? origin : parseMetroOrigin(origin);
   const label = originLabel(base);
@@ -130,10 +105,7 @@ export async function metroTargets(origin, { signal } = {}) {
   });
 }
 
-/**
- * One-line human label, e.g. `AwesomeApp (Hermes) — iPhone 17 Pro`.
- * @param {MetroTarget} target
- */
+/** One-line label for an app and device. */
 export function describeMetroTarget(target) {
   let text = target.title || target.appId || target.id;
   if (target.vm) text += ` (${target.vm})`;
@@ -145,14 +117,7 @@ function sameText(a, b) {
   return typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
 }
 
-/**
- * Pick the one app to record. Pure, so the ambiguity rules are testable without
- * a Metro server. The proxy lists the freshest connection last, so a reloaded
- * app that left a stale entry behind resolves to its newest session.
- * @param {MetroTarget[]} targets
- * @param {{ app?: string, device?: string, targetId?: string, origin?: string | URL }} [options]
- * @returns {MetroTarget}
- */
+/** Pick the one app to record. */
 export function selectMetroTarget(targets, { app, device, targetId, origin } = {}) {
   if (targets.length === 0) {
     throw new Error(

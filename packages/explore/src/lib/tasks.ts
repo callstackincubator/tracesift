@@ -163,19 +163,7 @@ export function measuredTasks(profile: CdpProfile): RawTaskInterval[] | undefine
  */
 const PROFILER_OVERHEAD_EVENTS = new Set(["CpuProfiler::StartProfiling", "CpuProfiler::StopProfiling"]);
 
-/**
- * The mark the extension writes into the page the moment `Tracing.start`
- * returns. Chrome emits no `CpuProfiler::StartProfiling` for a trace a
- * `chrome.debugger` client started, so on a browser capture the span above is
- * invisible and the attach lands in the recording as a first block holding
- * nothing but `(program)` — 518 ms of it on the local capture, carded as "no
- * code of your own ran in this block" because that is literally true.
- *
- * Everything between the profiler's own start and that mark is the cost of
- * attaching the debugger and starting the recording. Reading it off the mark
- * keeps this the same kind of claim as the event above — something the tracer
- * stated — rather than a `(program)`-heavy call tree we decided to distrust.
- */
+/** The mark the extension writes into the page the moment `Tracing.start` returns. */
 const CAPTURE_MARKER_PREFIX = "__tracesift_main_";
 
 /** Profiler-overhead intervals, grouped by the thread that paid for them. */

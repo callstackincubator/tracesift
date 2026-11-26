@@ -11,11 +11,8 @@ const shown = (name, url, kept) => isShownFrame(name, classifyByRule(frame(name,
 
 const ROOT = '/Users/dev/social-app';
 
-/**
- * The eight rows a symbolicated React Native recording put in front of a
- * reader who had asked for their own code. Every one of them is a dependency
- * the toggle is supposed to be hiding.
- */
+/** The eight rows a symbolicated React Native recording put in front of a reader who had asked for
+ * their own code. */
 const DEPENDENCIES = [
   ['loadModuleImplementation', `${ROOT}/node_modules/@expo/cli/build/metro-require/require.js`],
   ['computeFullKey', `${ROOT}/node_modules/react-refresh/cjs/react-refresh-runtime.development.js`],

@@ -13,18 +13,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import org.json.JSONObject
 
-/**
- * The link to the tracesift CLI.
- *
- * The app dials out rather than listening, which is both how React Native's
- * own inspector behaves and the only direction that works without asking for
- * a network permission or opening a port on the device. On an emulator or a
- * USB device `adb reverse tcp:8089 tcp:8089` points 127.0.0.1 back at the
- * developer's machine.
- *
- * The wire is newline-delimited JSON. There is no websocket handshake because
- * both ends are ours and the framing is one line per message.
- */
+/** The link to the tracesift CLI. */
 internal object ProfilerLink {
   const val TAG = "TracesiftProfiler"
 
@@ -35,21 +24,8 @@ internal object ProfilerLink {
 
   @Volatile private var started = false
 
-  /**
-   * Whether the sampler is running, and the reason nothing else may name
-   * `HermesSamplingProfiler` speculatively.
-   *
-   * That class loads Hermes through SoLoader in a static initialiser. We run
-   * from a ContentProvider, which Android creates *before*
-   * `Application.onCreate`, where React Native initialises SoLoader — so
-   * touching the class early throws `ExceptionInInitializerError`, and
-   * Android then refuses to retry the initialiser for the life of the
-   * process ("Rejecting re-init on previously-failed class"). One speculative
-   * call at startup therefore makes profiling impossible until the app is
-   * restarted. So the class is named only in response to a `start` or `stop`
-   * from the CLI, both of which are a person acting on a running app, long
-   * after SoLoader is up.
-   */
+  /** Whether the sampler is running, and the reason nothing else may name `HermesSamplingProfiler`
+   * speculatively. */
   @Volatile private var sampling = false
 
   /** Begin dialling, retrying until the CLI is there. Safe to call twice. */
@@ -122,11 +98,7 @@ internal object ProfilerLink {
     }
   }
 
-  /**
-   * Hermes writes the profile to a file, so there is a round trip through the
-   * cache directory. Dumping also clears the sampler's buffer, which is why
-   * `disable` comes after and why a profile can only be collected once.
-   */
+  /** Hermes writes the profile to a file, so there is a round trip through the cache directory. */
   private fun dump(context: Context): String {
     if (!sampling) throw IllegalStateException("no profile was started")
     val file = File.createTempFile("tracesift-profile", ".cpuprofile", context.cacheDir)

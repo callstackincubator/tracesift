@@ -1,11 +1,4 @@
-// Regenerates trace.json.gz from a real release export (the .json.gz that
-// `tracesift record stop` writes). Usage:
-//   node test-fixtures/release-ios/make-fixture.mjs <export.json.gz>
-//
-// The trace is kept whole. The map is pruned to the segments the trace's frames
-// land on (plus the sourceless segments two of them land on), because the full
-// Metro/Hermes map is 8 MB. `originalPositionFor` answers identically for every
-// frame in the trace; the test re-checks that against the frames it asserts.
+// Regenerates trace.json.gz from a real release export (the .json.gz that `tracesift record stop` writes).
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { AnyMap, eachMapping } from '@jridgewell/trace-mapping';
