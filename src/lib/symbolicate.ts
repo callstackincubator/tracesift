@@ -67,6 +67,7 @@ interface Resolved {
   url: string;
   lineNumber: number;
   columnNumber: number;
+  name: string | null;
 }
 
 function state(mappable: number, symbolicated: number, maps: number): SourceMapsInfo["state"] {
@@ -125,6 +126,7 @@ export function symbolicateProfile(profile: CdpProfile, maps: readonly RetainedS
     frame.url = resolved.url;
     frame.lineNumber = resolved.lineNumber;
     frame.columnNumber = resolved.columnNumber;
+    if (resolved.name) frame.functionName = resolved.name;
   }
 
   return {
@@ -160,5 +162,6 @@ function resolve(lazy: LazyMap, frame: CdpCallFrame, failures: SymbolicationFail
     url: found.source,
     lineNumber: typeof found.line === "number" ? Math.max(0, found.line - 1) : -1,
     columnNumber: typeof found.column === "number" ? found.column : -1,
+    name: found.name,
   };
 }

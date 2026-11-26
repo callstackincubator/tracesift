@@ -64,6 +64,24 @@ test('Metro frames move from one bundle URL onto the files they were written in'
   assert.deepEqual(parsed.nodes.map((n) => n.callFrame.columnNumber), [0, 4, 2]);
 });
 
+test('a source map name replaces a generated function name when present', () => {
+  const parsed = {
+    ...profile(),
+    nodes: [node(1, 'a', 0), node(2, 'alreadyReadable', 1)],
+  };
+  const namedMap = {
+    version: 3,
+    sources: ['/app/src/feature.ts'],
+    names: ['calculateTotal'],
+    mappings: 'AAAAA;AACA',
+  };
+
+  const info = symbolicateProfile(parsed, [{ url: BUNDLE, sourceMapUrl: 'x.map', sourceMap: namedMap }]);
+
+  assert.equal(info.state, 'full');
+  assert.deepEqual(parsed.nodes.map((n) => n.callFrame.functionName), ['calculateTotal', 'alreadyReadable']);
+});
+
 test('the bundle position is kept, because it is what was actually sampled', () => {
   const parsed = profile();
   symbolicateProfile(parsed, maps);
